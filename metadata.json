@@ -1,0 +1,6 @@
+{
+  "name": "GIS Nilai Hostel Management",
+  "description": "Multi-staff hostel inventory, student residency, and payment management portal for Global Institute of Studies (GIS) Nilai.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

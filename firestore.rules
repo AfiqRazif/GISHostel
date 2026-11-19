@@ -1,0 +1,331 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ---------------------------------------------------------
+    // Global Hardened Primitives
+    // ---------------------------------------------------------
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedStaff() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string
+        && request.auth.token.email.size() >= 3
+        && request.auth.token.email.size() <= 160;
+    }
+
+    function isAdmin() {
+      return isVerifiedStaff() && (
+        request.auth.token.email == 'afiqjacksonmusic@gmail.com'
+        || exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isAuditValid(data) {
+      return data.updatedBy is string
+        && data.updatedBy == request.auth.token.email
+        && data.updatedAt is timestamp
+        && data.updatedAt == request.time;
+    }
+
+    // ---------------------------------------------------------
+    // Validation Blueprints
+    // ---------------------------------------------------------
+    function isValidRoom(data, roomId) {
+      return data.keys().hasAll([
+          'roomId', 'location', 'block', 'unitNo', 'bedSlot',
+          'monthlyRate', 'status', 'currentStudentId', 'currentStudentName',
+          'updatedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'roomId', 'location', 'block', 'unitNo', 'bedSlot',
+          'monthlyRate', 'status', 'currentStudentId', 'currentStudentName',
+          'updatedBy', 'updatedAt'
+        ])
+        && data.roomId is string
+        && data.roomId == roomId
+        && data.roomId.size() >= 3 && data.roomId.size() <= 64
+        && data.roomId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.location is string
+        && data.location in ['Apartment Desa Jati 2', 'Nilai Square']
+        && data.location.size() <= 64
+        && data.block is string && data.block.size() >= 1 && data.block.size() <= 32
+        && data.unitNo is string && data.unitNo.size() >= 1 && data.unitNo.size() <= 32
+        && data.bedSlot is string && data.bedSlot.size() >= 1 && data.bedSlot.size() <= 16
+        && (data.monthlyRate is int || data.monthlyRate is float)
+        && data.monthlyRate >= 0 && data.monthlyRate <= 10000
+        && data.status is string
+        && data.status in ['Vacant', 'Occupied', 'Maintenance']
+        && (data.currentStudentId == null || (
+          data.currentStudentId is string
+          && data.currentStudentId.size() >= 3 && data.currentStudentId.size() <= 64
+          && data.currentStudentId.matches('^[a-zA-Z0-9_\\-]+$')
+        ))
+        && (data.currentStudentName == null || (
+          data.currentStudentName is string
+          && data.currentStudentName.size() >= 2 && data.currentStudentName.size() <= 120
+        ))
+        && (
+          (data.status == 'Occupied' && data.currentStudentId != null && data.currentStudentName != null)
+          || (data.status in ['Vacant', 'Maintenance'] && data.currentStudentId == null && data.currentStudentName == null)
+        )
+        && isAuditValid(data);
+    }
+
+    function isValidStudent(data, studentId) {
+      return data.keys().hasAll([
+          'studentId', 'fullName', 'phone', 'emergencyContact', 'program',
+          'assignedRoomId', 'hostelLocation', 'checkInDate', 'checkOutDate',
+          'depositPaid', 'monthlyFee', 'status', 'updatedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'studentId', 'fullName', 'phone', 'emergencyContact', 'program',
+          'assignedRoomId', 'hostelLocation', 'checkInDate', 'checkOutDate',
+          'depositPaid', 'monthlyFee', 'status', 'updatedBy', 'updatedAt'
+        ])
+        && data.studentId is string
+        && data.studentId == studentId
+        && data.studentId.size() >= 3 && data.studentId.size() <= 64
+        && data.studentId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120
+        && data.phone is string && data.phone.size() >= 6 && data.phone.size() <= 32
+        && data.emergencyContact is string && data.emergencyContact.size() >= 6 && data.emergencyContact.size() <= 120
+        && data.program is string && data.program in ['Diploma', 'SKM', 'DiFFER', 'Other']
+        && data.assignedRoomId is string
+        && data.assignedRoomId.size() >= 3 && data.assignedRoomId.size() <= 64
+        && data.assignedRoomId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.hostelLocation is string && data.hostelLocation in ['Apartment Desa Jati 2', 'Nilai Square']
+        && data.checkInDate is string && data.checkInDate.size() == 10 && data.checkInDate.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && (data.checkOutDate == null || (
+          data.checkOutDate is string && data.checkOutDate.size() == 10 && data.checkOutDate.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        ))
+        && (data.depositPaid is int || data.depositPaid is float) && data.depositPaid >= 0 && data.depositPaid <= 50000
+        && (data.monthlyFee is int || data.monthlyFee is float) && data.monthlyFee >= 0 && data.monthlyFee <= 10000
+        && data.status is string && data.status in ['Active', 'Checked-Out', 'Suspended']
+        && (data.status != 'Checked-Out' || data.checkOutDate != null)
+        && isAuditValid(data);
+    }
+
+    function isValidPayment(data, paymentId) {
+      return data.keys().hasAll([
+          'paymentId', 'studentId', 'studentName', 'roomId', 'hostelLocation',
+          'billingMonth', 'paymentType', 'amount', 'paymentMethod', 'referenceNo',
+          'paymentDate', 'status', 'notes', 'updatedBy', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'paymentId', 'studentId', 'studentName', 'roomId', 'hostelLocation',
+          'billingMonth', 'paymentType', 'amount', 'paymentMethod', 'referenceNo',
+          'paymentDate', 'status', 'notes', 'updatedBy', 'updatedAt'
+        ])
+        && data.paymentId is string
+        && data.paymentId == paymentId
+        && data.paymentId.size() >= 3 && data.paymentId.size() <= 64
+        && data.paymentId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.studentId is string
+        && data.studentId.size() >= 3 && data.studentId.size() <= 64
+        && data.studentId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.studentName is string && data.studentName.size() >= 2 && data.studentName.size() <= 120
+        && data.roomId is string
+        && data.roomId.size() >= 3 && data.roomId.size() <= 64
+        && data.roomId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.hostelLocation is string && data.hostelLocation in ['Apartment Desa Jati 2', 'Nilai Square']
+        && data.billingMonth is string && data.billingMonth.size() == 7 && data.billingMonth.matches('^\\d{4}-\\d{2}$')
+        && data.paymentType is string && data.paymentType in ['Monthly Rent', 'Hostel Deposit', 'Utility / Misc', 'Refund']
+        && (data.amount is int || data.amount is float) && data.amount >= 0 && data.amount <= 50000
+        && data.paymentMethod is string && data.paymentMethod in ['Online Transfer (FPX/DuitNow)', 'Cash', 'JomPAY', 'Card']
+        && data.referenceNo is string && data.referenceNo.size() <= 64
+        && data.paymentDate is string && data.paymentDate.size() == 10 && data.paymentDate.matches('^\\d{4}-\\d{2}-\\d{2}$')
+        && data.status is string && data.status in ['Paid', 'Pending', 'Overdue', 'Waived']
+        && data.notes is string && data.notes.size() <= 240
+        && isAuditValid(data);
+    }
+
+    function isValidStaffProfile(data, uid) {
+      return data.keys().hasAll(['uid', 'email', 'displayName', 'role', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'displayName', 'role', 'updatedAt'])
+        && data.uid is string && data.uid == uid && data.uid == request.auth.uid
+        && data.email is string && data.email == request.auth.token.email
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 120
+        && data.role is string && data.role in ['staff', 'admin']
+        && (data.role == 'staff' || isAdmin())
+        && data.updatedAt is timestamp && data.updatedAt == request.time;
+    }
+
+    // ---------------------------------------------------------
+    // Collection: /rooms/{roomId}
+    // ---------------------------------------------------------
+    match /rooms/{roomId} {
+      allow get: if isVerifiedStaff() && isValidId(roomId);
+      allow list: if isVerifiedStaff() && resource.data.location in ['Apartment Desa Jati 2', 'Nilai Square'];
+
+      allow create: if isVerifiedStaff()
+        && isValidId(roomId)
+        && isValidRoom(incoming(), roomId);
+
+      allow update: if isVerifiedStaff()
+        && isValidId(roomId)
+        && isValidRoom(incoming(), roomId)
+        && incoming().roomId == existing().roomId
+        && (
+          isAdmin()
+          || (
+            // Action: Update monthly rate or toggle Vacant/Maintenance when unoccupied
+            existing().status != 'Occupied'
+            && incoming().status != 'Occupied'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['monthlyRate', 'status', 'updatedBy', 'updatedAt'])
+          )
+          || (
+            // Action: Update monthly rate while occupied
+            existing().status == 'Occupied'
+            && incoming().status == 'Occupied'
+            && incoming().currentStudentId == existing().currentStudentId
+            && incoming().currentStudentName == existing().currentStudentName
+            && incoming().diff(existing()).affectedKeys().hasOnly(['monthlyRate', 'updatedBy', 'updatedAt'])
+          )
+          || (
+            // Action: Assign student to a Vacant bed
+            existing().status == 'Vacant'
+            && incoming().status == 'Occupied'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'currentStudentId', 'currentStudentName', 'updatedBy', 'updatedAt'])
+          )
+          || (
+            // Action: Vacate an Occupied bed
+            existing().status == 'Occupied'
+            && incoming().status in ['Vacant', 'Maintenance']
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'currentStudentId', 'currentStudentName', 'updatedBy', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isVerifiedStaff() && isValidId(roomId) && existing().status != 'Occupied';
+    }
+
+    // ---------------------------------------------------------
+    // Collection: /students/{studentId}
+    // ---------------------------------------------------------
+    match /students/{studentId} {
+      allow get: if isVerifiedStaff() && isValidId(studentId);
+      allow list: if isVerifiedStaff() && resource.data.status in ['Active', 'Checked-Out', 'Suspended'];
+
+      allow create: if isVerifiedStaff()
+        && isValidId(studentId)
+        && isValidStudent(incoming(), studentId)
+        && existsAfter(/databases/$(database)/documents/rooms/$(incoming().assignedRoomId));
+
+      allow update: if isVerifiedStaff()
+        && isValidId(studentId)
+        && isValidStudent(incoming(), studentId)
+        && incoming().studentId == existing().studentId
+        && (
+          isAdmin()
+          || (
+            // Action: Check out student and vacate room atomically
+            existing().status != 'Checked-Out'
+            && incoming().status == 'Checked-Out'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'checkOutDate', 'updatedBy', 'updatedAt'])
+            && getAfter(/databases/$(database)/documents/rooms/$(existing().assignedRoomId)).data.currentStudentId == null
+          )
+          || (
+            // Action: Edit active/suspended student details
+            existing().status != 'Checked-Out'
+            && incoming().status != 'Checked-Out'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'fullName', 'phone', 'emergencyContact', 'program',
+              'depositPaid', 'monthlyFee', 'status', 'checkInDate',
+              'checkOutDate', 'assignedRoomId', 'hostelLocation',
+              'updatedBy', 'updatedAt'
+            ])
+          )
+          || (
+            // Action: Re-check-in a Checked-Out student into a room
+            existing().status == 'Checked-Out'
+            && incoming().status == 'Active'
+            && incoming().checkOutDate == null
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'checkOutDate', 'checkInDate', 'assignedRoomId',
+              'hostelLocation', 'monthlyFee', 'depositPaid', 'updatedBy', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isAdmin() && isValidId(studentId);
+    }
+
+    // ---------------------------------------------------------
+    // Collection: /payments/{paymentId}
+    // ---------------------------------------------------------
+    match /payments/{paymentId} {
+      allow get: if isVerifiedStaff() && isValidId(paymentId);
+      allow list: if isVerifiedStaff() && resource.data.status in ['Paid', 'Pending', 'Overdue', 'Waived'];
+
+      allow create: if isVerifiedStaff()
+        && isValidId(paymentId)
+        && isValidPayment(incoming(), paymentId)
+        && existsAfter(/databases/$(database)/documents/students/$(incoming().studentId))
+        && existsAfter(/databases/$(database)/documents/rooms/$(incoming().roomId));
+
+      allow update: if isVerifiedStaff()
+        && isValidId(paymentId)
+        && isValidPayment(incoming(), paymentId)
+        && incoming().paymentId == existing().paymentId
+        && incoming().studentId == existing().studentId
+        && (
+          isAdmin()
+          || (
+            // Action: Settle or update payment details
+            existing().status != 'Waived'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'amount', 'paymentMethod', 'referenceNo', 'paymentDate',
+              'status', 'notes', 'paymentType', 'billingMonth',
+              'updatedBy', 'updatedAt'
+            ])
+          )
+        );
+
+      allow delete: if isVerifiedStaff() && isValidId(paymentId) && (isAdmin() || existing().status == 'Pending');
+    }
+
+    // ---------------------------------------------------------
+    // Collection: /staff/{uid} & /admins/{uid} & /test/connection
+    // ---------------------------------------------------------
+    match /staff/{uid} {
+      allow get: if isVerifiedStaff() && isValidId(uid) && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin() && resource.data.role in ['staff', 'admin'];
+      allow create: if isVerifiedStaff() && isValidId(uid) && isValidStaffProfile(incoming(), uid);
+      allow update: if isVerifiedStaff() && isValidId(uid) && isValidStaffProfile(incoming(), uid)
+        && incoming().uid == existing().uid
+        && incoming().role == existing().role;
+      allow delete: if false;
+    }
+
+    match /admins/{uid} {
+      allow get: if isVerifiedStaff() && isValidId(uid) && (request.auth.uid == uid || isAdmin());
+      allow list, write: if false;
+    }
+
+    match /test/connection {
+      allow get: if isSignedIn();
+      allow list, write: if false;
+    }
+  }
+}

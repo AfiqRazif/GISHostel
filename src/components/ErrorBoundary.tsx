@@ -1,9 +1,12 @@
 import React from 'react';
-import { AlertTriangle, RotateCcw } from 'lucide-react';
+import { signOut } from 'firebase/auth';
+import { AlertTriangle, LogOut, RotateCcw } from 'lucide-react';
+import { auth } from '../lib/firebase';
 
 interface ErrorBoundaryState {
   hasError: boolean;
   message: string;
+  signingOut: boolean;
 }
 
 export class ErrorBoundary extends React.Component<
@@ -12,10 +15,10 @@ export class ErrorBoundary extends React.Component<
 > {
   constructor(props: { children: React.ReactNode }) {
     super(props);
-    this.state = { hasError: false, message: '' };
+    this.state = { hasError: false, message: '', signingOut: false };
   }
 
-  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+  static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
     return {
       hasError: true,
       message: error.message || 'An unexpected application error occurred.',
@@ -25,6 +28,17 @@ export class ErrorBoundary extends React.Component<
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
     console.error('Application ErrorBoundary:', error, info);
   }
+
+  handleSignOutAndReload = async (): Promise<void> => {
+    this.setState({ signingOut: true });
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error('Error signing out during recovery:', err);
+    } finally {
+      window.location.reload();
+    }
+  };
 
   render(): React.ReactNode {
     if (this.state.hasError) {
@@ -50,14 +64,28 @@ export class ErrorBoundary extends React.Component<
             <p className="text-sm text-slate-600 leading-relaxed mb-6 break-words">
               {readableMessage}
             </p>
-            <button
-              type="button"
-              onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-900 hover:bg-blue-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
-            >
-              <RotateCcw className="w-4 h-4" />
-              Reload Application
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                disabled={this.state.signingOut}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <RotateCcw className="w-4 h-4" />
+                Reload Application
+              </button>
+              <button
+                type="button"
+                onClick={this.handleSignOutAndReload}
+                disabled={this.state.signingOut}
+                className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <LogOut className="w-4 h-4 text-slate-500" />
+                {this.state.signingOut
+                  ? 'Signing Out...'
+                  : 'Sign Out & Return to Login'}
+              </button>
+            </div>
           </div>
         </div>
       );

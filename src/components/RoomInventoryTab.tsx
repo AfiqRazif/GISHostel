@@ -4,6 +4,7 @@ import {
   buildRoomId,
   formatRM,
   formatTimestamp,
+  generateBulkBedSlots,
   HOSTEL_LOCATIONS,
   HostelLocation,
   Room,
@@ -14,7 +15,7 @@ import {
   bulkCreateBeds,
   createRoom,
   deleteVacantRoom,
-  updateRoomRateAndStatus,
+  updateRoomDetails,
 } from '../lib/hostelService';
 import { StatusBadge } from './StatusBadge';
 
@@ -54,8 +55,15 @@ export function RoomInventoryTab({
   const [bulkUnitNo, setBulkUnitNo] = useState('01');
   const [bulkMonthlyRate, setBulkMonthlyRate] = useState('250');
   const [bulkBedCount, setBulkBedCount] = useState(4);
+  const [bulkPrefixPattern, setBulkPrefixPattern] = useState<string>('B');
+  const [bulkCustomPrefix, setBulkCustomPrefix] = useState('Slot-');
+  const [bulkStartNumber, setBulkStartNumber] = useState(1);
 
   // Edit Room form
+  const [editLocation, setEditLocation] = useState<HostelLocation>('Apartment Desa Jati 2');
+  const [editBlock, setEditBlock] = useState('A');
+  const [editUnitNo, setEditUnitNo] = useState('01');
+  const [editBedSlot, setEditBedSlot] = useState('B1');
   const [editRate, setEditRate] = useState('250');
   const [editStatus, setEditStatus] = useState<RoomStatus>('Vacant');
 
@@ -74,6 +82,7 @@ export function RoomInventoryTab({
           r.roomId.toLowerCase().includes(q) ||
           r.block.toLowerCase().includes(q) ||
           r.unitNo.toLowerCase().includes(q) ||
+          r.bedSlot.toLowerCase().includes(q) ||
           (r.currentStudentName && r.currentStudentName.toLowerCase().includes(q)) ||
           (r.currentStudentId && r.currentStudentId.toLowerCase().includes(q))
         );
@@ -92,11 +101,28 @@ export function RoomInventoryTab({
     singleCustomId.trim() ||
     buildRoomId(singleLocation, singleBlock, singleUnitNo, singleBedSlot);
 
+  const activeBulkPrefix =
+    bulkPrefixPattern === 'CUSTOM' ? bulkCustomPrefix : bulkPrefixPattern;
+
+  const bulkBedSlots = useMemo(() => {
+    return generateBulkBedSlots(bulkBedCount, activeBulkPrefix, bulkStartNumber);
+  }, [bulkBedCount, activeBulkPrefix, bulkStartNumber]);
+
   const bulkPreviewIds = useMemo(() => {
-    return Array.from({ length: bulkBedCount }, (_, idx) =>
-      buildRoomId(bulkLocation, bulkBlock, bulkUnitNo, `B${idx + 1}`)
+    return bulkBedSlots.map((slot) =>
+      buildRoomId(bulkLocation, bulkBlock, bulkUnitNo, slot)
     );
-  }, [bulkLocation, bulkBlock, bulkUnitNo, bulkBedCount]);
+  }, [bulkLocation, bulkBlock, bulkUnitNo, bulkBedSlots]);
+
+  const editPreviewRoomId = editingRoom
+    ? buildRoomId(editLocation, editBlock, editUnitNo, editBedSlot)
+    : '';
+
+  const editHasDuplicateId = Boolean(
+    editingRoom &&
+      editPreviewRoomId !== editingRoom.roomId &&
+      rooms.some((r) => r.roomId === editPreviewRoomId)
+  );
 
   const handleOpenAddModal = () => {
     setFormError(null);
@@ -110,12 +136,18 @@ export function RoomInventoryTab({
     setFormError(null);
     setBulkMonthlyRate('250');
     setBulkBedCount(4);
+    setBulkPrefixPattern('B');
+    setBulkStartNumber(1);
     setShowBulkModal(true);
   };
 
   const handleOpenEditModal = (room: Room) => {
     setFormError(null);
     setEditingRoom(room);
+    setEditLocation(room.location);
+    setEditBlock(room.block);
+    setEditUnitNo(room.unitNo);
+    setEditBedSlot(room.bedSlot);
     setEditRate(String(room.monthlyRate));
     setEditStatus(room.status);
   };
@@ -158,6 +190,8 @@ export function RoomInventoryTab({
           unitNo: bulkUnitNo,
           monthlyRate: Number(bulkMonthlyRate),
           bedCount: bulkBedCount,
+          bedPrefix: activeBulkPrefix,
+          startNumber: bulkStartNumber,
         },
         staffEmail
       );
@@ -185,16 +219,30 @@ export function RoomInventoryTab({
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingRoom) return;
+    if (editHasDuplicateId) {
+      setFormError(`Room ID "${editPreviewRoomId}" already exists in inventory.`);
+      return;
+    }
     setSubmitting(true);
     setFormError(null);
     try {
-      await updateRoomRateAndStatus(
+      const result = await updateRoomDetails(
         editingRoom,
-        Number(editRate),
-        editStatus,
+        {
+          location: editLocation,
+          block: editBlock,
+          unitNo: editUnitNo,
+          bedSlot: editBedSlot,
+          monthlyRate: Number(editRate),
+          status: editStatus,
+        },
         staffEmail
       );
-      setFeedbackBanner(`Updated ${editingRoom.roomId}.`);
+      setFeedbackBanner(
+        result.renamed
+          ? `Updated room ${editingRoom.roomId} to ${result.roomId}.`
+          : `Updated room ${result.roomId}.`
+      );
       setEditingRoom(null);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to update room.');
@@ -503,7 +551,7 @@ export function RoomInventoryTab({
                   <input
                     type="text"
                     required
-                    maxLength={16}
+                    maxLength={32}
                     value={singleBedSlot}
                     onChange={(e) => setSingleBedSlot(e.target.value)}
                     placeholder="e.g. B1"
@@ -585,15 +633,15 @@ export function RoomInventoryTab({
 
       {/* Bulk Add Beds Modal */}
       {showBulkModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5 my-8">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
-                  Bulk Add Beds (B1–B{bulkBedCount})
+                  Bulk Add Beds ({bulkBedSlots[0]}–{bulkBedSlots[bulkBedSlots.length - 1]})
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Automatically generate 1–6 bed slots for an apartment unit
+                  Automatically generate 1–8 bed slots for an apartment unit
                 </p>
               </div>
               <button
@@ -679,29 +727,98 @@ export function RoomInventoryTab({
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Number of Beds (1–6)
+                    Number of Beds (1–8)
                   </label>
                   <select
                     value={bulkBedCount}
                     onChange={(e) => setBulkBedCount(Number(e.target.value))}
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   >
-                    {[1, 2, 3, 4, 5, 6].map((n) => (
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
                       <option key={n} value={n}>
-                        {n} {n === 1 ? 'Bed (B1)' : `Beds (B1–B${n})`}
+                        {n} {n === 1 ? 'Bed' : 'Beds'}
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <p className="text-xs font-medium text-slate-700 mb-1.5">
-                  Room IDs to generate ({formatRM(Number(bulkMonthlyRate) || 0)}/mo each):
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Bed Prefix / Naming Pattern
+                  </label>
+                  <select
+                    value={bulkPrefixPattern}
+                    onChange={(e) => setBulkPrefixPattern(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    <option value="B">Standard (B1, B2 ... B8)</option>
+                    <option value="Bed-">Labeled (Bed-1, Bed-2 ...)</option>
+                    <option value="Upper-">Upper Bunk (Upper-1, Upper-2 ...)</option>
+                    <option value="Lower-">Lower Bunk (Lower-1, Lower-2 ...)</option>
+                    <option value="CUSTOM">Custom Prefix...</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Starting No.
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={1}
+                    max={99}
+                    value={bulkStartNumber}
+                    onChange={(e) =>
+                      setBulkStartNumber(Math.max(1, Number(e.target.value) || 1))
+                    }
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+              </div>
+
+              {bulkPrefixPattern === 'CUSTOM' && (
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Custom Bed Prefix
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={20}
+                    value={bulkCustomPrefix}
+                    onChange={(e) => setBulkCustomPrefix(e.target.value)}
+                    placeholder="e.g. M- or Window-"
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+              )}
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5">
+                <p className="text-xs font-medium text-slate-700">
+                  Live Preview ({bulkPreviewIds.length} Room IDs ·{' '}
+                  {formatRM(Number(bulkMonthlyRate) || 0)}/mo each):
                 </p>
-                <p className="text-xs font-mono text-slate-600 leading-relaxed">
-                  {bulkPreviewIds.join(' · ')}
-                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {bulkPreviewIds.map((id) => {
+                    const exists = rooms.some((r) => r.roomId === id);
+                    return (
+                      <span
+                        key={id}
+                        className={`text-xs font-mono px-2 py-0.5 rounded border ${
+                          exists
+                            ? 'bg-amber-50 border-amber-200 text-amber-800'
+                            : 'bg-white border-slate-200 text-slate-700'
+                        }`}
+                        title={exists ? 'Already exists (will be skipped)' : 'New bed slot'}
+                      >
+                        {id}
+                        {exists ? ' (exists)' : ''}
+                      </span>
+                    );
+                  })}
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
@@ -717,7 +834,9 @@ export function RoomInventoryTab({
                   disabled={submitting}
                   className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
                 >
-                  {submitting ? 'Generating Beds...' : `Create ${bulkBedCount} Beds`}
+                  {submitting
+                    ? 'Generating Beds...'
+                    : `Create ${bulkBedCount} ${bulkBedCount === 1 ? 'Bed' : 'Beds'}`}
                 </button>
               </div>
             </form>
@@ -725,17 +844,17 @@ export function RoomInventoryTab({
         </div>
       )}
 
-      {/* Edit Room Modal */}
+      {/* Edit Room / Bed Modal */}
       {editingRoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-5">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5 my-8">
             <div className="flex items-center justify-between">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
-                  Edit Room {editingRoom.roomId}
+                  Edit Room / Bed · {editingRoom.roomId}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {editingRoom.location} · Blk {editingRoom.block} Unit {editingRoom.unitNo}
+                  Update bed designation, unit details, monthly RM rate, or maintenance status
                 </p>
               </div>
               <button
@@ -757,43 +876,134 @@ export function RoomInventoryTab({
             <form onSubmit={handleSaveEdit} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Monthly Rate (RM)
+                  Hostel Location
                 </label>
-                <input
-                  type="number"
-                  required
-                  min={0}
-                  max={10000}
-                  step="0.01"
-                  value={editRate}
-                  onChange={(e) => setEditRate(e.target.value)}
-                  className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
+                <select
+                  value={editLocation}
+                  onChange={(e) => setEditLocation(e.target.value as HostelLocation)}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                >
+                  {HOSTEL_LOCATIONS.map((loc) => (
+                    <option key={loc} value={loc}>
+                      {loc}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Room Status
-                </label>
-                {editingRoom.status === 'Occupied' ? (
-                  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600">
-                    Currently Occupied by{' '}
-                    <strong className="text-slate-900">
-                      {editingRoom.currentStudentName}
-                    </strong>
-                    . Check out the student in the Students tab to mark this bed Vacant.
-                  </div>
-                ) : (
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Block
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={32}
+                    value={editBlock}
+                    onChange={(e) => setEditBlock(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Unit No.
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={32}
+                    value={editUnitNo}
+                    onChange={(e) => setEditUnitNo(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Bed Designation
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={32}
+                    value={editBedSlot}
+                    onChange={(e) => setEditBedSlot(e.target.value)}
+                    placeholder="e.g. B1-Window"
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+              </div>
+
+              <div
+                className={`p-3 rounded-lg border text-xs ${
+                  editHasDuplicateId
+                    ? 'bg-red-50 border-red-200 text-red-800'
+                    : 'bg-slate-50 border-slate-200 text-slate-600'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span>Auto-formatted Room ID:</span>
+                  <span className="font-mono font-semibold text-slate-900">
+                    {editPreviewRoomId}
+                  </span>
+                </div>
+                {editHasDuplicateId && (
+                  <p className="mt-1 font-medium text-red-700">
+                    Duplicate Room ID detected — choose a unique Block, Unit, or Bed Designation.
+                  </p>
+                )}
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Monthly Rate (RM)
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={0}
+                    max={10000}
+                    step="0.01"
+                    value={editRate}
+                    onChange={(e) => setEditRate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Room Status
+                  </label>
                   <select
                     value={editStatus}
                     onChange={(e) => setEditStatus(e.target.value as RoomStatus)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    disabled={
+                      editingRoom.status === 'Occupied' ||
+                      Boolean(editingRoom.currentStudentId)
+                    }
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-600"
                   >
                     <option value="Vacant">Vacant</option>
+                    <option value="Occupied" disabled>
+                      Occupied
+                    </option>
                     <option value="Maintenance">Maintenance</option>
                   </select>
-                )}
+                </div>
               </div>
+
+              {(editingRoom.status === 'Occupied' ||
+                Boolean(editingRoom.currentStudentId)) && (
+                <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                  Assigned to{' '}
+                  <strong>
+                    {editingRoom.currentStudentName || editingRoom.currentStudentId}
+                  </strong>
+                  . Status cannot be switched to Vacant or Maintenance until the
+                  student is checked out or transferred in the Students tab.
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
                 <button
@@ -805,7 +1015,7 @@ export function RoomInventoryTab({
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
+                  disabled={submitting || editHasDuplicateId}
                   className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
                 >
                   {submitting ? 'Saving...' : 'Save Changes'}

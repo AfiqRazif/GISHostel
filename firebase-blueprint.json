@@ -33,8 +33,8 @@
         "bedSlot": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 16,
-          "description": "Bed slot label, e.g. B1"
+          "maxLength": 32,
+          "description": "Bed slot label, e.g. B1, B1-Window, Upper-1"
         },
         "monthlyRate": {
           "type": "number",

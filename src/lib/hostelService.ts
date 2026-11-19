@@ -13,6 +13,7 @@ import {
   buildRoomId,
   DATE_REGEX,
   FIELD_LIMITS,
+  generateBulkBedSlots,
   getCurrentMonthISO,
   getTodayISO,
   HostelLocation,
@@ -129,6 +130,8 @@ export interface BulkCreateBedsInput {
   unitNo: string;
   monthlyRate: number;
   bedCount: number;
+  bedPrefix?: string;
+  startNumber?: number;
 }
 
 export async function bulkCreateBeds(
@@ -138,7 +141,7 @@ export async function bulkCreateBeds(
   const email = assertStaffEmail(staffEmail);
   const block = input.block.trim().slice(0, FIELD_LIMITS.block.max);
   const unitNo = input.unitNo.trim().slice(0, FIELD_LIMITS.unitNo.max);
-  const count = Math.min(6, Math.max(1, Math.floor(input.bedCount)));
+  const count = Math.min(8, Math.max(1, Math.floor(input.bedCount)));
   const monthlyRate = clampNumber(
     input.monthlyRate,
     FIELD_LIMITS.monthlyRate.min,
@@ -149,14 +152,18 @@ export async function bulkCreateBeds(
     throw new Error('Block and Unit No. are required.');
   }
 
+  const bedSlots = generateBulkBedSlots(count, input.bedPrefix, input.startNumber);
   const batch = writeBatch(db);
   const createdIds: string[] = [];
   const skippedIds: string[] = [];
 
   try {
-    for (let i = 1; i <= count; i++) {
-      const bedSlot = `B${i}`;
+    for (const rawSlot of bedSlots) {
+      const bedSlot = rawSlot.slice(0, FIELD_LIMITS.bedSlot.max);
       const roomId = buildRoomId(input.location, block, unitNo, bedSlot);
+      if (!ID_REGEX.test(roomId) || roomId.length < FIELD_LIMITS.roomId.min) {
+        throw new Error(`Generated Room ID "${roomId}" is invalid.`);
+      }
       const ref = doc(db, 'rooms', roomId);
       const snap = await getDoc(ref);
       if (snap.exists()) {
@@ -184,35 +191,117 @@ export async function bulkCreateBeds(
     }
     return { createdIds, skippedIds };
   } catch (error) {
+    if (error instanceof Error && error.message.includes('Generated Room ID')) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.WRITE, 'rooms');
   }
 }
 
-export async function updateRoomRateAndStatus(
-  room: Room,
-  monthlyRate: number,
-  nextStatus: RoomStatus,
-  staffEmail: string
-): Promise<void> {
-  const email = assertStaffEmail(staffEmail);
-  const cleanRate = clampNumber(monthlyRate, FIELD_LIMITS.monthlyRate.min, FIELD_LIMITS.monthlyRate.max);
-  const path = `rooms/${room.roomId}`;
+export interface UpdateRoomDetailsInput {
+  location: HostelLocation;
+  block: string;
+  unitNo: string;
+  bedSlot: string;
+  monthlyRate: number;
+  status: RoomStatus;
+}
 
-  if (room.status === 'Occupied' && nextStatus !== 'Occupied') {
-    throw new Error('Check out the assigned student first before changing this room out of Occupied status.');
+export async function updateRoomDetails(
+  room: Room,
+  input: UpdateRoomDetailsInput,
+  staffEmail: string
+): Promise<{ roomId: string; renamed: boolean }> {
+  const email = assertStaffEmail(staffEmail);
+  const block = input.block.trim().slice(0, FIELD_LIMITS.block.max);
+  const unitNo = input.unitNo.trim().slice(0, FIELD_LIMITS.unitNo.max);
+  const bedSlot = input.bedSlot.trim().slice(0, FIELD_LIMITS.bedSlot.max);
+  const cleanRate = clampNumber(
+    input.monthlyRate,
+    FIELD_LIMITS.monthlyRate.min,
+    FIELD_LIMITS.monthlyRate.max
+  );
+
+  if (!block || !unitNo || !bedSlot) {
+    throw new Error('Block, Unit No., and Bed Designation are required.');
   }
-  if (room.status !== 'Occupied' && nextStatus === 'Occupied') {
+
+  const hasAssignedStudent =
+    room.status === 'Occupied' || Boolean(room.currentStudentId);
+  if (hasAssignedStudent && input.status !== 'Occupied') {
+    throw new Error(
+      'Check out or unassign the current student in the Students tab before changing status to Vacant or Maintenance.'
+    );
+  }
+  if (!hasAssignedStudent && input.status === 'Occupied') {
     throw new Error('Register or assign a student to mark a bed as Occupied.');
   }
 
+  const nextRoomId = buildRoomId(input.location, block, unitNo, bedSlot);
+  if (!ID_REGEX.test(nextRoomId) || nextRoomId.length < FIELD_LIMITS.roomId.min) {
+    throw new Error(
+      'Resulting Room ID must be 3–64 characters using letters, numbers, hyphens, or underscores.'
+    );
+  }
+
+  const path = `rooms/${room.roomId}`;
+
   try {
-    await updateDoc(doc(db, 'rooms', room.roomId), {
+    if (nextRoomId === room.roomId) {
+      await updateDoc(doc(db, 'rooms', room.roomId), {
+        location: input.location,
+        block,
+        unitNo,
+        bedSlot,
+        monthlyRate: cleanRate,
+        status: input.status,
+        updatedBy: email,
+        updatedAt: serverTimestamp(),
+      });
+      return { roomId: nextRoomId, renamed: false };
+    }
+
+    const nextRoomRef = doc(db, 'rooms', nextRoomId);
+    const existingNext = await getDoc(nextRoomRef);
+    if (existingNext.exists()) {
+      throw new Error(`Room ID "${nextRoomId}" already exists in inventory.`);
+    }
+
+    const batch = writeBatch(db);
+    batch.set(nextRoomRef, {
+      roomId: nextRoomId,
+      location: input.location,
+      block,
+      unitNo,
+      bedSlot,
       monthlyRate: cleanRate,
-      status: nextStatus,
+      status: input.status,
+      currentStudentId: room.currentStudentId ?? null,
+      currentStudentName: room.currentStudentName ?? null,
       updatedBy: email,
       updatedAt: serverTimestamp(),
     });
+    batch.delete(doc(db, 'rooms', room.roomId));
+
+    if (room.currentStudentId) {
+      const studentRef = doc(db, 'students', room.currentStudentId);
+      const studentSnap = await getDoc(studentRef);
+      if (studentSnap.exists()) {
+        batch.update(studentRef, {
+          assignedRoomId: nextRoomId,
+          hostelLocation: input.location,
+          updatedBy: email,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    await batch.commit();
+    return { roomId: nextRoomId, renamed: true };
   } catch (error) {
+    if (error instanceof Error && error.message.includes('already exists')) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }

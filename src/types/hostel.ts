@@ -40,7 +40,7 @@ export const FIELD_LIMITS = {
   roomId: { min: 3, max: 64 },
   block: { min: 1, max: 32 },
   unitNo: { min: 1, max: 32 },
-  bedSlot: { min: 1, max: 16 },
+  bedSlot: { min: 1, max: 32 },
   monthlyRate: { min: 0, max: 10000 },
   studentId: { min: 3, max: 64 },
   fullName: { min: 2, max: 120 },
@@ -135,6 +135,17 @@ export function buildRoomId(
   const u = sanitizeIdSegment(unitNo) || '00';
   const s = sanitizeIdSegment(bedSlot) || 'B1';
   return `${prefix}-${b}-${u}-${s}`.slice(0, FIELD_LIMITS.roomId.max);
+}
+
+export function generateBulkBedSlots(
+  count: number,
+  prefix = 'B',
+  startNumber = 1
+): string[] {
+  const safeCount = Math.min(8, Math.max(1, Math.floor(count)));
+  const safeStart = Math.max(1, Math.floor(startNumber || 1));
+  const cleanPrefix = (prefix || 'B').trim().slice(0, 20) || 'B';
+  return Array.from({ length: safeCount }, (_, idx) => `${cleanPrefix}${safeStart + idx}`);
 }
 
 export function getTodayISO(): string {

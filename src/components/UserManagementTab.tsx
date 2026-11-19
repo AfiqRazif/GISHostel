@@ -1,0 +1,462 @@
+import React, { useMemo, useState } from 'react';
+import { Shield, UserCheck, UserPlus, UserX, X } from 'lucide-react';
+import {
+  formatTimestamp,
+  normalizeStaffLoginEmail,
+  STAFF_ROLES,
+  StaffRole,
+  StaffUser,
+} from '../types/hostel';
+import {
+  createManagedStaffAccount,
+  updateStaffUserAccount,
+} from '../lib/hostelService';
+import { StatusBadge } from './StatusBadge';
+
+interface UserManagementTabProps {
+  staffUsers: StaffUser[];
+  currentUserUid: string;
+  staffEmail: string;
+  loading: boolean;
+}
+
+export function UserManagementTab({
+  staffUsers,
+  currentUserUid,
+  staffEmail,
+  loading,
+}: UserManagementTabProps) {
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [fullName, setFullName] = useState('');
+  const [username, setUsername] = useState('');
+  const [customEmail, setCustomEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [role, setRole] = useState<StaffRole>('Staff');
+
+  const [submitting, setSubmitting] = useState(false);
+  const [busyUid, setBusyUid] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
+
+  const sortedUsers = useMemo(() => {
+    const rank: Record<StaffRole, number> = {
+      'Master Admin': 0,
+      Admin: 1,
+      Staff: 2,
+    };
+    return [...staffUsers].sort((a, b) => {
+      if (rank[a.role] !== rank[b.role]) return rank[a.role] - rank[b.role];
+      return a.fullName.localeCompare(b.fullName);
+    });
+  }, [staffUsers]);
+
+  const counts = useMemo(() => {
+    const active = staffUsers.filter((u) => u.active).length;
+    const disabled = staffUsers.filter((u) => !u.active).length;
+    const masterAdmins = staffUsers.filter(
+      (u) => u.role === 'Master Admin' && u.active
+    ).length;
+    return { total: staffUsers.length, active, disabled, masterAdmins };
+  }, [staffUsers]);
+
+  const previewEmail = customEmail.trim()
+    ? customEmail.trim().toLowerCase()
+    : username.trim()
+      ? normalizeStaffLoginEmail(
+          username.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '')
+        )
+      : 'username@gis-hostel.local';
+
+  const handleOpenCreate = () => {
+    setFormError(null);
+    setFullName('');
+    setUsername('');
+    setCustomEmail('');
+    setPassword('');
+    setRole('Staff');
+    setShowCreateModal(true);
+  };
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      const created = await createManagedStaffAccount(
+        {
+          username,
+          customEmail: customEmail.trim() || undefined,
+          fullName,
+          password,
+          role,
+        },
+        staffEmail
+      );
+      setShowCreateModal(false);
+      setFeedbackBanner(
+        `Created ${role} account for ${fullName.trim()} (${created.email}). Your Master Admin session remains active.`
+      );
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : 'Failed to create staff account.';
+      if (msg.includes('auth/email-already-in-use')) {
+        setFormError('That username or email already has a registered account.');
+      } else if (msg.includes('auth/operation-not-allowed')) {
+        setFormError(
+          'Enable Email/Password sign-in in Firebase Console → Authentication → Sign-in method first.'
+        );
+      } else {
+        setFormError(msg);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleRoleChange = async (target: StaffUser, nextRole: StaffRole) => {
+    if (target.uid === currentUserUid && nextRole !== 'Master Admin') {
+      setFeedbackBanner('You cannot demote your own active Master Admin role.');
+      return;
+    }
+    setBusyUid(target.uid);
+    try {
+      await updateStaffUserAccount(target.uid, { role: nextRole }, staffEmail);
+      setFeedbackBanner(`Updated ${target.fullName}'s role to ${nextRole}.`);
+    } catch (err) {
+      setFeedbackBanner(
+        err instanceof Error ? err.message : 'Failed to update role.'
+      );
+    } finally {
+      setBusyUid(null);
+    }
+  };
+
+  const handleToggleActive = async (target: StaffUser) => {
+    if (target.uid === currentUserUid && target.active) {
+      setFeedbackBanner('You cannot disable your own currently signed-in account.');
+      return;
+    }
+    setBusyUid(target.uid);
+    try {
+      await updateStaffUserAccount(
+        target.uid,
+        { active: !target.active },
+        staffEmail
+      );
+      setFeedbackBanner(
+        `${target.fullName} has been ${target.active ? 'disabled' : 're-enabled'}.`
+      );
+    } catch (err) {
+      setFeedbackBanner(
+        err instanceof Error ? err.message : 'Failed to toggle user status.'
+      );
+    } finally {
+      setBusyUid(null);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {feedbackBanner && (
+        <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-4 py-2.5 text-xs font-medium flex items-center justify-between gap-4">
+          <span>{feedbackBanner}</span>
+          <button
+            type="button"
+            onClick={() => setFeedbackBanner(null)}
+            className="text-blue-900 hover:text-blue-700 cursor-pointer"
+            aria-label="Dismiss notification"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Header Toolbar */}
+      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-center shrink-0">
+            <Shield className="w-4 h-4" />
+          </div>
+          <div>
+            <h2 className="font-display text-base font-semibold text-slate-900">
+              Master Admin Staff User Manager
+            </h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Provision staff login credentials, assign roles, or disable portal access immediately
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleOpenCreate}
+          className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0 self-start sm:self-auto"
+        >
+          <UserPlus className="w-3.5 h-3.5" />
+          <span>Create Staff Account</span>
+        </button>
+      </div>
+
+      {/* Summary Counts */}
+      <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 px-1 tabular-nums">
+        <span>
+          Total Accounts: <strong className="text-slate-900">{counts.total}</strong>
+        </span>
+        <span aria-hidden="true">·</span>
+        <span>
+          <strong className="text-emerald-700">{counts.active}</strong> Active
+        </span>
+        <span aria-hidden="true">·</span>
+        <span>
+          <strong className="text-red-700">{counts.disabled}</strong> Disabled
+        </span>
+        <span aria-hidden="true">·</span>
+        <span>
+          <strong className="text-blue-900">{counts.masterAdmins}</strong> Master Admin
+        </span>
+      </div>
+
+      {/* Staff Accounts Table */}
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        {loading ? (
+          <div className="p-8 text-center text-sm text-slate-500">
+            Loading staff accounts...
+          </div>
+        ) : sortedUsers.length === 0 ? (
+          <div className="p-8 text-center text-sm text-slate-500">
+            No staff user records found.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
+                  <th className="py-3 px-4">Staff Member</th>
+                  <th className="py-3 px-4">Username</th>
+                  <th className="py-3 px-4">Login Email</th>
+                  <th className="py-3 px-4">Role</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Created</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {sortedUsers.map((u) => {
+                  const isSelf = u.uid === currentUserUid;
+                  return (
+                    <tr key={u.uid} className="hover:bg-slate-50/70">
+                      <td className="py-3 px-4">
+                        <p className="font-medium text-slate-900">
+                          {u.fullName}
+                          {isSelf && (
+                            <span className="ml-1.5 text-xs font-normal text-blue-900">
+                              (You)
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-xs font-mono text-slate-400">
+                          {u.uid.slice(0, 12)}...
+                        </p>
+                      </td>
+                      <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
+                        {u.username}
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-600 whitespace-nowrap">
+                        {u.email}
+                      </td>
+                      <td className="py-3 px-4 whitespace-nowrap">
+                        <select
+                          value={u.role}
+                          disabled={busyUid === u.uid || isSelf}
+                          onChange={(e) =>
+                            void handleRoleChange(u, e.target.value as StaffRole)
+                          }
+                          aria-label={`Role for ${u.fullName}`}
+                          className="px-2.5 py-1.5 text-xs font-medium bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-900 disabled:bg-slate-50 disabled:text-slate-600"
+                        >
+                          {STAFF_ROLES.map((r) => (
+                            <option key={r} value={r}>
+                              {r}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="py-3 px-4">
+                        <StatusBadge status={u.active ? 'Active' : 'Disabled'} />
+                      </td>
+                      <td className="py-3 px-4 text-xs text-slate-500 tabular-nums whitespace-nowrap">
+                        {formatTimestamp(u.createdAt)}
+                      </td>
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          disabled={busyUid === u.uid || (isSelf && u.active)}
+                          onClick={() => void handleToggleActive(u)}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ${
+                            u.active
+                              ? 'text-red-700 bg-red-50 border-red-200 hover:bg-red-100'
+                              : 'text-emerald-800 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'
+                          }`}
+                        >
+                          {u.active ? (
+                            <>
+                              <UserX className="w-3 h-3" />
+                              <span>Disable</span>
+                            </>
+                          ) : (
+                            <>
+                              <UserCheck className="w-3 h-3" />
+                              <span>Enable</span>
+                            </>
+                          )}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Create Staff Account Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5 my-8">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  Create Staff Account
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Provisions a Firebase Auth login via secondary app without signing you out
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCreateModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {formError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {formError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateUser} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Staff Full Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  minLength={2}
+                  maxLength={120}
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="e.g. Puan Noraini binti Kassim"
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    minLength={2}
+                    maxLength={64}
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="e.g. warden1"
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Role
+                  </label>
+                  <select
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as StaffRole)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    {STAFF_ROLES.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Custom Email (Optional — leave blank to use @gis-hostel.local)
+                </label>
+                <input
+                  type="email"
+                  maxLength={160}
+                  value={customEmail}
+                  onChange={(e) => setCustomEmail(e.target.value)}
+                  placeholder={previewEmail}
+                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Staff can sign in using username{' '}
+                  <span className="font-mono font-semibold">
+                    {username.trim().toLowerCase() || 'username'}
+                  </span>{' '}
+                  or email <span className="font-mono">{previewEmail}</span>.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Initial Password (minimum 6 characters)
+                </label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  maxLength={128}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter initial login password"
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateModal(false)}
+                  className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
+                >
+                  {submitting ? 'Creating Account...' : 'Create Staff Account'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

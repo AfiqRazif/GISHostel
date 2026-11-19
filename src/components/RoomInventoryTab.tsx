@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Layers, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { FileSpreadsheet, Layers, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import {
   buildRoomId,
   formatRM,
@@ -17,6 +17,7 @@ import {
   deleteVacantRoom,
   updateRoomDetails,
 } from '../lib/hostelService';
+import { BulkImportModal } from './BulkImportModal';
 import { StatusBadge } from './StatusBadge';
 
 interface RoomInventoryTabProps {
@@ -37,6 +38,7 @@ export function RoomInventoryTab({
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
   const [showBulkModal, setShowBulkModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [deletingRoom, setDeletingRoom] = useState<Room | null>(null);
 
@@ -84,7 +86,8 @@ export function RoomInventoryTab({
           r.unitNo.toLowerCase().includes(q) ||
           r.bedSlot.toLowerCase().includes(q) ||
           (r.currentStudentName && r.currentStudentName.toLowerCase().includes(q)) ||
-          (r.currentStudentId && r.currentStudentId.toLowerCase().includes(q))
+          (r.currentStudentId && r.currentStudentId.toLowerCase().includes(q)) ||
+          (r.statusNote && r.statusNote.toLowerCase().includes(q))
         );
       })
       .sort((a, b) => a.roomId.localeCompare(b.roomId));
@@ -93,8 +96,9 @@ export function RoomInventoryTab({
   const summary = useMemo(() => {
     const vacant = filteredRooms.filter((r) => r.status === 'Vacant').length;
     const occupied = filteredRooms.filter((r) => r.status === 'Occupied').length;
+    const reserved = filteredRooms.filter((r) => r.status === 'Reserved / Blocked').length;
     const maintenance = filteredRooms.filter((r) => r.status === 'Maintenance').length;
-    return { total: filteredRooms.length, vacant, occupied, maintenance };
+    return { total: filteredRooms.length, vacant, occupied, reserved, maintenance };
   }, [filteredRooms]);
 
   const generatedSingleId =
@@ -332,6 +336,14 @@ export function RoomInventoryTab({
         <div className="flex flex-wrap items-center gap-2.5 shrink-0">
           <button
             type="button"
+            onClick={() => setShowImportModal(true)}
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+            <span>Import Excel / CSV</span>
+          </button>
+          <button
+            type="button"
             onClick={handleOpenBulkModal}
             className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
@@ -361,6 +373,10 @@ export function RoomInventoryTab({
         <span aria-hidden="true">·</span>
         <span>
           <strong className="text-blue-900">{summary.occupied}</strong> Occupied
+        </span>
+        <span aria-hidden="true">·</span>
+        <span>
+          <strong className="text-indigo-900">{summary.reserved}</strong> Reserved / Blocked
         </span>
         <span aria-hidden="true">·</span>
         <span>
@@ -426,6 +442,17 @@ export function RoomInventoryTab({
                             {room.currentStudentId}
                           </p>
                         </div>
+                      ) : room.status === 'Reserved / Blocked' || room.statusNote ? (
+                        <div>
+                          <p className="text-xs font-medium text-indigo-900">
+                            {room.statusNote || 'Exclusive Unit Blocked'}
+                          </p>
+                          {room.exclusiveResidentId && (
+                            <p className="text-xs font-mono text-slate-500">
+                              Holder: {room.exclusiveResidentId}
+                            </p>
+                          )}
+                        </div>
                       ) : (
                         <span className="text-xs text-slate-400">Unassigned</span>
                       )}
@@ -449,20 +476,21 @@ export function RoomInventoryTab({
                           <Pencil className="w-3 h-3" />
                           <span>Edit</span>
                         </button>
-                        {room.status !== 'Occupied' && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFormError(null);
-                              setDeletingRoom(room);
-                            }}
-                            className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-md cursor-pointer"
-                            title="Delete unoccupied bed"
-                            aria-label={`Delete ${room.roomId}`}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                        {room.status !== 'Occupied' &&
+                          room.status !== 'Reserved / Blocked' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormError(null);
+                                setDeletingRoom(room);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-md cursor-pointer"
+                              title="Delete unoccupied bed"
+                              aria-label={`Delete ${room.roomId}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                       </div>
                     </td>
                   </tr>
@@ -980,6 +1008,7 @@ export function RoomInventoryTab({
                     onChange={(e) => setEditStatus(e.target.value as RoomStatus)}
                     disabled={
                       editingRoom.status === 'Occupied' ||
+                      editingRoom.status === 'Reserved / Blocked' ||
                       Boolean(editingRoom.currentStudentId)
                     }
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-600"
@@ -987,6 +1016,9 @@ export function RoomInventoryTab({
                     <option value="Vacant">Vacant</option>
                     <option value="Occupied" disabled>
                       Occupied
+                    </option>
+                    <option value="Reserved / Blocked" disabled>
+                      Reserved / Blocked
                     </option>
                     <option value="Maintenance">Maintenance</option>
                   </select>
@@ -1001,7 +1033,16 @@ export function RoomInventoryTab({
                     {editingRoom.currentStudentName || editingRoom.currentStudentId}
                   </strong>
                   . Status cannot be switched to Vacant or Maintenance until the
-                  student is checked out or transferred in the Students tab.
+                  resident is checked out or transferred in the Students tab.
+                </div>
+              )}
+
+              {editingRoom.status === 'Reserved / Blocked' && (
+                <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                  <strong>{editingRoom.statusNote || 'Exclusive Unit Blocked'}</strong>.
+                  This bed is blocked for Whole Unit Exclusive occupancy and cannot
+                  be manually switched until that resident checks out or changes to
+                  Single Bed.
                 </div>
               )}
 
@@ -1063,6 +1104,17 @@ export function RoomInventoryTab({
           </div>
         </div>
       )}
+
+      <BulkImportModal
+        isOpen={showImportModal}
+        importType="rooms"
+        rooms={rooms}
+        students={[]}
+        payments={[]}
+        staffEmail={staffEmail}
+        onClose={() => setShowImportModal(false)}
+        onImportComplete={(msg) => setFeedbackBanner(msg)}
+      />
     </div>
   );
 }

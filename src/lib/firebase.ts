@@ -1,12 +1,15 @@
-import { initializeApp } from 'firebase/app';
+import { getApps, initializeApp } from 'firebase/app';
 import {
+  createUserWithEmailAndPassword,
   getAuth,
   GoogleAuthProvider,
+  signInWithEmailAndPassword,
   signInWithPopup,
   signOut,
 } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { normalizeStaffLoginEmail } from '../types/hostel';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -81,6 +84,37 @@ export async function testConnection(): Promise<void> {
 
 export async function signInWithGoogle(): Promise<void> {
   await signInWithPopup(auth, googleProvider);
+}
+
+export async function signInWithUsernameOrEmail(
+  identifier: string,
+  password: string
+): Promise<void> {
+  const email = normalizeStaffLoginEmail(identifier);
+  if (!email) {
+    throw new Error('Please enter your staff username or email address.');
+  }
+  await signInWithEmailAndPassword(auth, email, password);
+}
+
+export async function createStaffAuthAccount(
+  email: string,
+  password: string
+): Promise<{ uid: string }> {
+  const secondaryApp =
+    getApps().find((a) => a.name === 'staff-provisioner') ||
+    initializeApp(firebaseConfig, 'staff-provisioner');
+  const secondaryAuth = getAuth(secondaryApp);
+  try {
+    const cred = await createUserWithEmailAndPassword(
+      secondaryAuth,
+      email,
+      password
+    );
+    return { uid: cred.user.uid };
+  } finally {
+    await signOut(secondaryAuth).catch(() => undefined);
+  }
 }
 
 export async function signOutStaff(): Promise<void> {

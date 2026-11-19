@@ -1,10 +1,11 @@
 import type { User } from 'firebase/auth';
 import { Database, LogOut, Menu } from 'lucide-react';
-import type { TabKey } from '../types/hostel';
+import type { StaffUser, TabKey } from '../types/hostel';
 
 interface TopBarProps {
   activeTab: TabKey;
   user: User;
+  staffUser?: StaffUser | null;
   isDatabaseEmpty: boolean;
   seedingData: boolean;
   onLoadSampleData: () => void;
@@ -17,22 +18,29 @@ const TAB_TITLES: Record<TabKey, string> = {
   students: 'Student Residency',
   payments: 'Payments & Fee Ledger',
   rooms: 'Room Inventory',
+  users: 'Staff User Accounts',
 };
 
 export function TopBar({
   activeTab,
   user,
+  staffUser,
   isDatabaseEmpty,
   seedingData,
   onLoadSampleData,
   onSignOut,
   onOpenMobileMenu,
 }: TopBarProps) {
-  const displayName = user.displayName || user.email?.split('@')[0] || 'GIS Staff';
-  const email = user.email || '';
+  const displayName =
+    staffUser?.fullName ||
+    user.displayName ||
+    user.email?.split('@')[0] ||
+    'GIS Staff';
+  const email = staffUser?.email || user.email || '';
+  const roleLabel = staffUser?.role || 'Staff';
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-4 shrink-0">
+    <header className="h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-4 shrink-0 print:hidden">
       <div className="flex items-center gap-3 min-w-0">
         <button
           type="button"
@@ -71,8 +79,8 @@ export function TopBar({
         )}
 
         <div className="hidden md:flex flex-col items-end text-right min-w-0">
-          <span className="text-xs font-semibold text-slate-900 truncate max-w-[180px]">
-            {displayName}
+          <span className="text-xs font-semibold text-slate-900 truncate max-w-[220px]">
+            {displayName} · <span className="text-blue-900">{roleLabel}</span>
           </span>
           <span className="text-xs text-slate-500 truncate max-w-[220px]">
             {email}

@@ -3,19 +3,22 @@ import {
   Building2,
   CreditCard,
   LayoutDashboard,
+  UserCog,
   Users,
   X,
 } from 'lucide-react';
-import type { TabKey } from '../types/hostel';
+import type { StaffRole, TabKey } from '../types/hostel';
 
 interface SidebarProps {
   activeTab: TabKey;
   onSelectTab: (tab: TabKey) => void;
+  staffRole?: StaffRole;
   counts: {
     vacantBeds: number;
     totalBeds: number;
     activeStudents: number;
     pendingPayments: number;
+    staffUsers?: number;
   };
   mobileOpen: boolean;
   onCloseMobile: () => void;
@@ -35,6 +38,7 @@ const NAV_ITEMS: Array<{
 export function Sidebar({
   activeTab,
   onSelectTab,
+  staffRole,
   counts,
   mobileOpen,
   onCloseMobile,
@@ -43,6 +47,14 @@ export function Sidebar({
     onSelectTab(key);
     onCloseMobile();
   };
+
+  const navItems =
+    staffRole === 'Master Admin'
+      ? [
+          ...NAV_ITEMS,
+          { key: 'users' as TabKey, label: 'User Accounts', icon: UserCog },
+        ]
+      : NAV_ITEMS;
 
   const getCountText = (key: TabKey): string | null => {
     switch (key) {
@@ -53,6 +65,10 @@ export function Sidebar({
       case 'payments':
         return counts.pendingPayments > 0
           ? `${counts.pendingPayments} due`
+          : null;
+      case 'users':
+        return typeof counts.staffUsers === 'number'
+          ? `${counts.staffUsers}`
           : null;
       default:
         return null;
@@ -84,7 +100,7 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto" aria-label="Primary">
-        {NAV_ITEMS.map((item) => {
+        {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.key;
           const metaText = getCountText(item.key);
@@ -130,10 +146,10 @@ export function Sidebar({
 
   return (
     <>
-      <aside className="hidden lg:block shrink-0">{navContent}</aside>
+      <aside className="hidden lg:block shrink-0 print:hidden">{navContent}</aside>
 
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 lg:hidden flex">
+        <div className="fixed inset-0 z-50 lg:hidden flex print:hidden">
           <div
             className="fixed inset-0 bg-slate-900/40"
             onClick={onCloseMobile}

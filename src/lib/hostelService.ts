@@ -1,31 +1,50 @@
 import type { User } from 'firebase/auth';
 import {
+  collection,
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
+  limit,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
   writeBatch,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from './firebase';
+import {
+  createStaffAuthAccount,
+  db,
+  handleFirestoreError,
+  OperationType,
+} from './firebase';
 import {
   buildRoomId,
+  calculateFirstMonthDefaults,
   DATE_REGEX,
+  extractUsernameFromEmail,
   FIELD_LIMITS,
   generateBulkBedSlots,
+  generateReceiptNumber,
   getCurrentMonthISO,
   getTodayISO,
   HostelLocation,
   ID_REGEX,
   MONTH_REGEX,
+  normalizeStaffLoginEmail,
+  OccupancyMode,
+  Payment,
   PaymentMethod,
   PaymentStatus,
   PaymentType,
+  PhysicalReceiptStatus,
   ProgramType,
+  ResidentType,
   Room,
   RoomStatus,
   sanitizeIdSegment,
+  StaffRole,
+  StaffUser,
   Student,
   StudentStatus,
 } from '../types/hostel';
@@ -71,6 +90,145 @@ export async function syncStaffProfile(user: User): Promise<void> {
   }
 }
 
+export async function syncStaffUserRecord(user: User): Promise<StaffUser> {
+  const email = (user.email || `${user.uid}@gis-hostel.local`)
+    .trim()
+    .slice(0, FIELD_LIMITS.email.max);
+  const path = `staff_users/${user.uid}`;
+
+  try {
+    const ref = doc(db, 'staff_users', user.uid);
+    const existingSnap = await getDoc(ref);
+
+    if (existingSnap.exists()) {
+      return existingSnap.data() as StaffUser;
+    }
+
+    const firstCheckSnap = await getDocs(
+      query(collection(db, 'staff_users'), limit(1))
+    );
+    const isFirstUser = firstCheckSnap.empty;
+
+    const fullName = (
+      user.displayName ||
+      extractUsernameFromEmail(email) ||
+      'GIS Staff'
+    )
+      .trim()
+      .slice(0, FIELD_LIMITS.fullName.max);
+    const username = extractUsernameFromEmail(email).slice(0, 64);
+    const role: StaffRole = isFirstUser ? 'Master Admin' : 'Staff';
+
+    const newRecord = {
+      uid: user.uid,
+      username,
+      email,
+      fullName,
+      role,
+      active: true,
+      createdAt: serverTimestamp(),
+      updatedBy: email,
+      updatedAt: serverTimestamp(),
+    };
+
+    await setDoc(ref, newRecord);
+    const createdSnap = await getDoc(ref);
+    return (createdSnap.data() as StaffUser) || {
+      uid: user.uid,
+      username,
+      email,
+      fullName,
+      role,
+      active: true,
+      createdAt: null,
+    };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export interface CreateManagedStaffInput {
+  username: string;
+  customEmail?: string;
+  fullName: string;
+  password: string;
+  role: StaffRole;
+}
+
+export async function createManagedStaffAccount(
+  input: CreateManagedStaffInput,
+  masterAdminEmail: string
+): Promise<{ email: string; uid: string }> {
+  const adminEmail = assertStaffEmail(masterAdminEmail);
+  const cleanUsername = input.username
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[^a-z0-9._-]/g, '');
+  const fullName = input.fullName.trim().slice(0, FIELD_LIMITS.fullName.max);
+
+  if (cleanUsername.length < 2) {
+    throw new Error('Username must be at least 2 alphanumeric characters.');
+  }
+  if (fullName.length < 2) {
+    throw new Error('Full Name must be at least 2 characters.');
+  }
+  if (input.password.length < 6) {
+    throw new Error('Password must be at least 6 characters.');
+  }
+
+  const loginEmail = input.customEmail?.trim()
+    ? input.customEmail.trim().toLowerCase()
+    : normalizeStaffLoginEmail(cleanUsername);
+
+  if (!loginEmail.includes('@')) {
+    throw new Error('Login email must be a valid email address.');
+  }
+
+  const { uid } = await createStaffAuthAccount(loginEmail, input.password);
+  const path = `staff_users/${uid}`;
+
+  try {
+    await setDoc(doc(db, 'staff_users', uid), {
+      uid,
+      username: cleanUsername.slice(0, 64),
+      email: loginEmail.slice(0, FIELD_LIMITS.email.max),
+      fullName,
+      role: input.role,
+      active: true,
+      createdAt: serverTimestamp(),
+      updatedBy: adminEmail,
+      updatedAt: serverTimestamp(),
+    });
+    return { email: loginEmail, uid };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, path);
+  }
+}
+
+export async function updateStaffUserAccount(
+  uid: string,
+  updates: { role?: StaffRole; active?: boolean; fullName?: string },
+  masterAdminEmail: string
+): Promise<void> {
+  const adminEmail = assertStaffEmail(masterAdminEmail);
+  const path = `staff_users/${uid}`;
+  try {
+    const payload: Record<string, unknown> = {
+      updatedBy: adminEmail,
+      updatedAt: serverTimestamp(),
+    };
+    if (updates.role !== undefined) payload.role = updates.role;
+    if (updates.active !== undefined) payload.active = updates.active;
+    if (updates.fullName !== undefined) {
+      payload.fullName = updates.fullName.trim().slice(0, FIELD_LIMITS.fullName.max);
+    }
+    await updateDoc(doc(db, 'staff_users', uid), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
 export interface CreateRoomInput {
   roomId?: string;
   location: HostelLocation;
@@ -113,6 +271,8 @@ export async function createRoom(input: CreateRoomInput, staffEmail: string): Pr
       status: input.status,
       currentStudentId: null,
       currentStudentName: null,
+      statusNote: null,
+      exclusiveResidentId: null,
       updatedBy: email,
       updatedAt: serverTimestamp(),
     });
@@ -180,6 +340,8 @@ export async function bulkCreateBeds(
         status: 'Vacant',
         currentStudentId: null,
         currentStudentName: null,
+        statusNote: null,
+        exclusiveResidentId: null,
         updatedBy: email,
         updatedAt: serverTimestamp(),
       });
@@ -230,11 +392,21 @@ export async function updateRoomDetails(
     room.status === 'Occupied' || Boolean(room.currentStudentId);
   if (hasAssignedStudent && input.status !== 'Occupied') {
     throw new Error(
-      'Check out or unassign the current student in the Students tab before changing status to Vacant or Maintenance.'
+      'Check out or unassign the current resident in the Students tab before changing status.'
     );
   }
   if (!hasAssignedStudent && input.status === 'Occupied') {
-    throw new Error('Register or assign a student to mark a bed as Occupied.');
+    throw new Error('Register or assign a resident to mark a bed as Occupied.');
+  }
+  if (room.status === 'Reserved / Blocked' && input.status !== 'Reserved / Blocked') {
+    throw new Error(
+      'This bed is blocked by a Whole Unit Exclusive occupancy. Check out or switch the resident to Single Bed first.'
+    );
+  }
+  if (room.status !== 'Reserved / Blocked' && input.status === 'Reserved / Blocked') {
+    throw new Error(
+      'Reserved / Blocked status is automatically managed by Whole Unit Exclusive residency.'
+    );
   }
 
   const nextRoomId = buildRoomId(input.location, block, unitNo, bedSlot);
@@ -278,6 +450,8 @@ export async function updateRoomDetails(
       status: input.status,
       currentStudentId: room.currentStudentId ?? null,
       currentStudentName: room.currentStudentName ?? null,
+      statusNote: room.statusNote ?? null,
+      exclusiveResidentId: room.exclusiveResidentId ?? null,
       updatedBy: email,
       updatedAt: serverTimestamp(),
     });
@@ -307,8 +481,10 @@ export async function updateRoomDetails(
 }
 
 export async function deleteVacantRoom(room: Room): Promise<void> {
-  if (room.status === 'Occupied') {
-    throw new Error('Cannot delete an occupied bed. Check out the resident first.');
+  if (room.status === 'Occupied' || room.status === 'Reserved / Blocked') {
+    throw new Error(
+      'Cannot delete an occupied or exclusive-unit blocked bed. Check out the resident first.'
+    );
   }
   const path = `rooms/${room.roomId}`;
   try {
@@ -321,28 +497,72 @@ export async function deleteVacantRoom(room: Room): Promise<void> {
 export interface RegisterStudentInput {
   studentId: string;
   fullName: string;
+  residentType: ResidentType;
+  occupancyMode: OccupancyMode;
   phone: string;
   emergencyContact: string;
   program: ProgramType;
   assignedRoomId: string;
+  status: 'Active' | 'Checked-Out';
   checkInDate: string;
+  checkOutDate: string | null;
   depositPaid: number;
-  monthlyFee: number;
+  standardRoomRate: number;
+  monthlyRebate: number;
+  rebateReason: string;
+  firstMonthCharge: number;
+  firstMonthNote: string;
 }
 
 export async function registerStudent(
   input: RegisterStudentInput,
   selectedRoom: Room,
+  allRooms: Room[],
   staffEmail: string
-): Promise<void> {
+): Promise<{ blockedSiblings: string[] }> {
   const email = assertStaffEmail(staffEmail);
   const studentId = sanitizeIdSegment(input.studentId).slice(0, FIELD_LIMITS.studentId.max);
   const fullName = input.fullName.trim().slice(0, FIELD_LIMITS.fullName.max);
   const phone = input.phone.trim().slice(0, FIELD_LIMITS.phone.max);
   const emergencyContact = input.emergencyContact.trim().slice(0, FIELD_LIMITS.emergencyContact.max);
+  const standardRoomRate = clampNumber(
+    input.standardRoomRate,
+    FIELD_LIMITS.monthlyFee.min,
+    FIELD_LIMITS.monthlyFee.max
+  );
+  const monthlyRebate = clampNumber(
+    input.monthlyRebate,
+    FIELD_LIMITS.monthlyFee.min,
+    FIELD_LIMITS.monthlyFee.max
+  );
+  const effectiveMonthlyFee = Math.max(
+    0,
+    Math.round((standardRoomRate - monthlyRebate) * 100) / 100
+  );
+  const firstMonthDefaults = calculateFirstMonthDefaults(
+    input.checkInDate,
+    effectiveMonthlyFee
+  );
+  const firstMonthCharge = clampNumber(
+    typeof input.firstMonthCharge === 'number' && !Number.isNaN(input.firstMonthCharge)
+      ? input.firstMonthCharge
+      : firstMonthDefaults.firstMonthCharge,
+    FIELD_LIMITS.monthlyFee.min,
+    FIELD_LIMITS.monthlyFee.max
+  );
+  const firstMonthNote = (
+    input.firstMonthNote?.trim() || firstMonthDefaults.firstMonthNote
+  ).slice(0, 64);
+
+  const rebateReason = (input.rebateReason || 'None').trim().slice(0, FIELD_LIMITS.rebateReason.max);
+  const depositPaid = clampNumber(
+    input.depositPaid,
+    FIELD_LIMITS.depositPaid.min,
+    FIELD_LIMITS.depositPaid.max
+  );
 
   if (!ID_REGEX.test(studentId) || studentId.length < FIELD_LIMITS.studentId.min) {
-    throw new Error('Student ID (Matrix / IC) must be 3–64 characters (letters, numbers, hyphens, underscores).');
+    throw new Error('Resident ID (Matrix / IC) must be 3–64 characters (letters, numbers, hyphens, underscores).');
   }
   if (fullName.length < FIELD_LIMITS.fullName.min) {
     throw new Error('Full Name must be at least 2 characters.');
@@ -353,54 +573,107 @@ export async function registerStudent(
   if (!DATE_REGEX.test(input.checkInDate)) {
     throw new Error('Check-In Date must be in YYYY-MM-DD format.');
   }
-  if (selectedRoom.status !== 'Vacant') {
+  if (input.status === 'Checked-Out') {
+    if (!input.checkOutDate || !DATE_REGEX.test(input.checkOutDate)) {
+      throw new Error('Check-Out Date (YYYY-MM-DD) is required when importing a historical Checked-Out resident.');
+    }
+    if (input.checkOutDate < input.checkInDate) {
+      throw new Error('Check-Out Date cannot be earlier than Check-In Date.');
+    }
+  } else if (selectedRoom.status !== 'Vacant') {
     throw new Error('Selected room is no longer Vacant. Please choose another available bed.');
   }
 
   const studentRef = doc(db, 'students', studentId);
   const roomRef = doc(db, 'rooms', selectedRoom.roomId);
+  const blockedSiblings: string[] = [];
 
   try {
     const existingStudent = await getDoc(studentRef);
     if (existingStudent.exists()) {
-      throw new Error(`Student ID "${studentId}" is already registered.`);
-    }
-    const freshRoom = await getDoc(roomRef);
-    if (!freshRoom.exists() || freshRoom.data()?.status !== 'Vacant') {
-      throw new Error(`Room "${selectedRoom.roomId}" is not currently Vacant.`);
+      throw new Error(`Resident ID "${studentId}" is already registered.`);
     }
 
     const batch = writeBatch(db);
+
+    if (input.status === 'Active') {
+      const freshRoom = await getDoc(roomRef);
+      if (!freshRoom.exists() || freshRoom.data()?.status !== 'Vacant') {
+        throw new Error(`Room "${selectedRoom.roomId}" is not currently Vacant.`);
+      }
+
+      batch.update(roomRef, {
+        status: 'Occupied',
+        currentStudentId: studentId,
+        currentStudentName: fullName,
+        statusNote: null,
+        exclusiveResidentId: null,
+        updatedBy: email,
+        updatedAt: serverTimestamp(),
+      });
+
+      if (input.occupancyMode === 'Whole Unit Exclusive') {
+        const siblings = allRooms.filter(
+          (r) =>
+            r.roomId !== selectedRoom.roomId &&
+            r.location === selectedRoom.location &&
+            r.block === selectedRoom.block &&
+            r.unitNo === selectedRoom.unitNo &&
+            r.status === 'Vacant'
+        );
+        const note = `Exclusive Unit: ${fullName}`.slice(0, FIELD_LIMITS.statusNote.max);
+        for (const sib of siblings) {
+          const sibRef = doc(db, 'rooms', sib.roomId);
+          const sibSnap = await getDoc(sibRef);
+          if (sibSnap.exists() && sibSnap.data()?.status === 'Vacant') {
+            batch.update(sibRef, {
+              status: 'Reserved / Blocked',
+              currentStudentId: null,
+              currentStudentName: null,
+              statusNote: note,
+              exclusiveResidentId: studentId,
+              updatedBy: email,
+              updatedAt: serverTimestamp(),
+            });
+            blockedSiblings.push(sib.roomId);
+          }
+        }
+      }
+    }
+
     batch.set(studentRef, {
       studentId,
       fullName,
+      residentType: input.residentType,
+      occupancyMode: input.occupancyMode,
       phone,
       emergencyContact,
       program: input.program,
       assignedRoomId: selectedRoom.roomId,
       hostelLocation: selectedRoom.location,
       checkInDate: input.checkInDate,
-      checkOutDate: null,
-      depositPaid: clampNumber(input.depositPaid, FIELD_LIMITS.depositPaid.min, FIELD_LIMITS.depositPaid.max),
-      monthlyFee: clampNumber(input.monthlyFee, FIELD_LIMITS.monthlyFee.min, FIELD_LIMITS.monthlyFee.max),
-      status: 'Active',
-      updatedBy: email,
-      updatedAt: serverTimestamp(),
-    });
-
-    batch.update(roomRef, {
-      status: 'Occupied',
-      currentStudentId: studentId,
-      currentStudentName: fullName,
+      checkOutDate: input.status === 'Checked-Out' ? input.checkOutDate : null,
+      depositPaid,
+      standardRoomRate,
+      monthlyRebate,
+      rebateReason,
+      effectiveMonthlyFee,
+      monthlyFee: effectiveMonthlyFee,
+      firstMonthCharge,
+      firstMonthNote,
+      status: input.status,
       updatedBy: email,
       updatedAt: serverTimestamp(),
     });
 
     await batch.commit();
+    return { blockedSiblings };
   } catch (error) {
     if (
       error instanceof Error &&
-      (error.message.includes('already registered') || error.message.includes('Vacant'))
+      (error.message.includes('already registered') ||
+        error.message.includes('Vacant') ||
+        error.message.includes('Check-Out'))
     ) {
       throw error;
     }
@@ -410,6 +683,8 @@ export async function registerStudent(
 
 export interface UpdateStudentInput {
   fullName: string;
+  residentType: ResidentType;
+  occupancyMode: OccupancyMode;
   phone: string;
   emergencyContact: string;
   program: ProgramType;
@@ -417,19 +692,59 @@ export interface UpdateStudentInput {
   checkInDate: string;
   checkOutDate: string | null;
   depositPaid: number;
-  monthlyFee: number;
+  standardRoomRate: number;
+  monthlyRebate: number;
+  rebateReason: string;
+  firstMonthCharge: number;
+  firstMonthNote: string;
   newRoom?: Room | null;
 }
 
 export async function updateStudentRecord(
   currentStudent: Student,
   input: UpdateStudentInput,
+  allRooms: Room[],
   staffEmail: string
 ): Promise<void> {
   const email = assertStaffEmail(staffEmail);
   const fullName = input.fullName.trim().slice(0, FIELD_LIMITS.fullName.max);
   const phone = input.phone.trim().slice(0, FIELD_LIMITS.phone.max);
   const emergencyContact = input.emergencyContact.trim().slice(0, FIELD_LIMITS.emergencyContact.max);
+  const standardRoomRate = clampNumber(
+    input.standardRoomRate,
+    FIELD_LIMITS.monthlyFee.min,
+    FIELD_LIMITS.monthlyFee.max
+  );
+  const monthlyRebate = clampNumber(
+    input.monthlyRebate,
+    FIELD_LIMITS.monthlyFee.min,
+    FIELD_LIMITS.monthlyFee.max
+  );
+  const effectiveMonthlyFee = Math.max(
+    0,
+    Math.round((standardRoomRate - monthlyRebate) * 100) / 100
+  );
+  const firstMonthDefaults = calculateFirstMonthDefaults(
+    input.checkInDate,
+    effectiveMonthlyFee
+  );
+  const firstMonthCharge = clampNumber(
+    typeof input.firstMonthCharge === 'number' && !Number.isNaN(input.firstMonthCharge)
+      ? input.firstMonthCharge
+      : firstMonthDefaults.firstMonthCharge,
+    FIELD_LIMITS.monthlyFee.min,
+    FIELD_LIMITS.monthlyFee.max
+  );
+  const firstMonthNote = (
+    input.firstMonthNote?.trim() || firstMonthDefaults.firstMonthNote
+  ).slice(0, 64);
+
+  const rebateReason = (input.rebateReason || 'None').trim().slice(0, FIELD_LIMITS.rebateReason.max);
+  const depositPaid = clampNumber(
+    input.depositPaid,
+    FIELD_LIMITS.depositPaid.min,
+    FIELD_LIMITS.depositPaid.max
+  );
 
   if (fullName.length < FIELD_LIMITS.fullName.min) {
     throw new Error('Full Name must be at least 2 characters.');
@@ -440,15 +755,73 @@ export async function updateStudentRecord(
   if (!DATE_REGEX.test(input.checkInDate)) {
     throw new Error('Check-In Date must be in YYYY-MM-DD format.');
   }
-  if (input.status === 'Checked-Out' && (!input.checkOutDate || !DATE_REGEX.test(input.checkOutDate))) {
-    throw new Error('A valid Check-Out Date (YYYY-MM-DD) is required when checking out a student.');
+  if (input.status === 'Checked-Out') {
+    if (!input.checkOutDate || !DATE_REGEX.test(input.checkOutDate)) {
+      throw new Error('A valid Check-Out Date (YYYY-MM-DD) is required when checking out a resident.');
+    }
+    if (input.checkOutDate < input.checkInDate) {
+      throw new Error('Check-Out Date cannot be earlier than Check-In Date.');
+    }
   }
 
   const studentRef = doc(db, 'students', currentStudent.studentId);
   const batch = writeBatch(db);
+  const exclusiveNote = `Exclusive Unit: ${fullName}`.slice(0, FIELD_LIMITS.statusNote.max);
+
+  const releaseUnitExclusiveBlocks = (anchorRoom: Room | undefined) => {
+    for (const r of allRooms) {
+      if (r.status !== 'Reserved / Blocked') continue;
+      const matchesResident = r.exclusiveResidentId === currentStudent.studentId;
+      const matchesUnit =
+        anchorRoom &&
+        r.location === anchorRoom.location &&
+        r.block === anchorRoom.block &&
+        r.unitNo === anchorRoom.unitNo;
+      if (matchesResident || matchesUnit) {
+        batch.update(doc(db, 'rooms', r.roomId), {
+          status: 'Vacant',
+          currentStudentId: null,
+          currentStudentName: null,
+          statusNote: null,
+          exclusiveResidentId: null,
+          updatedBy: email,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+  };
+
+  const applyUnitExclusiveBlocks = async (targetRoom: Room) => {
+    const siblings = allRooms.filter(
+      (r) =>
+        r.roomId !== targetRoom.roomId &&
+        r.location === targetRoom.location &&
+        r.block === targetRoom.block &&
+        r.unitNo === targetRoom.unitNo &&
+        r.status === 'Vacant'
+    );
+    for (const sib of siblings) {
+      const sibRef = doc(db, 'rooms', sib.roomId);
+      const sibSnap = await getDoc(sibRef);
+      if (sibSnap.exists() && sibSnap.data()?.status === 'Vacant') {
+        batch.update(sibRef, {
+          status: 'Reserved / Blocked',
+          currentStudentId: null,
+          currentStudentName: null,
+          statusNote: exclusiveNote,
+          exclusiveResidentId: currentStudent.studentId,
+          updatedBy: email,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+  };
 
   try {
-    // Case 1: Transitioning to Checked-Out from Active/Suspended -> vacate assigned room atomically
+    const currentRoomObj = allRooms.find(
+      (r) => r.roomId === currentStudent.assignedRoomId
+    );
+
     if (currentStudent.status !== 'Checked-Out' && input.status === 'Checked-Out') {
       const assignedRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
       const roomSnap = await getDoc(assignedRoomRef);
@@ -458,14 +831,33 @@ export async function updateStudentRecord(
           status: 'Vacant',
           currentStudentId: null,
           currentStudentName: null,
+          statusNote: null,
+          exclusiveResidentId: null,
           updatedBy: email,
           updatedAt: serverTimestamp(),
         });
       }
 
+      releaseUnitExclusiveBlocks(currentRoomObj);
+
       batch.update(studentRef, {
+        fullName,
+        residentType: input.residentType,
+        occupancyMode: input.occupancyMode,
+        phone,
+        emergencyContact,
+        program: input.program,
         status: 'Checked-Out',
+        checkInDate: input.checkInDate,
         checkOutDate: input.checkOutDate,
+        depositPaid,
+        standardRoomRate,
+        monthlyRebate,
+        rebateReason,
+        effectiveMonthlyFee,
+        monthlyFee: effectiveMonthlyFee,
+        firstMonthCharge,
+        firstMonthNote,
         updatedBy: email,
         updatedAt: serverTimestamp(),
       });
@@ -474,27 +866,50 @@ export async function updateStudentRecord(
       return;
     }
 
-    // Case 2: Re-activating a Checked-Out student into a Vacant room
     if (currentStudent.status === 'Checked-Out' && input.status === 'Active') {
       if (!input.newRoom || input.newRoom.status !== 'Vacant') {
-        throw new Error('Select an available Vacant room to re-activate this student.');
+        throw new Error('Select an available Vacant room to re-activate this resident.');
       }
       const newRoomRef = doc(db, 'rooms', input.newRoom.roomId);
+      const freshNewRoom = await getDoc(newRoomRef);
+      if (!freshNewRoom.exists() || freshNewRoom.data()?.status !== 'Vacant') {
+        throw new Error(`Room "${input.newRoom.roomId}" is no longer Vacant.`);
+      }
+
       batch.update(newRoomRef, {
         status: 'Occupied',
         currentStudentId: currentStudent.studentId,
         currentStudentName: fullName,
+        statusNote: null,
+        exclusiveResidentId: null,
         updatedBy: email,
         updatedAt: serverTimestamp(),
       });
+
+      if (input.occupancyMode === 'Whole Unit Exclusive') {
+        await applyUnitExclusiveBlocks(input.newRoom);
+      }
+
       batch.update(studentRef, {
+        fullName,
+        residentType: input.residentType,
+        occupancyMode: input.occupancyMode,
+        phone,
+        emergencyContact,
+        program: input.program,
         status: 'Active',
         checkOutDate: null,
         checkInDate: input.checkInDate,
         assignedRoomId: input.newRoom.roomId,
         hostelLocation: input.newRoom.location,
-        monthlyFee: clampNumber(input.monthlyFee, FIELD_LIMITS.monthlyFee.min, FIELD_LIMITS.monthlyFee.max),
-        depositPaid: clampNumber(input.depositPaid, FIELD_LIMITS.depositPaid.min, FIELD_LIMITS.depositPaid.max),
+        depositPaid,
+        standardRoomRate,
+        monthlyRebate,
+        rebateReason,
+        effectiveMonthlyFee,
+        monthlyFee: effectiveMonthlyFee,
+        firstMonthCharge,
+        firstMonthNote,
         updatedBy: email,
         updatedAt: serverTimestamp(),
       });
@@ -502,38 +917,82 @@ export async function updateStudentRecord(
       return;
     }
 
-    // Case 3: Active/Suspended student transferring to a different Vacant room
     let targetRoomId = currentStudent.assignedRoomId;
     let targetLocation = currentStudent.hostelLocation;
-    if (input.newRoom && input.newRoom.roomId !== currentStudent.assignedRoomId) {
-      if (input.newRoom.status !== 'Vacant') {
-        throw new Error('Target room must be Vacant for a room transfer.');
-      }
-      const oldRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
-      const oldSnap = await getDoc(oldRoomRef);
-      if (oldSnap.exists() && oldSnap.data()?.currentStudentId === currentStudent.studentId) {
-        batch.update(oldRoomRef, {
-          status: 'Vacant',
-          currentStudentId: null,
-          currentStudentName: null,
+
+    if (input.status !== 'Checked-Out') {
+      if (input.newRoom && input.newRoom.roomId !== currentStudent.assignedRoomId) {
+        if (input.newRoom.status !== 'Vacant') {
+          throw new Error('Target room must be Vacant for a room transfer.');
+        }
+        const oldRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
+        const oldSnap = await getDoc(oldRoomRef);
+        if (oldSnap.exists() && oldSnap.data()?.currentStudentId === currentStudent.studentId) {
+          batch.update(oldRoomRef, {
+            status: 'Vacant',
+            currentStudentId: null,
+            currentStudentName: null,
+            statusNote: null,
+            exclusiveResidentId: null,
+            updatedBy: email,
+            updatedAt: serverTimestamp(),
+          });
+        }
+        releaseUnitExclusiveBlocks(currentRoomObj);
+
+        const newRoomRef = doc(db, 'rooms', input.newRoom.roomId);
+        batch.update(newRoomRef, {
+          status: 'Occupied',
+          currentStudentId: currentStudent.studentId,
+          currentStudentName: fullName,
+          statusNote: null,
+          exclusiveResidentId: null,
           updatedBy: email,
           updatedAt: serverTimestamp(),
         });
+
+        if (input.status === 'Active' && input.occupancyMode === 'Whole Unit Exclusive') {
+          await applyUnitExclusiveBlocks(input.newRoom);
+        }
+
+        targetRoomId = input.newRoom.roomId;
+        targetLocation = input.newRoom.location;
+      } else if (currentRoomObj) {
+        if (currentRoomObj.currentStudentId === currentStudent.studentId) {
+          batch.update(doc(db, 'rooms', currentRoomObj.roomId), {
+            currentStudentName: fullName,
+            updatedBy: email,
+            updatedAt: serverTimestamp(),
+          });
+        }
+        if (input.status === 'Active' && input.occupancyMode === 'Whole Unit Exclusive') {
+          for (const r of allRooms) {
+            if (
+              r.status === 'Reserved / Blocked' &&
+              (r.exclusiveResidentId === currentStudent.studentId ||
+                (r.location === currentRoomObj.location &&
+                  r.block === currentRoomObj.block &&
+                  r.unitNo === currentRoomObj.unitNo))
+            ) {
+              batch.update(doc(db, 'rooms', r.roomId), {
+                statusNote: exclusiveNote,
+                exclusiveResidentId: currentStudent.studentId,
+                updatedBy: email,
+                updatedAt: serverTimestamp(),
+              });
+            }
+          }
+          await applyUnitExclusiveBlocks(currentRoomObj);
+        } else {
+          releaseUnitExclusiveBlocks(currentRoomObj);
+        }
       }
-      const newRoomRef = doc(db, 'rooms', input.newRoom.roomId);
-      batch.update(newRoomRef, {
-        status: 'Occupied',
-        currentStudentId: currentStudent.studentId,
-        currentStudentName: fullName,
-        updatedBy: email,
-        updatedAt: serverTimestamp(),
-      });
-      targetRoomId = input.newRoom.roomId;
-      targetLocation = input.newRoom.location;
     }
 
     batch.update(studentRef, {
       fullName,
+      residentType: input.residentType,
+      occupancyMode: input.occupancyMode,
       phone,
       emergencyContact,
       program: input.program,
@@ -542,8 +1001,14 @@ export async function updateStudentRecord(
       checkOutDate: input.status === 'Checked-Out' ? input.checkOutDate : null,
       assignedRoomId: targetRoomId,
       hostelLocation: targetLocation,
-      depositPaid: clampNumber(input.depositPaid, FIELD_LIMITS.depositPaid.min, FIELD_LIMITS.depositPaid.max),
-      monthlyFee: clampNumber(input.monthlyFee, FIELD_LIMITS.monthlyFee.min, FIELD_LIMITS.monthlyFee.max),
+      depositPaid,
+      standardRoomRate,
+      monthlyRebate,
+      rebateReason,
+      effectiveMonthlyFee,
+      monthlyFee: effectiveMonthlyFee,
+      firstMonthCharge,
+      firstMonthNote,
       updatedBy: email,
       updatedAt: serverTimestamp(),
     });
@@ -552,7 +1017,7 @@ export async function updateStudentRecord(
   } catch (error) {
     if (
       error instanceof Error &&
-      (error.message.includes('Vacant') || error.message.includes('Check-Out Date'))
+      (error.message.includes('Vacant') || error.message.includes('Check-Out'))
     ) {
       throw error;
     }
@@ -566,13 +1031,18 @@ export interface CreatePaymentInput {
   paymentType: PaymentType;
   amount: number;
   paymentMethod: PaymentMethod;
-  referenceNo: string;
+  bankRefNo: string;
   paymentDate: string;
   status: PaymentStatus;
   notes: string;
+  proofImageData?: string | null;
 }
 
-export async function createPayment(input: CreatePaymentInput, staffEmail: string): Promise<void> {
+export async function createPayment(
+  input: CreatePaymentInput,
+  existingPayments: Payment[],
+  staffEmail: string
+): Promise<{ receiptNo: string }> {
   const email = assertStaffEmail(staffEmail);
   if (!MONTH_REGEX.test(input.billingMonth)) {
     throw new Error('Billing Month must be in YYYY-MM format.');
@@ -587,11 +1057,14 @@ export async function createPayment(input: CreatePaymentInput, staffEmail: strin
     0,
     FIELD_LIMITS.paymentId.max
   );
+  const receiptNo = generateReceiptNumber(input.billingMonth, existingPayments);
+  const bankRefNo = input.bankRefNo.trim().slice(0, FIELD_LIMITS.bankRefNo.max);
 
   const path = `payments/${paymentId}`;
   try {
     await setDoc(doc(db, 'payments', paymentId), {
       paymentId,
+      receiptNo,
       studentId: input.student.studentId,
       studentName: input.student.fullName.slice(0, FIELD_LIMITS.fullName.max),
       roomId: input.student.assignedRoomId,
@@ -600,13 +1073,22 @@ export async function createPayment(input: CreatePaymentInput, staffEmail: strin
       paymentType: input.paymentType,
       amount: clampNumber(input.amount, FIELD_LIMITS.amount.min, FIELD_LIMITS.amount.max),
       paymentMethod: input.paymentMethod,
-      referenceNo: input.referenceNo.trim().slice(0, FIELD_LIMITS.referenceNo.max),
+      bankRefNo,
+      referenceNo: bankRefNo,
       paymentDate: input.paymentDate,
       status: input.status,
       notes: input.notes.trim().slice(0, FIELD_LIMITS.notes.max),
+      proofImageData: input.proofImageData || null,
+      physicalReceiptStatus: 'Pending Issuance' as PhysicalReceiptStatus,
+      physicalReceiptNo: '',
+      receiptIssuedBy: null,
+      receiptIssuedAt: null,
+      recordedBy: email,
+      recordedAt: serverTimestamp(),
       updatedBy: email,
       updatedAt: serverTimestamp(),
     });
+    return { receiptNo };
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
   }
@@ -617,10 +1099,11 @@ export interface UpdatePaymentInput {
   paymentType: PaymentType;
   amount: number;
   paymentMethod: PaymentMethod;
-  referenceNo: string;
+  bankRefNo: string;
   paymentDate: string;
   status: PaymentStatus;
   notes: string;
+  proofImageData?: string | null;
 }
 
 export async function updatePayment(
@@ -636,17 +1119,44 @@ export async function updatePayment(
     throw new Error('Payment Date must be in YYYY-MM-DD format.');
   }
 
+  const bankRefNo = input.bankRefNo.trim().slice(0, FIELD_LIMITS.bankRefNo.max);
   const path = `payments/${paymentId}`;
   try {
-    await updateDoc(doc(db, 'payments', paymentId), {
+    const payload: Record<string, unknown> = {
       billingMonth: input.billingMonth,
       paymentType: input.paymentType,
       amount: clampNumber(input.amount, FIELD_LIMITS.amount.min, FIELD_LIMITS.amount.max),
       paymentMethod: input.paymentMethod,
-      referenceNo: input.referenceNo.trim().slice(0, FIELD_LIMITS.referenceNo.max),
+      bankRefNo,
+      referenceNo: bankRefNo,
       paymentDate: input.paymentDate,
       status: input.status,
       notes: input.notes.trim().slice(0, FIELD_LIMITS.notes.max),
+      updatedBy: email,
+      updatedAt: serverTimestamp(),
+    };
+    if (input.proofImageData !== undefined) {
+      payload.proofImageData = input.proofImageData;
+    }
+    await updateDoc(doc(db, 'payments', paymentId), payload);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function markPhysicalReceiptIssued(
+  paymentId: string,
+  physicalReceiptNo: string,
+  staffEmail: string
+): Promise<void> {
+  const email = assertStaffEmail(staffEmail);
+  const path = `payments/${paymentId}`;
+  try {
+    await updateDoc(doc(db, 'payments', paymentId), {
+      physicalReceiptStatus: 'Issued' as PhysicalReceiptStatus,
+      physicalReceiptNo: physicalReceiptNo.trim().slice(0, 64),
+      receiptIssuedBy: email,
+      receiptIssuedAt: serverTimestamp(),
       updatedBy: email,
       updatedAt: serverTimestamp(),
     });
@@ -659,11 +1169,14 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
   const email = assertStaffEmail(staffEmail);
   const today = getTodayISO();
   const month = getCurrentMonthISO();
+  const ym = month.replace('-', '');
 
   const sampleStudents = [
     {
       studentId: 'GIS250101',
       fullName: 'Muhammad Amirul Hakim bin Razak',
+      residentType: 'Student' as ResidentType,
+      occupancyMode: 'Single Bed' as OccupancyMode,
       phone: '011-2345 6789',
       emergencyContact: 'Razak bin Osman (Father) · 019-332 1140',
       program: 'Diploma' as ProgramType,
@@ -672,12 +1185,20 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       checkInDate: '2026-09-01',
       checkOutDate: null,
       depositPaid: 250,
+      standardRoomRate: 250,
+      monthlyRebate: 0,
+      rebateReason: 'None',
+      effectiveMonthlyFee: 250,
       monthlyFee: 250,
+      firstMonthCharge: 250,
+      firstMonthNote: 'Standard Full Month',
       status: 'Active' as StudentStatus,
     },
     {
       studentId: 'GIS250102',
       fullName: 'Nurul Aina Syafiqah binti Mohd Noor',
+      residentType: 'Student' as ResidentType,
+      occupancyMode: 'Single Bed' as OccupancyMode,
       phone: '013-887 4512',
       emergencyContact: 'Zaiton binti Karim (Mother) · 012-774 8890',
       program: 'SKM' as ProgramType,
@@ -686,12 +1207,20 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       checkInDate: '2026-09-01',
       checkOutDate: null,
       depositPaid: 250,
+      standardRoomRate: 250,
+      monthlyRebate: 0,
+      rebateReason: 'None',
+      effectiveMonthlyFee: 250,
       monthlyFee: 250,
+      firstMonthCharge: 250,
+      firstMonthNote: 'Standard Full Month',
       status: 'Active' as StudentStatus,
     },
     {
       studentId: 'GIS250103',
       fullName: 'Kavinesh A/L Subramaniam',
+      residentType: 'Student' as ResidentType,
+      occupancyMode: 'Single Bed' as OccupancyMode,
       phone: '016-445 9910',
       emergencyContact: 'Subramaniam A/L Muthu · 016-221 3309',
       program: 'DiFFER' as ProgramType,
@@ -700,12 +1229,20 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       checkInDate: '2026-10-05',
       checkOutDate: null,
       depositPaid: 250,
-      monthlyFee: 250,
+      standardRoomRate: 250,
+      monthlyRebate: 50,
+      rebateReason: 'Management Rebate',
+      effectiveMonthlyFee: 200,
+      monthlyFee: 200,
+      firstMonthCharge: 200,
+      firstMonthNote: 'Standard Full Month',
       status: 'Active' as StudentStatus,
     },
     {
       studentId: 'GIS250201',
       fullName: 'Tan Wei Ming',
+      residentType: 'Student' as ResidentType,
+      occupancyMode: 'Single Bed' as OccupancyMode,
       phone: '017-654 2210',
       emergencyContact: 'Tan Boon Hock (Father) · 012-301 9981',
       program: 'Diploma' as ProgramType,
@@ -714,26 +1251,64 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       checkInDate: '2026-08-15',
       checkOutDate: null,
       depositPaid: 280,
+      standardRoomRate: 280,
+      monthlyRebate: 0,
+      rebateReason: 'None',
+      effectiveMonthlyFee: 280,
       monthlyFee: 280,
+      firstMonthCharge: 280,
+      firstMonthNote: 'Standard Full Month',
       status: 'Active' as StudentStatus,
     },
     {
       studentId: 'GIS250202',
       fullName: 'Siti Khadijah binti Ismail',
+      residentType: 'Student' as ResidentType,
+      occupancyMode: 'Single Bed' as OccupancyMode,
       phone: '014-909 1134',
       emergencyContact: 'Ismail bin Hamid · 019-665 0042',
       program: 'SKM' as ProgramType,
       assignedRoomId: 'NSQ-C-12-B2',
       hostelLocation: 'Nilai Square' as HostelLocation,
-      checkInDate: '2026-09-12',
+      checkInDate: '2026-09-18',
       checkOutDate: null,
       depositPaid: 280,
+      standardRoomRate: 280,
+      monthlyRebate: 0,
+      rebateReason: 'None',
+      effectiveMonthlyFee: 280,
       monthlyFee: 280,
+      firstMonthCharge: 140,
+      firstMonthNote: 'After 15th Half-Rate',
+      status: 'Active' as StudentStatus,
+    },
+    {
+      studentId: 'STF-GIS-014',
+      fullName: 'Encik Haziq bin Mansor',
+      residentType: 'Lecturer / Staff' as ResidentType,
+      occupancyMode: 'Whole Unit Exclusive' as OccupancyMode,
+      phone: '019-778 2310',
+      emergencyContact: 'Puan Nadia binti Aziz (Spouse) · 019-778 2311',
+      program: 'Other' as ProgramType,
+      assignedRoomId: 'NSQ-D-05-B1',
+      hostelLocation: 'Nilai Square' as HostelLocation,
+      checkInDate: '2026-09-01',
+      checkOutDate: null,
+      depositPaid: 300,
+      standardRoomRate: 300,
+      monthlyRebate: 150,
+      rebateReason: 'Staff Housing',
+      effectiveMonthlyFee: 150,
+      monthlyFee: 150,
+      firstMonthCharge: 150,
+      firstMonthNote: 'Standard Full Month',
       status: 'Active' as StudentStatus,
     },
     {
       studentId: 'GIS240089',
       fullName: 'Ahmad Faiz bin Zulkifli',
+      residentType: 'Student' as ResidentType,
+      occupancyMode: 'Single Bed' as OccupancyMode,
       phone: '018-321 7745',
       emergencyContact: 'Zulkifli bin Ali · 019-412 5531',
       program: 'Other' as ProgramType,
@@ -742,7 +1317,13 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       checkInDate: '2026-02-01',
       checkOutDate: '2026-10-31',
       depositPaid: 250,
+      standardRoomRate: 250,
+      monthlyRebate: 0,
+      rebateReason: 'None',
+      effectiveMonthlyFee: 250,
       monthlyFee: 250,
+      firstMonthCharge: 250,
+      firstMonthNote: 'Standard Full Month',
       status: 'Checked-Out' as StudentStatus,
     },
   ];
@@ -752,6 +1333,15 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       .filter((s) => s.status === 'Active')
       .map((s) => [s.assignedRoomId, s])
   );
+
+  const exclusiveUnits = sampleStudents
+    .filter((s) => s.status === 'Active' && s.occupancyMode === 'Whole Unit Exclusive')
+    .map((s) => ({
+      resident: s,
+      location: s.hostelLocation,
+      block: 'D',
+      unitNo: '05',
+    }));
 
   const roomBlueprints: Array<{
     location: HostelLocation;
@@ -782,11 +1372,22 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
         const bedSlot = `B${b}`;
         const roomId = buildRoomId(grp.location, grp.block, grp.unitNo, bedSlot);
         const resident = activeByRoom.get(roomId);
+        const exclusiveHolder = !resident
+          ? exclusiveUnits.find(
+              (u) =>
+                u.location === grp.location &&
+                u.block === grp.block &&
+                u.unitNo === grp.unitNo
+            )
+          : undefined;
+
         const status: RoomStatus = resident
           ? 'Occupied'
           : grp.maintenanceBed === bedSlot
             ? 'Maintenance'
-            : 'Vacant';
+            : exclusiveHolder
+              ? 'Reserved / Blocked'
+              : 'Vacant';
 
         batch.set(doc(db, 'rooms', roomId), {
           roomId,
@@ -798,6 +1399,12 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
           status,
           currentStudentId: resident ? resident.studentId : null,
           currentStudentName: resident ? resident.fullName : null,
+          statusNote: exclusiveHolder
+            ? `Exclusive Unit: ${exclusiveHolder.resident.fullName}`
+            : null,
+          exclusiveResidentId: exclusiveHolder
+            ? exclusiveHolder.resident.studentId
+            : null,
           updatedBy: email,
           updatedAt: serverTimestamp(),
         });
@@ -814,7 +1421,8 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
 
     const samplePayments = [
       {
-        paymentId: `PAY-${month.replace('-', '')}-101`,
+        paymentId: `PAY-${ym}-101`,
+        receiptNo: `GIS-${ym}-0001`,
         studentId: 'GIS250101',
         studentName: 'Muhammad Amirul Hakim bin Razak',
         roomId: 'DJ2-A-04-B1',
@@ -822,44 +1430,65 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
         billingMonth: month,
         paymentType: 'Monthly Rent' as PaymentType,
         amount: 250,
-        paymentMethod: 'Online Transfer (FPX/DuitNow)' as PaymentMethod,
+        paymentMethod: 'DuitNow QR' as PaymentMethod,
+        bankRefNo: 'DUITNOW-984120',
         referenceNo: 'DUITNOW-984120',
         paymentDate: today,
         status: 'Paid' as PaymentStatus,
-        notes: 'November hostel rent settled via DuitNow QR.',
+        notes: 'Hostel rent settled via DuitNow QR.',
+        proofImageData: null,
+        physicalReceiptStatus: 'Issued' as PhysicalReceiptStatus,
+        physicalReceiptNo: 'BK-DJ2-0101',
+        receiptIssuedBy: email,
+        receiptIssuedAt: serverTimestamp(),
       },
       {
-        paymentId: `PAY-${month.replace('-', '')}-102`,
+        paymentId: `PAY-${ym}-102`,
+        receiptNo: `GIS-${ym}-0002`,
         studentId: 'GIS250102',
         studentName: 'Nurul Aina Syafiqah binti Mohd Noor',
         roomId: 'DJ2-A-04-B2',
         hostelLocation: 'Apartment Desa Jati 2' as HostelLocation,
         billingMonth: month,
         paymentType: 'Monthly Rent' as PaymentType,
-        amount: 250,
-        paymentMethod: 'JomPAY' as PaymentMethod,
-        referenceNo: 'JP-772104',
+        amount: 150,
+        paymentMethod: 'Online Transfer' as PaymentMethod,
+        bankRefNo: 'MBB-772104',
+        referenceNo: 'MBB-772104',
         paymentDate: today,
         status: 'Paid' as PaymentStatus,
-        notes: 'Verified by hostel finance counter.',
+        notes: 'First installment payment (RM 100 remaining).',
+        proofImageData: null,
+        physicalReceiptStatus: 'Pending Issuance' as PhysicalReceiptStatus,
+        physicalReceiptNo: '',
+        receiptIssuedBy: null,
+        receiptIssuedAt: null,
       },
       {
-        paymentId: `PAY-${month.replace('-', '')}-103`,
+        paymentId: `PAY-${ym}-103`,
+        receiptNo: `GIS-${ym}-0003`,
         studentId: 'GIS250103',
         studentName: 'Kavinesh A/L Subramaniam',
         roomId: 'DJ2-B-02-B1',
         hostelLocation: 'Apartment Desa Jati 2' as HostelLocation,
         billingMonth: month,
-        paymentType: 'Monthly Rent' as PaymentType,
-        amount: 250,
-        paymentMethod: 'Cash' as PaymentMethod,
-        referenceNo: 'INV-DJ2-003',
+        paymentType: 'Rebate / Fee Waiver' as PaymentType,
+        amount: 50,
+        paymentMethod: 'Internal Adjustment' as PaymentMethod,
+        bankRefNo: 'WAIVE-DJ2-003',
+        referenceNo: 'WAIVE-DJ2-003',
         paymentDate: today,
-        status: 'Pending' as PaymentStatus,
-        notes: 'Awaiting transfer slip from student.',
+        status: 'Waived' as PaymentStatus,
+        notes: 'Approved one-time management orientation fee waiver.',
+        proofImageData: null,
+        physicalReceiptStatus: 'Issued' as PhysicalReceiptStatus,
+        physicalReceiptNo: 'ADJ-003',
+        receiptIssuedBy: email,
+        receiptIssuedAt: serverTimestamp(),
       },
       {
-        paymentId: `PAY-${month.replace('-', '')}-201`,
+        paymentId: `PAY-${ym}-201`,
+        receiptNo: `GIS-${ym}-0004`,
         studentId: 'GIS250201',
         studentName: 'Tan Wei Ming',
         roomId: 'NSQ-C-12-B1',
@@ -867,32 +1496,69 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
         billingMonth: month,
         paymentType: 'Monthly Rent' as PaymentType,
         amount: 280,
-        paymentMethod: 'Online Transfer (FPX/DuitNow)' as PaymentMethod,
+        paymentMethod: 'Online Transfer' as PaymentMethod,
+        bankRefNo: 'FPX-550192',
         referenceNo: 'FPX-550192',
         paymentDate: today,
         status: 'Paid' as PaymentStatus,
         notes: 'Nilai Square single bed monthly fee.',
+        proofImageData: null,
+        physicalReceiptStatus: 'Pending Issuance' as PhysicalReceiptStatus,
+        physicalReceiptNo: '',
+        receiptIssuedBy: null,
+        receiptIssuedAt: null,
       },
       {
-        paymentId: `PAY-${month.replace('-', '')}-202`,
+        paymentId: `PAY-${ym}-202`,
+        receiptNo: `GIS-${ym}-0005`,
         studentId: 'GIS250202',
         studentName: 'Siti Khadijah binti Ismail',
         roomId: 'NSQ-C-12-B2',
         hostelLocation: 'Nilai Square' as HostelLocation,
         billingMonth: month,
         paymentType: 'Monthly Rent' as PaymentType,
-        amount: 280,
-        paymentMethod: 'Online Transfer (FPX/DuitNow)' as PaymentMethod,
+        amount: 140,
+        paymentMethod: 'Online Transfer' as PaymentMethod,
+        bankRefNo: 'REM-NSQ-019',
         referenceNo: 'REM-NSQ-019',
         paymentDate: today,
         status: 'Overdue' as PaymentStatus,
-        notes: 'Reminder sent via WhatsApp on 10th.',
+        notes: 'After 15th half-rate first month reminder sent.',
+        proofImageData: null,
+        physicalReceiptStatus: 'Pending Issuance' as PhysicalReceiptStatus,
+        physicalReceiptNo: '',
+        receiptIssuedBy: null,
+        receiptIssuedAt: null,
+      },
+      {
+        paymentId: `PAY-${ym}-301`,
+        receiptNo: `GIS-${ym}-0006`,
+        studentId: 'STF-GIS-014',
+        studentName: 'Encik Haziq bin Mansor',
+        roomId: 'NSQ-D-05-B1',
+        hostelLocation: 'Nilai Square' as HostelLocation,
+        billingMonth: month,
+        paymentType: 'Monthly Rent' as PaymentType,
+        amount: 150,
+        paymentMethod: 'Internal Adjustment' as PaymentMethod,
+        bankRefNo: 'HR-DEDUCT-014',
+        referenceNo: 'HR-DEDUCT-014',
+        paymentDate: today,
+        status: 'Paid' as PaymentStatus,
+        notes: 'Staff housing payroll settlement (Whole Unit Exclusive Blk D Unit 05).',
+        proofImageData: null,
+        physicalReceiptStatus: 'Issued' as PhysicalReceiptStatus,
+        physicalReceiptNo: 'HR-014',
+        receiptIssuedBy: email,
+        receiptIssuedAt: serverTimestamp(),
       },
     ];
 
     for (const p of samplePayments) {
       batch.set(doc(db, 'payments', p.paymentId), {
         ...p,
+        recordedBy: email,
+        recordedAt: serverTimestamp(),
         updatedBy: email,
         updatedAt: serverTimestamp(),
       });
@@ -901,5 +1567,374 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
     await batch.commit();
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'sample-seed');
+  }
+}
+
+const MAX_BATCH_OPERATIONS = 400;
+
+export interface BulkImportRoomItem {
+  roomId: string;
+  location: HostelLocation;
+  block: string;
+  unitNo: string;
+  bedSlot: string;
+  monthlyRate: number;
+  status: 'Vacant' | 'Maintenance';
+}
+
+export async function bulkImportRooms(
+  items: BulkImportRoomItem[],
+  staffEmail: string,
+  onProgress?: (completed: number, total: number) => void
+): Promise<{ importedCount: number }> {
+  const email = assertStaffEmail(staffEmail);
+  if (items.length === 0) return { importedCount: 0 };
+
+  let batch = writeBatch(db);
+  let opsInBatch = 0;
+  let completed = 0;
+
+  try {
+    for (const item of items) {
+      const roomId = sanitizeIdSegment(item.roomId).slice(0, FIELD_LIMITS.roomId.max);
+      batch.set(doc(db, 'rooms', roomId), {
+        roomId,
+        location: item.location,
+        block: item.block.trim().slice(0, FIELD_LIMITS.block.max),
+        unitNo: item.unitNo.trim().slice(0, FIELD_LIMITS.unitNo.max),
+        bedSlot: item.bedSlot.trim().slice(0, FIELD_LIMITS.bedSlot.max),
+        monthlyRate: clampNumber(
+          item.monthlyRate,
+          FIELD_LIMITS.monthlyRate.min,
+          FIELD_LIMITS.monthlyRate.max
+        ),
+        status: item.status,
+        currentStudentId: null,
+        currentStudentName: null,
+        statusNote: null,
+        exclusiveResidentId: null,
+        updatedBy: email,
+        updatedAt: serverTimestamp(),
+      });
+      opsInBatch += 1;
+      completed += 1;
+
+      if (opsInBatch >= MAX_BATCH_OPERATIONS) {
+        await batch.commit();
+        onProgress?.(completed, items.length);
+        batch = writeBatch(db);
+        opsInBatch = 0;
+      }
+    }
+
+    if (opsInBatch > 0) {
+      await batch.commit();
+      onProgress?.(completed, items.length);
+    }
+
+    return { importedCount: completed };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'rooms');
+  }
+}
+
+export interface BulkImportStudentItem {
+  studentId: string;
+  fullName: string;
+  phone: string;
+  emergencyContact: string;
+  program: ProgramType;
+  residentType: ResidentType;
+  occupancyMode: OccupancyMode;
+  assignedRoomId: string;
+  hostelLocation: HostelLocation;
+  checkInDate: string;
+  checkOutDate: string | null;
+  depositPaid: number;
+  standardRoomRate: number;
+  monthlyRebate: number;
+  rebateReason: string;
+  effectiveMonthlyFee: number;
+  firstMonthCharge: number;
+  firstMonthNote: string;
+  status: 'Active' | 'Checked-Out';
+}
+
+export async function bulkImportStudents(
+  items: BulkImportStudentItem[],
+  allRooms: Room[],
+  staffEmail: string,
+  onProgress?: (completed: number, total: number) => void
+): Promise<{ importedCount: number; occupiedCount: number; blockedCount: number }> {
+  const email = assertStaffEmail(staffEmail);
+  if (items.length === 0) {
+    return { importedCount: 0, occupiedCount: 0, blockedCount: 0 };
+  }
+
+  const roomById = new Map(allRooms.map((r) => [r.roomId, r]));
+  const claimedInImport = new Set<string>();
+
+  let batch = writeBatch(db);
+  let opsInBatch = 0;
+  let completed = 0;
+  let occupiedCount = 0;
+  let blockedCount = 0;
+
+  const flushBatchIfNeeded = async (neededOps: number) => {
+    if (opsInBatch > 0 && opsInBatch + neededOps > MAX_BATCH_OPERATIONS) {
+      await batch.commit();
+      onProgress?.(completed, items.length);
+      batch = writeBatch(db);
+      opsInBatch = 0;
+    }
+  };
+
+  try {
+    for (const item of items) {
+      const studentId = sanitizeIdSegment(item.studentId).slice(0, FIELD_LIMITS.studentId.max);
+      const fullName = item.fullName.trim().slice(0, FIELD_LIMITS.fullName.max);
+      const assignedRoom = roomById.get(item.assignedRoomId);
+
+      const siblingsToBlock =
+        item.status === 'Active' &&
+        item.occupancyMode === 'Whole Unit Exclusive' &&
+        assignedRoom
+          ? allRooms.filter(
+              (r) =>
+                r.roomId !== assignedRoom.roomId &&
+                r.location === assignedRoom.location &&
+                r.block === assignedRoom.block &&
+                r.unitNo === assignedRoom.unitNo &&
+                r.status === 'Vacant' &&
+                !claimedInImport.has(r.roomId)
+            )
+          : [];
+
+      const opsForThisResident =
+        1 + (item.status === 'Active' ? 1 + siblingsToBlock.length : 0);
+
+      await flushBatchIfNeeded(opsForThisResident);
+
+      batch.set(doc(db, 'students', studentId), {
+        studentId,
+        fullName,
+        residentType: item.residentType,
+        occupancyMode: item.occupancyMode,
+        phone: item.phone.trim().slice(0, FIELD_LIMITS.phone.max),
+        emergencyContact: item.emergencyContact
+          .trim()
+          .slice(0, FIELD_LIMITS.emergencyContact.max),
+        program: item.program,
+        assignedRoomId: item.assignedRoomId,
+        hostelLocation: item.hostelLocation,
+        checkInDate: item.checkInDate,
+        checkOutDate: item.status === 'Checked-Out' ? item.checkOutDate : null,
+        depositPaid: clampNumber(
+          item.depositPaid,
+          FIELD_LIMITS.depositPaid.min,
+          FIELD_LIMITS.depositPaid.max
+        ),
+        standardRoomRate: clampNumber(
+          item.standardRoomRate,
+          FIELD_LIMITS.monthlyFee.min,
+          FIELD_LIMITS.monthlyFee.max
+        ),
+        monthlyRebate: clampNumber(
+          item.monthlyRebate,
+          FIELD_LIMITS.monthlyFee.min,
+          FIELD_LIMITS.monthlyFee.max
+        ),
+        rebateReason: (item.rebateReason || 'None')
+          .trim()
+          .slice(0, FIELD_LIMITS.rebateReason.max),
+        effectiveMonthlyFee: clampNumber(
+          item.effectiveMonthlyFee,
+          FIELD_LIMITS.monthlyFee.min,
+          FIELD_LIMITS.monthlyFee.max
+        ),
+        monthlyFee: clampNumber(
+          item.effectiveMonthlyFee,
+          FIELD_LIMITS.monthlyFee.min,
+          FIELD_LIMITS.monthlyFee.max
+        ),
+        firstMonthCharge: clampNumber(
+          item.firstMonthCharge,
+          FIELD_LIMITS.monthlyFee.min,
+          FIELD_LIMITS.monthlyFee.max
+        ),
+        firstMonthNote: (item.firstMonthNote || 'Standard Full Month')
+          .trim()
+          .slice(0, 64),
+        status: item.status,
+        updatedBy: email,
+        updatedAt: serverTimestamp(),
+      });
+      opsInBatch += 1;
+
+      if (item.status === 'Active' && assignedRoom) {
+        claimedInImport.add(assignedRoom.roomId);
+        batch.update(doc(db, 'rooms', assignedRoom.roomId), {
+          status: 'Occupied',
+          currentStudentId: studentId,
+          currentStudentName: fullName,
+          statusNote: null,
+          exclusiveResidentId: null,
+          updatedBy: email,
+          updatedAt: serverTimestamp(),
+        });
+        opsInBatch += 1;
+        occupiedCount += 1;
+
+        const exclusiveNote = `Exclusive Unit: ${fullName}`.slice(
+          0,
+          FIELD_LIMITS.statusNote.max
+        );
+        for (const sib of siblingsToBlock) {
+          claimedInImport.add(sib.roomId);
+          batch.update(doc(db, 'rooms', sib.roomId), {
+            status: 'Reserved / Blocked',
+            currentStudentId: null,
+            currentStudentName: null,
+            statusNote: exclusiveNote,
+            exclusiveResidentId: studentId,
+            updatedBy: email,
+            updatedAt: serverTimestamp(),
+          });
+          opsInBatch += 1;
+          blockedCount += 1;
+        }
+      }
+
+      completed += 1;
+      if (opsInBatch >= MAX_BATCH_OPERATIONS) {
+        await batch.commit();
+        onProgress?.(completed, items.length);
+        batch = writeBatch(db);
+        opsInBatch = 0;
+      }
+    }
+
+    if (opsInBatch > 0) {
+      await batch.commit();
+      onProgress?.(completed, items.length);
+    }
+
+    return { importedCount: completed, occupiedCount, blockedCount };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'students');
+  }
+}
+
+export interface BulkImportPaymentItem {
+  student: Student;
+  billingMonth: string;
+  paymentType: PaymentType;
+  amount: number;
+  paymentMethod: PaymentMethod;
+  bankRefNo: string;
+  paymentDate: string;
+  status: PaymentStatus;
+  physicalReceiptStatus: PhysicalReceiptStatus;
+  physicalReceiptNo: string;
+  notes: string;
+}
+
+export async function bulkImportPayments(
+  items: BulkImportPaymentItem[],
+  existingPayments: Payment[],
+  staffEmail: string,
+  onProgress?: (completed: number, total: number) => void
+): Promise<{ importedCount: number }> {
+  const email = assertStaffEmail(staffEmail);
+  if (items.length === 0) return { importedCount: 0 };
+
+  // Track sequential receipt numbers per billingMonth across existing + newly imported rows
+  const maxSeqByMonth = new Map<string, number>();
+  for (const p of existingPayments) {
+    const r = p.receiptNo || p.paymentId;
+    const prefix = `GIS-${p.billingMonth.replace('-', '')}-`;
+    if (r.startsWith(prefix)) {
+      const seq = Number.parseInt(r.slice(prefix.length), 10);
+      if (!Number.isNaN(seq)) {
+        maxSeqByMonth.set(
+          p.billingMonth,
+          Math.max(maxSeqByMonth.get(p.billingMonth) ?? 0, seq)
+        );
+      }
+    }
+  }
+
+  let batch = writeBatch(db);
+  let opsInBatch = 0;
+  let completed = 0;
+
+  try {
+    for (let idx = 0; idx < items.length; idx++) {
+      const item = items[idx];
+      const ym = item.billingMonth.replace('-', '');
+      const prevSeq = maxSeqByMonth.get(item.billingMonth) ?? 0;
+      const nextSeq = prevSeq + 1;
+      maxSeqByMonth.set(item.billingMonth, nextSeq);
+      const receiptNo = `GIS-${ym}-${String(nextSeq).padStart(4, '0')}`;
+
+      const stamp = Date.now().toString(36).toUpperCase();
+      const rand = Math.random().toString(36).substring(2, 5).toUpperCase();
+      const paymentId = `PAY-${ym}-${stamp}${idx}${rand}`.slice(
+        0,
+        FIELD_LIMITS.paymentId.max
+      );
+      const bankRefNo = item.bankRefNo.trim().slice(0, FIELD_LIMITS.bankRefNo.max);
+      const isIssued = item.physicalReceiptStatus === 'Issued';
+
+      batch.set(doc(db, 'payments', paymentId), {
+        paymentId,
+        receiptNo,
+        studentId: item.student.studentId,
+        studentName: item.student.fullName.slice(0, FIELD_LIMITS.fullName.max),
+        roomId: item.student.assignedRoomId,
+        hostelLocation: item.student.hostelLocation,
+        billingMonth: item.billingMonth,
+        paymentType: item.paymentType,
+        amount: clampNumber(
+          item.amount,
+          FIELD_LIMITS.amount.min,
+          FIELD_LIMITS.amount.max
+        ),
+        paymentMethod: item.paymentMethod,
+        bankRefNo,
+        referenceNo: bankRefNo,
+        paymentDate: item.paymentDate,
+        status: item.status,
+        notes: item.notes.trim().slice(0, FIELD_LIMITS.notes.max),
+        proofImageData: null,
+        physicalReceiptStatus: item.physicalReceiptStatus,
+        physicalReceiptNo: item.physicalReceiptNo.trim().slice(0, 64),
+        receiptIssuedBy: isIssued ? email : null,
+        receiptIssuedAt: isIssued ? serverTimestamp() : null,
+        recordedBy: email,
+        recordedAt: serverTimestamp(),
+        updatedBy: email,
+        updatedAt: serverTimestamp(),
+      });
+
+      opsInBatch += 1;
+      completed += 1;
+
+      if (opsInBatch >= MAX_BATCH_OPERATIONS) {
+        await batch.commit();
+        onProgress?.(completed, items.length);
+        batch = writeBatch(db);
+        opsInBatch = 0;
+      }
+    }
+
+    if (opsInBatch > 0) {
+      await batch.commit();
+      onProgress?.(completed, items.length);
+    }
+
+    return { importedCount: completed };
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, 'payments');
   }
 }

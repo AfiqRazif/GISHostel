@@ -19,3 +19,9 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+@media print {
+  body {
+    background: #ffffff !important;
+  }
+}

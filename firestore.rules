@@ -35,6 +35,10 @@ service cloud.firestore {
       allow read, write: if isSignedIn();
     }
 
+    match /staff_users/{uid} {
+      allow read, write: if isSignedIn();
+    }
+
     match /test/connection {
       allow get: if isSignedIn();
       allow list, write: if false;

@@ -42,19 +42,29 @@
         },
         "status": {
           "type": "string",
-          "enum": ["Vacant", "Occupied", "Maintenance"],
+          "enum": ["Vacant", "Occupied", "Maintenance", "Reserved / Blocked"],
           "maxLength": 32,
-          "description": "Current occupancy or maintenance status"
+          "description": "Current occupancy, exclusive block, or maintenance status"
         },
         "currentStudentId": {
           "type": "string",
           "maxLength": 64,
-          "description": "Nullable Matrix or IC number of currently occupying student"
+          "description": "Nullable Matrix or IC number of currently occupying resident"
         },
         "currentStudentName": {
           "type": "string",
           "maxLength": 120,
-          "description": "Nullable full name of currently occupying student"
+          "description": "Nullable full name of currently occupying resident"
+        },
+        "statusNote": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Optional note such as Exclusive Unit resident attribution"
+        },
+        "exclusiveResidentId": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Nullable residentId who holds whole-unit exclusive lock on this bed"
         },
         "updatedBy": {
           "type": "string",
@@ -83,7 +93,7 @@
     },
     "Student": {
       "title": "Student",
-      "description": "A GIS Nilai student hostel resident record.",
+      "description": "A GIS Nilai hostel resident record (Student, Lecturer/Staff, or Guest).",
       "type": "object",
       "properties": {
         "studentId": {
@@ -91,19 +101,31 @@
           "minLength": 3,
           "maxLength": 64,
           "pattern": "^[a-zA-Z0-9_\\-]+$",
-          "description": "Primary identifier (Matrix or IC No.)"
+          "description": "Primary identifier (Matrix, Staff ID, or IC No.)"
         },
         "fullName": {
           "type": "string",
           "minLength": 2,
           "maxLength": 120,
-          "description": "Student full name"
+          "description": "Resident full name"
+        },
+        "residentType": {
+          "type": "string",
+          "enum": ["Student", "Lecturer / Staff", "Guest"],
+          "maxLength": 32,
+          "description": "Classification of hostel resident"
+        },
+        "occupancyMode": {
+          "type": "string",
+          "enum": ["Single Bed", "Whole Unit Exclusive"],
+          "maxLength": 32,
+          "description": "Single bed or whole-unit exclusive occupancy"
         },
         "phone": {
           "type": "string",
           "minLength": 6,
           "maxLength": 32,
-          "description": "Student contact phone number"
+          "description": "Resident contact phone number"
         },
         "emergencyContact": {
           "type": "string",
@@ -115,7 +137,7 @@
           "type": "string",
           "enum": ["Diploma", "SKM", "DiFFER", "Other"],
           "maxLength": 32,
-          "description": "Academic program"
+          "description": "Academic program or department"
         },
         "assignedRoomId": {
           "type": "string",
@@ -143,11 +165,37 @@
         },
         "depositPaid": {
           "type": "number",
-          "description": "Hostel deposit paid in RM"
+          "description": "Hostel security deposit paid in RM"
+        },
+        "standardRoomRate": {
+          "type": "number",
+          "description": "Standard room monthly rate in RM"
+        },
+        "monthlyRebate": {
+          "type": "number",
+          "description": "Recurring monthly rebate in RM"
+        },
+        "rebateReason": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Reason for monthly rebate"
+        },
+        "effectiveMonthlyFee": {
+          "type": "number",
+          "description": "Net monthly rent fee after rebate in RM"
         },
         "monthlyFee": {
           "type": "number",
-          "description": "Monthly rental fee in RM"
+          "description": "Net monthly rental fee in RM"
+        },
+        "firstMonthCharge": {
+          "type": "number",
+          "description": "First month prorated charge in RM (auto-halved after 15th unless edited)"
+        },
+        "firstMonthNote": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Note describing first month rate rule or leniency"
         },
         "status": {
           "type": "string",
@@ -169,6 +217,8 @@
       "required": [
         "studentId",
         "fullName",
+        "residentType",
+        "occupancyMode",
         "phone",
         "emergencyContact",
         "program",
@@ -177,6 +227,10 @@
         "checkInDate",
         "checkOutDate",
         "depositPaid",
+        "standardRoomRate",
+        "monthlyRebate",
+        "rebateReason",
+        "effectiveMonthlyFee",
         "monthlyFee",
         "status",
         "updatedBy",
@@ -185,7 +239,7 @@
     },
     "Payment": {
       "title": "Payment",
-      "description": "A hostel fee, deposit, or utility payment transaction.",
+      "description": "A hostel fee, deposit, rebate waiver, or refund transaction.",
       "type": "object",
       "properties": {
         "paymentId": {
@@ -193,7 +247,14 @@
           "minLength": 3,
           "maxLength": 64,
           "pattern": "^[a-zA-Z0-9_\\-]+$",
-          "description": "Unique payment receipt identifier"
+          "description": "Unique payment document identifier"
+        },
+        "receiptNo": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 32,
+          "pattern": "^[a-zA-Z0-9_\\-]+$",
+          "description": "Official receipt number formatted GIS-YYYYMM-XXXX"
         },
         "studentId": {
           "type": "string",
@@ -206,7 +267,7 @@
           "type": "string",
           "minLength": 2,
           "maxLength": 120,
-          "description": "Student full name at time of payment"
+          "description": "Resident full name at time of payment"
         },
         "roomId": {
           "type": "string",
@@ -229,9 +290,15 @@
         },
         "paymentType": {
           "type": "string",
-          "enum": ["Monthly Rent", "Hostel Deposit", "Utility / Misc", "Refund"],
-          "maxLength": 32,
-          "description": "Category of payment"
+          "enum": [
+            "Monthly Rent",
+            "Registration/Deposit",
+            "Utility/Penalty",
+            "Rebate / Fee Waiver",
+            "Deposit Refund"
+          ],
+          "maxLength": 48,
+          "description": "Category of transaction"
         },
         "amount": {
           "type": "number",
@@ -239,11 +306,17 @@
         },
         "paymentMethod": {
           "type": "string",
-          "enum": ["Online Transfer (FPX/DuitNow)", "Cash", "JomPAY", "Card"],
+          "enum": [
+            "DuitNow QR",
+            "Online Transfer",
+            "Cash",
+            "PTPTN/Sponsor",
+            "Internal Adjustment"
+          ],
           "maxLength": 48,
           "description": "Payment channel used"
         },
-        "referenceNo": {
+        "bankRefNo": {
           "type": "string",
           "maxLength": 64,
           "description": "Bank or receipt reference number"
@@ -265,6 +338,41 @@
           "maxLength": 240,
           "description": "Optional staff remarks"
         },
+        "proofImageData": {
+          "type": "string",
+          "description": "Compressed Base64 JPEG data URL of uploaded payment proof"
+        },
+        "physicalReceiptStatus": {
+          "type": "string",
+          "enum": ["Pending Issuance", "Issued"],
+          "maxLength": 32,
+          "description": "Physical receipt book issuance tracking status"
+        },
+        "physicalReceiptNo": {
+          "type": "string",
+          "maxLength": 64,
+          "description": "Optional physical receipt book serial number"
+        },
+        "receiptIssuedBy": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Email of staff member who issued the physical receipt"
+        },
+        "receiptIssuedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when physical receipt was issued"
+        },
+        "recordedBy": {
+          "type": "string",
+          "maxLength": 160,
+          "description": "Email of the staff member who recorded the payment"
+        },
+        "recordedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when payment was recorded"
+        },
         "updatedBy": {
           "type": "string",
           "maxLength": 160,
@@ -278,6 +386,7 @@
       },
       "required": [
         "paymentId",
+        "receiptNo",
         "studentId",
         "studentName",
         "roomId",
@@ -286,10 +395,12 @@
         "paymentType",
         "amount",
         "paymentMethod",
-        "referenceNo",
+        "bankRefNo",
         "paymentDate",
         "status",
         "notes",
+        "recordedBy",
+        "recordedAt",
         "updatedBy",
         "updatedAt"
       ]
@@ -326,6 +437,46 @@
         }
       },
       "required": ["uid", "email", "displayName", "role", "updatedAt"]
+    },
+    "StaffUser": {
+      "title": "StaffUser",
+      "description": "GIS hostel portal staff account managed by Master Admin.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "username": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "email": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 160
+        },
+        "fullName": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 120
+        },
+        "role": {
+          "type": "string",
+          "enum": ["Master Admin", "Admin", "Staff"],
+          "maxLength": 32
+        },
+        "active": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "username", "email", "fullName", "role", "active", "createdAt"]
     }
   },
   "firestore": {
@@ -335,15 +486,19 @@
     },
     "/students/{studentId}": {
       "schema": { "$ref": "#/entities/Student" },
-      "description": "GIS Nilai student residency records keyed by Matrix/IC studentId."
+      "description": "GIS Nilai hostel resident records keyed by Matrix/Staff/IC studentId."
     },
     "/payments/{paymentId}": {
       "schema": { "$ref": "#/entities/Payment" },
-      "description": "Hostel rent, deposit, and fee ledger records."
+      "description": "Hostel rent, deposit, rebate waiver, and refund ledger records."
     },
     "/staff/{uid}": {
       "schema": { "$ref": "#/entities/StaffProfile" },
       "description": "GIS staff profiles isolated per authenticated UID."
+    },
+    "/staff_users/{uid}": {
+      "schema": { "$ref": "#/entities/StaffUser" },
+      "description": "Managed GIS staff user accounts with Master Admin RBAC and active toggle."
     }
   }
 }

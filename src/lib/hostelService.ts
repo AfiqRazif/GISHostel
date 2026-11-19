@@ -21,12 +21,14 @@ import {
 import {
   buildRoomId,
   calculateFirstMonthDefaults,
+  calculateStudentBilling,
   DATE_REGEX,
   extractUsernameFromEmail,
   FIELD_LIMITS,
   generateBulkBedSlots,
   generateReceiptNumber,
   getCurrentMonthISO,
+  getNormalizedStayHistory,
   getTodayISO,
   HostelLocation,
   ID_REGEX,
@@ -39,15 +41,37 @@ import {
   PaymentType,
   PhysicalReceiptStatus,
   ProgramType,
+  ResidentHostelLocation,
   ResidentType,
   Room,
   RoomStatus,
   sanitizeIdSegment,
   StaffRole,
   StaffUser,
+  StayHistorySegment,
   Student,
   StudentStatus,
+  subtractOneDayISO,
 } from '../types/hostel';
+
+export { calculateStudentBilling };
+
+function createStaySegmentId(): string {
+  const stamp = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).substring(2, 6).toUpperCase();
+  return `SEG-${stamp}-${rand}`;
+}
+
+function computeClosedEndDate(startDate: string, effectiveTransferDate: string): string {
+  const dayBefore = subtractOneDayISO(effectiveTransferDate);
+  if (
+    startDate.slice(0, 7) === effectiveTransferDate.slice(0, 7) ||
+    dayBefore < startDate
+  ) {
+    return effectiveTransferDate;
+  }
+  return dayBefore;
+}
 
 function assertStaffEmail(staffEmail: string): string {
   const email = staffEmail.trim();
@@ -461,12 +485,24 @@ export async function updateRoomDetails(
       const studentRef = doc(db, 'students', room.currentStudentId);
       const studentSnap = await getDoc(studentRef);
       if (studentSnap.exists()) {
-        batch.update(studentRef, {
+        const sData = studentSnap.data() as Student;
+        const existingHistory = Array.isArray(sData.stayHistory)
+          ? sData.stayHistory.map((seg) =>
+              !seg.endDate && seg.roomId === room.roomId
+                ? { ...seg, roomId: nextRoomId, hostelLocation: input.location }
+                : seg
+            )
+          : undefined;
+        const studentUpdate: Record<string, unknown> = {
           assignedRoomId: nextRoomId,
           hostelLocation: input.location,
           updatedBy: email,
           updatedAt: serverTimestamp(),
-        });
+        };
+        if (existingHistory) {
+          studentUpdate.stayHistory = existingHistory;
+        }
+        batch.update(studentRef, studentUpdate);
       }
     }
 
@@ -641,6 +677,25 @@ export async function registerStudent(
       }
     }
 
+    const initialSegment: StayHistorySegment = {
+      id: createStaySegmentId(),
+      roomId: selectedRoom.roomId,
+      hostelLocation: selectedRoom.location,
+      occupancyMode: input.occupancyMode,
+      startDate: input.checkInDate,
+      endDate: input.status === 'Checked-Out' ? input.checkOutDate : null,
+      standardRoomRate,
+      monthlyRebate,
+      effectiveMonthlyFee,
+      firstMonthCharge,
+      reason:
+        input.status === 'Checked-Out'
+          ? 'Historical Record Import'
+          : 'Initial Check-In',
+      recordedBy: email,
+      recordedAt: new Date().toISOString(),
+    };
+
     batch.set(studentRef, {
       studentId,
       fullName,
@@ -661,6 +716,7 @@ export async function registerStudent(
       monthlyFee: effectiveMonthlyFee,
       firstMonthCharge,
       firstMonthNote,
+      stayHistory: [initialSegment],
       status: input.status,
       updatedBy: email,
       updatedAt: serverTimestamp(),
@@ -749,9 +805,6 @@ export async function updateStudentRecord(
   if (fullName.length < FIELD_LIMITS.fullName.min) {
     throw new Error('Full Name must be at least 2 characters.');
   }
-  if (phone.length < FIELD_LIMITS.phone.min || emergencyContact.length < FIELD_LIMITS.emergencyContact.min) {
-    throw new Error('Phone and Emergency Contact must each be at least 6 characters.');
-  }
   if (!DATE_REGEX.test(input.checkInDate)) {
     throw new Error('Check-In Date must be in YYYY-MM-DD format.');
   }
@@ -818,27 +871,46 @@ export async function updateStudentRecord(
   };
 
   try {
-    const currentRoomObj = allRooms.find(
-      (r) => r.roomId === currentStudent.assignedRoomId
-    );
+    const existingStayHistory: StayHistorySegment[] =
+      Array.isArray(currentStudent.stayHistory) && currentStudent.stayHistory.length > 0
+        ? currentStudent.stayHistory.map((seg) => ({ ...seg }))
+        : currentStudent.assignedRoomId
+          ? getNormalizedStayHistory(currentStudent)
+          : [];
+
+    const currentRoomObj = currentStudent.assignedRoomId
+      ? allRooms.find((r) => r.roomId === currentStudent.assignedRoomId)
+      : undefined;
 
     if (currentStudent.status !== 'Checked-Out' && input.status === 'Checked-Out') {
-      const assignedRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
-      const roomSnap = await getDoc(assignedRoomRef);
+      if (currentStudent.assignedRoomId) {
+        const assignedRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
+        const roomSnap = await getDoc(assignedRoomRef);
 
-      if (roomSnap.exists() && roomSnap.data()?.currentStudentId === currentStudent.studentId) {
-        batch.update(assignedRoomRef, {
-          status: 'Vacant',
-          currentStudentId: null,
-          currentStudentName: null,
-          statusNote: null,
-          exclusiveResidentId: null,
-          updatedBy: email,
-          updatedAt: serverTimestamp(),
-        });
+        if (roomSnap.exists() && roomSnap.data()?.currentStudentId === currentStudent.studentId) {
+          batch.update(assignedRoomRef, {
+            status: 'Vacant',
+            currentStudentId: null,
+            currentStudentName: null,
+            statusNote: null,
+            exclusiveResidentId: null,
+            updatedBy: email,
+            updatedAt: serverTimestamp(),
+          });
+        }
       }
 
       releaseUnitExclusiveBlocks(currentRoomObj);
+
+      const closedHistory = existingStayHistory.map((seg, idx) => {
+        if (!seg.endDate || idx === existingStayHistory.length - 1) {
+          return {
+            ...seg,
+            endDate: seg.endDate || input.checkOutDate,
+          };
+        }
+        return seg;
+      });
 
       batch.update(studentRef, {
         fullName,
@@ -858,6 +930,7 @@ export async function updateStudentRecord(
         monthlyFee: effectiveMonthlyFee,
         firstMonthCharge,
         firstMonthNote,
+        stayHistory: closedHistory,
         updatedBy: email,
         updatedAt: serverTimestamp(),
       });
@@ -890,6 +963,29 @@ export async function updateStudentRecord(
         await applyUnitExclusiveBlocks(input.newRoom);
       }
 
+      const lastSeg = existingStayHistory[existingStayHistory.length - 1];
+      const restartDate =
+        lastSeg?.endDate && input.checkInDate <= lastSeg.endDate
+          ? getTodayISO()
+          : input.checkInDate;
+      const recheckSegment: StayHistorySegment = {
+        id: createStaySegmentId(),
+        roomId: input.newRoom.roomId,
+        hostelLocation: input.newRoom.location,
+        occupancyMode: input.occupancyMode,
+        startDate: restartDate,
+        endDate: null,
+        standardRoomRate,
+        monthlyRebate,
+        effectiveMonthlyFee,
+        reason: 'Re-Check-In',
+        recordedBy: email,
+        recordedAt: new Date().toISOString(),
+      };
+      if (existingStayHistory.length === 0) {
+        recheckSegment.firstMonthCharge = firstMonthCharge;
+      }
+
       batch.update(studentRef, {
         fullName,
         residentType: input.residentType,
@@ -910,6 +1006,7 @@ export async function updateStudentRecord(
         monthlyFee: effectiveMonthlyFee,
         firstMonthCharge,
         firstMonthNote,
+        stayHistory: [...existingStayHistory, recheckSegment],
         updatedBy: email,
         updatedAt: serverTimestamp(),
       });
@@ -919,28 +1016,36 @@ export async function updateStudentRecord(
 
     let targetRoomId = currentStudent.assignedRoomId;
     let targetLocation = currentStudent.hostelLocation;
+    let nextStayHistory = existingStayHistory;
 
     if (input.status !== 'Checked-Out') {
       if (input.newRoom && input.newRoom.roomId !== currentStudent.assignedRoomId) {
         if (input.newRoom.status !== 'Vacant') {
-          throw new Error('Target room must be Vacant for a room transfer.');
+          throw new Error('Target room must be Vacant for a room assignment.');
         }
-        const oldRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
-        const oldSnap = await getDoc(oldRoomRef);
-        if (oldSnap.exists() && oldSnap.data()?.currentStudentId === currentStudent.studentId) {
-          batch.update(oldRoomRef, {
-            status: 'Vacant',
-            currentStudentId: null,
-            currentStudentName: null,
-            statusNote: null,
-            exclusiveResidentId: null,
-            updatedBy: email,
-            updatedAt: serverTimestamp(),
-          });
+        const newRoomRef = doc(db, 'rooms', input.newRoom.roomId);
+        const freshNewRoom = await getDoc(newRoomRef);
+        if (!freshNewRoom.exists() || freshNewRoom.data()?.status !== 'Vacant') {
+          throw new Error(`Room "${input.newRoom.roomId}" is no longer Vacant.`);
+        }
+
+        if (currentStudent.assignedRoomId) {
+          const oldRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
+          const oldSnap = await getDoc(oldRoomRef);
+          if (oldSnap.exists() && oldSnap.data()?.currentStudentId === currentStudent.studentId) {
+            batch.update(oldRoomRef, {
+              status: 'Vacant',
+              currentStudentId: null,
+              currentStudentName: null,
+              statusNote: null,
+              exclusiveResidentId: null,
+              updatedBy: email,
+              updatedAt: serverTimestamp(),
+            });
+          }
         }
         releaseUnitExclusiveBlocks(currentRoomObj);
 
-        const newRoomRef = doc(db, 'rooms', input.newRoom.roomId);
         batch.update(newRoomRef, {
           status: 'Occupied',
           currentStudentId: currentStudent.studentId,
@@ -957,6 +1062,54 @@ export async function updateStudentRecord(
 
         targetRoomId = input.newRoom.roomId;
         targetLocation = input.newRoom.location;
+
+        if (!currentStudent.assignedRoomId && existingStayHistory.length === 0) {
+          nextStayHistory = [
+            {
+              id: createStaySegmentId(),
+              roomId: input.newRoom.roomId,
+              hostelLocation: input.newRoom.location,
+              occupancyMode: input.occupancyMode,
+              startDate: input.checkInDate,
+              endDate: null,
+              standardRoomRate,
+              monthlyRebate,
+              effectiveMonthlyFee,
+              firstMonthCharge,
+              reason: 'Initial Room Assignment',
+              recordedBy: email,
+              recordedAt: new Date().toISOString(),
+            },
+          ];
+        } else {
+          const today = getTodayISO();
+          const closedPrev = existingStayHistory.map((seg, idx) => {
+            if (!seg.endDate || idx === existingStayHistory.length - 1) {
+              return {
+                ...seg,
+                endDate: seg.endDate || computeClosedEndDate(seg.startDate, today),
+              };
+            }
+            return seg;
+          });
+          nextStayHistory = [
+            ...closedPrev,
+            {
+              id: createStaySegmentId(),
+              roomId: input.newRoom.roomId,
+              hostelLocation: input.newRoom.location,
+              occupancyMode: input.occupancyMode,
+              startDate: today,
+              endDate: null,
+              standardRoomRate,
+              monthlyRebate,
+              effectiveMonthlyFee,
+              reason: 'Room Transfer (Profile Edit)',
+              recordedBy: email,
+              recordedAt: new Date().toISOString(),
+            },
+          ];
+        }
       } else if (currentRoomObj) {
         if (currentRoomObj.currentStudentId === currentStudent.studentId) {
           batch.update(doc(db, 'rooms', currentRoomObj.roomId), {
@@ -986,6 +1139,25 @@ export async function updateStudentRecord(
         } else {
           releaseUnitExclusiveBlocks(currentRoomObj);
         }
+
+        if (nextStayHistory.length > 0) {
+          const lastIdx = nextStayHistory.length - 1;
+          nextStayHistory = nextStayHistory.map((seg, idx) => {
+            if (idx !== lastIdx || seg.endDate) return seg;
+            const updatedSeg: StayHistorySegment = {
+              ...seg,
+              occupancyMode: input.occupancyMode,
+              standardRoomRate,
+              monthlyRebate,
+              effectiveMonthlyFee,
+              startDate: idx === 0 ? input.checkInDate : seg.startDate,
+            };
+            if (idx === 0) {
+              updatedSeg.firstMonthCharge = firstMonthCharge;
+            }
+            return updatedSeg;
+          });
+        }
       }
     }
 
@@ -1009,6 +1181,7 @@ export async function updateStudentRecord(
       monthlyFee: effectiveMonthlyFee,
       firstMonthCharge,
       firstMonthNote,
+      stayHistory: nextStayHistory,
       updatedBy: email,
       updatedAt: serverTimestamp(),
     });
@@ -1018,6 +1191,250 @@ export async function updateStudentRecord(
     if (
       error instanceof Error &&
       (error.message.includes('Vacant') || error.message.includes('Check-Out'))
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, `students/${currentStudent.studentId}`);
+  }
+}
+
+export interface TransferStudentRoomInput {
+  effectiveTransferDate: string;
+  newRoom: Room;
+  newOccupancyMode: OccupancyMode;
+  newStandardRate: number;
+  keepExistingRebate: boolean;
+  newMonthlyRebate: number;
+  newRebateReason: string;
+  transferReason: string;
+}
+
+export async function transferStudentRoom(
+  currentStudent: Student,
+  input: TransferStudentRoomInput,
+  allRooms: Room[],
+  staffEmail: string
+): Promise<{ blockedSiblings: string[]; releasedRoomId: string | null }> {
+  const email = assertStaffEmail(staffEmail);
+
+  if (currentStudent.status !== 'Active') {
+    throw new Error('Only Active residents can be transferred to another room.');
+  }
+  if (!DATE_REGEX.test(input.effectiveTransferDate)) {
+    throw new Error('Effective Transfer Date must be in YYYY-MM-DD format.');
+  }
+  if (
+    DATE_REGEX.test(currentStudent.checkInDate) &&
+    input.effectiveTransferDate < currentStudent.checkInDate
+  ) {
+    throw new Error('Transfer date cannot be earlier than the resident check-in date.');
+  }
+  if (input.newRoom.roomId === currentStudent.assignedRoomId) {
+    throw new Error('Please choose a different Vacant bed to transfer this resident.');
+  }
+  if (input.newRoom.status !== 'Vacant') {
+    throw new Error(`Target room "${input.newRoom.roomId}" is not Vacant.`);
+  }
+
+  const newStandardRate = clampNumber(
+    input.newStandardRate,
+    FIELD_LIMITS.monthlyFee.min,
+    FIELD_LIMITS.monthlyFee.max
+  );
+  const baseExistingRebate =
+    typeof currentStudent.monthlyRebate === 'number'
+      ? currentStudent.monthlyRebate
+      : 0;
+  const newMonthlyRebate = clampNumber(
+    input.keepExistingRebate ? baseExistingRebate : input.newMonthlyRebate,
+    FIELD_LIMITS.monthlyFee.min,
+    FIELD_LIMITS.monthlyFee.max
+  );
+  const newEffectiveMonthlyFee = Math.max(
+    0,
+    Math.round((newStandardRate - newMonthlyRebate) * 100) / 100
+  );
+  const newRebateReason = (
+    input.keepExistingRebate
+      ? currentStudent.rebateReason || 'None'
+      : input.newRebateReason || 'None'
+  )
+    .trim()
+    .slice(0, FIELD_LIMITS.rebateReason.max);
+  const transferReason = (input.transferReason || 'Student Request')
+    .trim()
+    .slice(0, 120);
+
+  const studentRef = doc(db, 'students', currentStudent.studentId);
+  const newRoomRef = doc(db, 'rooms', input.newRoom.roomId);
+  const blockedSiblings: string[] = [];
+
+  try {
+    const freshNewRoom = await getDoc(newRoomRef);
+    if (!freshNewRoom.exists() || freshNewRoom.data()?.status !== 'Vacant') {
+      throw new Error(`Room "${input.newRoom.roomId}" is no longer Vacant.`);
+    }
+
+    const batch = writeBatch(db);
+    const currentRoomObj = currentStudent.assignedRoomId
+      ? allRooms.find((r) => r.roomId === currentStudent.assignedRoomId)
+      : undefined;
+
+    if (currentStudent.assignedRoomId) {
+      const oldRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
+      const oldSnap = await getDoc(oldRoomRef);
+      if (
+        oldSnap.exists() &&
+        oldSnap.data()?.currentStudentId === currentStudent.studentId
+      ) {
+        batch.update(oldRoomRef, {
+          status: 'Vacant',
+          currentStudentId: null,
+          currentStudentName: null,
+          statusNote: null,
+          exclusiveResidentId: null,
+          updatedBy: email,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    // Release any old unit-exclusive blocks held by this resident
+    for (const r of allRooms) {
+      if (r.status !== 'Reserved / Blocked') continue;
+      const matchesResident = r.exclusiveResidentId === currentStudent.studentId;
+      const matchesOldUnit =
+        currentRoomObj &&
+        r.location === currentRoomObj.location &&
+        r.block === currentRoomObj.block &&
+        r.unitNo === currentRoomObj.unitNo;
+      if (matchesResident || matchesOldUnit) {
+        batch.update(doc(db, 'rooms', r.roomId), {
+          status: 'Vacant',
+          currentStudentId: null,
+          currentStudentName: null,
+          statusNote: null,
+          exclusiveResidentId: null,
+          updatedBy: email,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    // Lock the newly selected room as Occupied
+    batch.update(newRoomRef, {
+      status: 'Occupied',
+      currentStudentId: currentStudent.studentId,
+      currentStudentName: currentStudent.fullName,
+      statusNote: null,
+      exclusiveResidentId: null,
+      updatedBy: email,
+      updatedAt: serverTimestamp(),
+    });
+
+    // Lock sibling vacant beds if Whole Unit Exclusive
+    if (input.newOccupancyMode === 'Whole Unit Exclusive') {
+      const exclusiveNote = `Exclusive Unit: ${currentStudent.fullName}`.slice(
+        0,
+        FIELD_LIMITS.statusNote.max
+      );
+      const siblings = allRooms.filter(
+        (r) =>
+          r.roomId !== input.newRoom.roomId &&
+          r.location === input.newRoom.location &&
+          r.block === input.newRoom.block &&
+          r.unitNo === input.newRoom.unitNo &&
+          r.status === 'Vacant'
+      );
+      for (const sib of siblings) {
+        const sibRef = doc(db, 'rooms', sib.roomId);
+        const sibSnap = await getDoc(sibRef);
+        if (sibSnap.exists() && sibSnap.data()?.status === 'Vacant') {
+          batch.update(sibRef, {
+            status: 'Reserved / Blocked',
+            currentStudentId: null,
+            currentStudentName: null,
+            statusNote: exclusiveNote,
+            exclusiveResidentId: currentStudent.studentId,
+            updatedBy: email,
+            updatedAt: serverTimestamp(),
+          });
+          blockedSiblings.push(sib.roomId);
+        }
+      }
+    }
+
+    const existingStayHistory: StayHistorySegment[] =
+      Array.isArray(currentStudent.stayHistory) && currentStudent.stayHistory.length > 0
+        ? currentStudent.stayHistory.map((seg) => ({ ...seg }))
+        : currentStudent.assignedRoomId
+          ? getNormalizedStayHistory(currentStudent)
+          : [];
+
+    const closedHistory: StayHistorySegment[] = existingStayHistory.map((seg, idx) => {
+      if (!seg.endDate || idx === existingStayHistory.length - 1) {
+        return {
+          ...seg,
+          endDate:
+            seg.endDate ||
+            computeClosedEndDate(seg.startDate, input.effectiveTransferDate),
+        };
+      }
+      return seg;
+    });
+
+    const isFirstAssignedSegment = closedHistory.length === 0;
+    const newSegment: StayHistorySegment = {
+      id: createStaySegmentId(),
+      roomId: input.newRoom.roomId,
+      hostelLocation: input.newRoom.location,
+      occupancyMode: input.newOccupancyMode,
+      startDate: isFirstAssignedSegment
+        ? currentStudent.checkInDate || input.effectiveTransferDate
+        : input.effectiveTransferDate,
+      endDate: null,
+      standardRoomRate: newStandardRate,
+      monthlyRebate: newMonthlyRebate,
+      effectiveMonthlyFee: newEffectiveMonthlyFee,
+      reason: isFirstAssignedSegment ? 'Initial Room Assignment' : transferReason,
+      recordedBy: email,
+      recordedAt: new Date().toISOString(),
+    };
+    if (isFirstAssignedSegment) {
+      newSegment.firstMonthCharge =
+        typeof currentStudent.firstMonthCharge === 'number'
+          ? currentStudent.firstMonthCharge
+          : calculateFirstMonthDefaults(
+              newSegment.startDate,
+              newEffectiveMonthlyFee
+            ).firstMonthCharge;
+    }
+
+    batch.update(studentRef, {
+      assignedRoomId: input.newRoom.roomId,
+      hostelLocation: input.newRoom.location,
+      occupancyMode: input.newOccupancyMode,
+      standardRoomRate: newStandardRate,
+      monthlyRebate: newMonthlyRebate,
+      rebateReason: newRebateReason,
+      effectiveMonthlyFee: newEffectiveMonthlyFee,
+      monthlyFee: newEffectiveMonthlyFee,
+      stayHistory: [...closedHistory, newSegment],
+      updatedBy: email,
+      updatedAt: serverTimestamp(),
+    });
+
+    await batch.commit();
+    return {
+      blockedSiblings,
+      releasedRoomId: currentStudent.assignedRoomId || null,
+    };
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('Vacant') ||
+        error.message.includes('Transfer') ||
+        error.message.includes('Active'))
     ) {
       throw error;
     }
@@ -1411,9 +1828,29 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       }
     }
 
+    const seedIso = new Date().toISOString();
     for (const st of sampleStudents) {
+      const initialSegment: StayHistorySegment = {
+        id: `SEG-SEED-${st.studentId}`,
+        roomId: st.assignedRoomId,
+        hostelLocation: st.hostelLocation,
+        occupancyMode: st.occupancyMode,
+        startDate: st.checkInDate,
+        endDate: st.status === 'Checked-Out' ? st.checkOutDate : null,
+        standardRoomRate: st.standardRoomRate,
+        monthlyRebate: st.monthlyRebate,
+        effectiveMonthlyFee: st.effectiveMonthlyFee,
+        firstMonthCharge: st.firstMonthCharge,
+        reason:
+          st.status === 'Checked-Out'
+            ? 'Historical Record Import'
+            : 'Initial Check-In',
+        recordedBy: email,
+        recordedAt: seedIso,
+      };
       batch.set(doc(db, 'students', st.studentId), {
         ...st,
+        stayHistory: [initialSegment],
         updatedBy: email,
         updatedAt: serverTimestamp(),
       });
@@ -1647,7 +2084,7 @@ export interface BulkImportStudentItem {
   residentType: ResidentType;
   occupancyMode: OccupancyMode;
   assignedRoomId: string;
-  hostelLocation: HostelLocation;
+  hostelLocation: ResidentHostelLocation;
   checkInDate: string;
   checkOutDate: string | null;
   depositPaid: number;
@@ -1693,7 +2130,9 @@ export async function bulkImportStudents(
     for (const item of items) {
       const studentId = sanitizeIdSegment(item.studentId).slice(0, FIELD_LIMITS.studentId.max);
       const fullName = item.fullName.trim().slice(0, FIELD_LIMITS.fullName.max);
-      const assignedRoom = roomById.get(item.assignedRoomId);
+      const assignedRoom = item.assignedRoomId
+        ? roomById.get(item.assignedRoomId)
+        : undefined;
 
       const siblingsToBlock =
         item.status === 'Active' &&
@@ -1711,9 +2150,53 @@ export async function bulkImportStudents(
           : [];
 
       const opsForThisResident =
-        1 + (item.status === 'Active' ? 1 + siblingsToBlock.length : 0);
+        1 + (item.status === 'Active' && assignedRoom ? 1 + siblingsToBlock.length : 0);
 
       await flushBatchIfNeeded(opsForThisResident);
+
+      const clampedStdRate = clampNumber(
+        item.standardRoomRate,
+        FIELD_LIMITS.monthlyFee.min,
+        FIELD_LIMITS.monthlyFee.max
+      );
+      const clampedRebate = clampNumber(
+        item.monthlyRebate,
+        FIELD_LIMITS.monthlyFee.min,
+        FIELD_LIMITS.monthlyFee.max
+      );
+      const clampedEffFee = clampNumber(
+        item.effectiveMonthlyFee,
+        FIELD_LIMITS.monthlyFee.min,
+        FIELD_LIMITS.monthlyFee.max
+      );
+      const clampedFirstCharge = clampNumber(
+        item.firstMonthCharge,
+        FIELD_LIMITS.monthlyFee.min,
+        FIELD_LIMITS.monthlyFee.max
+      );
+
+      const initialStayHistory: StayHistorySegment[] = item.assignedRoomId
+        ? [
+            {
+              id: createStaySegmentId(),
+              roomId: item.assignedRoomId,
+              hostelLocation: item.hostelLocation,
+              occupancyMode: item.occupancyMode,
+              startDate: item.checkInDate,
+              endDate: item.status === 'Checked-Out' ? item.checkOutDate : null,
+              standardRoomRate: clampedStdRate,
+              monthlyRebate: clampedRebate,
+              effectiveMonthlyFee: clampedEffFee,
+              firstMonthCharge: clampedFirstCharge,
+              reason:
+                item.status === 'Checked-Out'
+                  ? 'Bulk Import Historical Stay'
+                  : 'Bulk Import Check-In',
+              recordedBy: email,
+              recordedAt: new Date().toISOString(),
+            },
+          ]
+        : [];
 
       batch.set(doc(db, 'students', studentId), {
         studentId,
@@ -1734,37 +2217,18 @@ export async function bulkImportStudents(
           FIELD_LIMITS.depositPaid.min,
           FIELD_LIMITS.depositPaid.max
         ),
-        standardRoomRate: clampNumber(
-          item.standardRoomRate,
-          FIELD_LIMITS.monthlyFee.min,
-          FIELD_LIMITS.monthlyFee.max
-        ),
-        monthlyRebate: clampNumber(
-          item.monthlyRebate,
-          FIELD_LIMITS.monthlyFee.min,
-          FIELD_LIMITS.monthlyFee.max
-        ),
+        standardRoomRate: clampedStdRate,
+        monthlyRebate: clampedRebate,
         rebateReason: (item.rebateReason || 'None')
           .trim()
           .slice(0, FIELD_LIMITS.rebateReason.max),
-        effectiveMonthlyFee: clampNumber(
-          item.effectiveMonthlyFee,
-          FIELD_LIMITS.monthlyFee.min,
-          FIELD_LIMITS.monthlyFee.max
-        ),
-        monthlyFee: clampNumber(
-          item.effectiveMonthlyFee,
-          FIELD_LIMITS.monthlyFee.min,
-          FIELD_LIMITS.monthlyFee.max
-        ),
-        firstMonthCharge: clampNumber(
-          item.firstMonthCharge,
-          FIELD_LIMITS.monthlyFee.min,
-          FIELD_LIMITS.monthlyFee.max
-        ),
+        effectiveMonthlyFee: clampedEffFee,
+        monthlyFee: clampedEffFee,
+        firstMonthCharge: clampedFirstCharge,
         firstMonthNote: (item.firstMonthNote || 'Standard Full Month')
           .trim()
           .slice(0, 64),
+        stayHistory: initialStayHistory,
         status: item.status,
         updatedBy: email,
         updatedAt: serverTimestamp(),

@@ -33,6 +33,7 @@ import {
   PROGRAMS,
   ProgramType,
   RESIDENT_TYPES,
+  ResidentHostelLocation,
   ResidentType,
   Room,
   sanitizeIdSegment,
@@ -242,6 +243,15 @@ function matchLocation(raw: string): HostelLocation | null {
   return matchEnum(raw, HOSTEL_LOCATIONS);
 }
 
+function matchResidentLocation(raw: string): ResidentHostelLocation | null {
+  const clean = raw.trim().toLowerCase();
+  if (!clean) return null;
+  if (clean === 'unassigned' || clean === 'none' || clean === '-') {
+    return 'Unassigned';
+  }
+  return matchLocation(raw);
+}
+
 function downloadTemplateWorkbook(type: BulkImportType) {
   let filename = '';
   let sheetName = '';
@@ -321,6 +331,25 @@ function downloadTemplateWorkbook(type: BulkImportType) {
         firstMonthCharge: '',
         status: 'Checked-Out',
       },
+      {
+        studentId: 'GIS260015',
+        fullName: 'Farahiyah binti Azman',
+        phone: '',
+        emergencyContact: '',
+        program: 'Diploma',
+        residentType: 'Student',
+        occupancyMode: 'Single Bed',
+        assignedRoomId: '',
+        hostelLocation: '',
+        checkInDate: '',
+        checkOutDate: '',
+        depositPaid: 250,
+        standardRoomRate: 250,
+        monthlyRebate: 0,
+        rebateReason: 'None',
+        firstMonthCharge: '',
+        status: 'Active',
+      },
     ];
   } else {
     filename = 'gis-payments-import-template.xlsx';
@@ -370,7 +399,7 @@ const MODAL_META: Record<
   students: {
     title: 'Bulk Import Residents (.xlsx / .csv)',
     subtitle:
-      'Import Active residents (automatically marks beds Occupied / Whole-Unit Blocked) or Checked-Out historical residents.',
+      'Only studentId and fullName are required. Leave assignedRoomId blank to import Active residents as Room Unassigned for later bed allocation.',
     noun: 'residents',
   },
   payments: {
@@ -519,9 +548,11 @@ export function BulkImportModal({
         const rawLocation = trimCell(
           getCell(raw, 'hostelLocation', 'location', 'Hostel Location')
         );
-        const checkInDate = normalizeExcelDate(
-          getCell(raw, 'checkInDate', 'Check-In Date')
-        );
+        const rawCheckIn = getCell(raw, 'checkInDate', 'Check-In Date');
+        const checkInDate =
+          trimCell(rawCheckIn) === ''
+            ? getTodayISO()
+            : normalizeExcelDate(rawCheckIn);
         const rawCheckOut = getCell(raw, 'checkOutDate', 'Check-Out Date');
         const checkOutDate = normalizeExcelDate(rawCheckOut);
         const rawStatus =
@@ -556,12 +587,6 @@ export function BulkImportModal({
         if (fullName.length < FIELD_LIMITS.fullName.min) {
           errors.push('fullName must be at least 2 characters');
         }
-        if (phone.length < FIELD_LIMITS.phone.min) {
-          errors.push('phone must be at least 6 characters');
-        }
-        if (emergencyContact.length < FIELD_LIMITS.emergencyContact.min) {
-          errors.push('emergencyContact must be at least 6 characters');
-        }
 
         const residentTypeNorm =
           rawResidentType.toLowerCase() === 'lecturer' ||
@@ -592,31 +617,42 @@ export function BulkImportModal({
         }
 
         const room = assignedRoomId ? roomById.get(assignedRoomId) : undefined;
-        if (!assignedRoomId) {
-          errors.push('assignedRoomId is required');
-        } else if (!room) {
-          errors.push(`Room ID ${assignedRoomId} not found`);
-        } else if (status === 'Active') {
-          if (room.status !== 'Vacant') {
-            errors.push(`Room ${room.roomId} is ${room.status} (must be Vacant)`);
-          } else if (claimedRoomsInFile.has(room.roomId)) {
-            errors.push(
-              `Room ${room.roomId} already claimed/blocked by an earlier row in this file`
-            );
+        if (assignedRoomId) {
+          if (!room) {
+            errors.push(`Room ID ${assignedRoomId} not found`);
+          } else if (status === 'Active') {
+            if (room.status !== 'Vacant') {
+              errors.push(`Room ${room.roomId} is ${room.status} (must be Vacant)`);
+            } else if (claimedRoomsInFile.has(room.roomId)) {
+              errors.push(
+                `Room ${room.roomId} already claimed/blocked by an earlier row in this file`
+              );
+            }
           }
         }
 
-        let hostelLocation: HostelLocation | null = room ? room.location : null;
+        let hostelLocation: ResidentHostelLocation | null = room
+          ? room.location
+          : 'Unassigned';
         if (rawLocation) {
-          const parsedLoc = matchLocation(rawLocation);
-          if (!parsedLoc) {
-            errors.push(`Invalid hostelLocation "${rawLocation}"`);
-          } else if (room && parsedLoc !== room.location) {
-            errors.push(
-              `hostelLocation (${parsedLoc}) mismatches room ${room.roomId} (${room.location})`
-            );
+          if (room) {
+            const parsedLoc = matchLocation(rawLocation);
+            if (!parsedLoc) {
+              errors.push(`Invalid hostelLocation "${rawLocation}"`);
+            } else if (parsedLoc !== room.location) {
+              errors.push(
+                `hostelLocation (${parsedLoc}) mismatches room ${room.roomId} (${room.location})`
+              );
+            } else {
+              hostelLocation = parsedLoc;
+            }
           } else {
-            hostelLocation = parsedLoc;
+            const parsedResLoc = matchResidentLocation(rawLocation);
+            if (!parsedResLoc) {
+              errors.push(`Invalid hostelLocation "${rawLocation}"`);
+            } else {
+              hostelLocation = parsedResLoc;
+            }
           }
         }
 
@@ -641,7 +677,7 @@ export function BulkImportModal({
 
         const standardRoomRate =
           trimCell(stdRateRaw) === ''
-            ? room?.monthlyRate ?? 0
+            ? room?.monthlyRate ?? 250
             : parseNumberCell(stdRateRaw);
         if (
           standardRoomRate === null ||
@@ -690,9 +726,9 @@ export function BulkImportModal({
         }
 
         const valid = errors.length === 0;
-        if (valid && studentId && room) {
+        if (valid && studentId) {
           seenStudentIds.add(studentId);
-          if (status === 'Active') {
+          if (room && status === 'Active') {
             claimedRoomsInFile.add(room.roomId);
             if (occupancyMode === 'Whole Unit Exclusive') {
               for (const sib of rooms) {
@@ -715,14 +751,13 @@ export function BulkImportModal({
           valid,
           errors,
           summaryLabel: `${studentId || rawStudentId || '(missing ID)'} · ${fullName || 'Unnamed'}`,
-          detailLabel: `${assignedRoomId || '—'} · In: ${checkInDate || 'invalid'}${
+          detailLabel: `${assignedRoomId || 'Room Unassigned'} · ${hostelLocation || 'Unassigned'} · In: ${checkInDate || 'invalid'}${
             status === 'Checked-Out' ? ` · Out: ${checkOutDate || 'missing'}` : ''
           } · 1st mo: ${formatRM(firstMonthCharge)} (${firstMonthNote})`,
           amountOrRateLabel: `${formatRM(effectiveMonthlyFee)}/mo`,
           statusLabel: status || rawStatus || '—',
           payload:
             valid &&
-            room &&
             hostelLocation &&
             residentTypeNorm &&
             occupancyMode &&
@@ -734,12 +769,15 @@ export function BulkImportModal({
               ? {
                   studentId,
                   fullName,
-                  phone,
-                  emergencyContact,
+                  phone: phone.slice(0, FIELD_LIMITS.phone.max),
+                  emergencyContact: emergencyContact.slice(
+                    0,
+                    FIELD_LIMITS.emergencyContact.max
+                  ),
                   program,
                   residentType: residentTypeNorm,
                   occupancyMode,
-                  assignedRoomId: room.roomId,
+                  assignedRoomId: room ? room.roomId : '',
                   hostelLocation,
                   checkInDate,
                   checkOutDate: status === 'Checked-Out' ? checkOutDate : null,
@@ -971,6 +1009,9 @@ export function BulkImportModal({
         );
       } else if (importType === 'students') {
         const payloads = validRows.map((r) => r.payload as BulkImportStudentItem);
+        const unassignedCount = payloads.filter(
+          (p) => p.status === 'Active' && !p.assignedRoomId
+        ).length;
         const res = await bulkImportStudents(
           payloads,
           rooms,
@@ -982,6 +1023,8 @@ export function BulkImportModal({
         onImportComplete(
           `Imported ${res.importedCount} resident(s) (${res.occupiedCount} bed(s) marked Occupied${
             res.blockedCount > 0 ? `, ${res.blockedCount} sibling bed(s) Reserved / Blocked` : ''
+          }${
+            unassignedCount > 0 ? `, ${unassignedCount} Room Unassigned` : ''
           }).${invalidCount > 0 ? ` (${invalidCount} invalid row(s) skipped)` : ''}`
         );
       } else {

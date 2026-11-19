@@ -722,10 +722,10 @@ export function DashboardTab({
                     </td>
                     <td className="py-3 px-4">
                       <p className="font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
-                        {student.assignedRoomId}
+                        {student.assignedRoomId || 'Room Unassigned'}
                       </p>
                       <p className="text-xs text-slate-500 whitespace-nowrap">
-                        {student.hostelLocation}
+                        {student.hostelLocation || 'Unassigned'}
                       </p>
                     </td>
                     <td className="py-3 px-4 text-xs text-slate-600 tabular-nums whitespace-nowrap">

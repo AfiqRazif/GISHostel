@@ -336,6 +336,7 @@ function HostelPortal() {
           {effectiveTab === 'rooms' && (
             <RoomInventoryTab
               rooms={rooms}
+              students={students}
               staffEmail={staffEmail}
               loading={dataLoading}
             />

@@ -749,10 +749,10 @@ export function PaymentsTab({
                         </td>
                         <td className="py-3 px-4">
                           <p className="font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
-                            {p.roomId}
+                            {p.roomId || 'Room Unassigned'}
                           </p>
                           <p className="text-xs text-slate-500 whitespace-nowrap">
-                            {p.hostelLocation}
+                            {p.hostelLocation || 'Unassigned'}
                           </p>
                         </td>
                         <td className="py-3 px-4">

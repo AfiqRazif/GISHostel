@@ -1,15 +1,27 @@
 import React, { useMemo, useState } from 'react';
-import { FileSpreadsheet, Layers, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import {
+  FileSpreadsheet,
+  History,
+  Layers,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  X,
+} from 'lucide-react';
 import {
   buildRoomId,
   formatRM,
   formatTimestamp,
   generateBulkBedSlots,
+  getNormalizedStayHistory,
   HOSTEL_LOCATIONS,
   HostelLocation,
   Room,
   ROOM_STATUSES,
   RoomStatus,
+  StayHistorySegment,
+  Student,
 } from '../types/hostel';
 import {
   bulkCreateBeds,
@@ -22,12 +34,14 @@ import { StatusBadge } from './StatusBadge';
 
 interface RoomInventoryTabProps {
   rooms: Room[];
+  students?: Student[];
   staffEmail: string;
   loading: boolean;
 }
 
 export function RoomInventoryTab({
   rooms,
+  students = [],
   staffEmail,
   loading,
 }: RoomInventoryTabProps) {
@@ -41,6 +55,7 @@ export function RoomInventoryTab({
   const [showImportModal, setShowImportModal] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [deletingRoom, setDeletingRoom] = useState<Room | null>(null);
+  const [historyRoom, setHistoryRoom] = useState<Room | null>(null);
 
   // Add Single Room form
   const [singleLocation, setSingleLocation] = useState<HostelLocation>('Apartment Desa Jati 2');
@@ -100,6 +115,22 @@ export function RoomInventoryTab({
     const maintenance = filteredRooms.filter((r) => r.status === 'Maintenance').length;
     return { total: filteredRooms.length, vacant, occupied, reserved, maintenance };
   }, [filteredRooms]);
+
+  const roomHistoryEntries = useMemo(() => {
+    if (!historyRoom) return [];
+    const list: Array<{ student: Student; segment: StayHistorySegment }> = [];
+    for (const st of students) {
+      const segs = getNormalizedStayHistory(st);
+      for (const seg of segs) {
+        if (seg.roomId === historyRoom.roomId) {
+          list.push({ student: st, segment: seg });
+        }
+      }
+    }
+    return list.sort((a, b) =>
+      b.segment.startDate.localeCompare(a.segment.startDate)
+    );
+  }, [historyRoom, students]);
 
   const generatedSingleId =
     singleCustomId.trim() ||
@@ -467,6 +498,15 @@ export function RoomInventoryTab({
                     </td>
                     <td className="py-3 px-4 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setHistoryRoom(room)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
+                          title="View room stay & transfer history"
+                        >
+                          <History className="w-3 h-3" />
+                          <span>History</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleOpenEditModal(room)}
@@ -1099,6 +1139,103 @@ export function RoomInventoryTab({
                 className="px-4 py-2 text-xs font-semibold text-white bg-red-700 hover:bg-red-800 disabled:opacity-60 rounded-lg cursor-pointer"
               >
                 {submitting ? 'Deleting...' : 'Delete Room'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {historyRoom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-2xl w-full p-6 space-y-4 my-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  Stay &amp; Transfer History · {historyRoom.roomId}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {historyRoom.location} · Blk {historyRoom.block}, Unit {historyRoom.unitNo},{' '}
+                  {historyRoom.bedSlot} · Current Rate {formatRM(historyRoom.monthlyRate)}/mo
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHistoryRoom(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close room history modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {roomHistoryEntries.length === 0 ? (
+              <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
+                No stay or transfer segments recorded for bed slot{' '}
+                <span className="font-mono font-semibold text-slate-700">
+                  {historyRoom.roomId}
+                </span>{' '}
+                yet.
+              </div>
+            ) : (
+              <div className="border border-slate-200 rounded-lg overflow-hidden">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                      <th className="py-2.5 px-3">Resident</th>
+                      <th className="py-2.5 px-3">Date Range</th>
+                      <th className="py-2.5 px-3 text-right">Monthly Rate</th>
+                      <th className="py-2.5 px-3">Reason / Audit</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {roomHistoryEntries.map(({ student, segment }) => (
+                      <tr key={`${student.studentId}-${segment.id}`}>
+                        <td className="py-2.5 px-3">
+                          <p className="font-semibold text-slate-900">
+                            {student.fullName}
+                          </p>
+                          <p className="font-mono text-slate-500">
+                            {student.studentId} · {segment.occupancyMode}
+                          </p>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono tabular-nums whitespace-nowrap text-slate-700">
+                          {segment.startDate} →{' '}
+                          {segment.endDate || (
+                            <span className="font-sans font-semibold text-emerald-700">
+                              Present
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono tabular-nums whitespace-nowrap">
+                          <p className="font-semibold text-slate-900">
+                            {formatRM(segment.effectiveMonthlyFee)}/mo
+                          </p>
+                          {segment.monthlyRebate > 0 && (
+                            <p className="text-emerald-700">
+                              Rebate -{formatRM(segment.monthlyRebate)}
+                            </p>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-600">
+                          <p className="font-medium text-slate-800">{segment.reason}</p>
+                          <p className="text-slate-400 truncate max-w-[180px]">
+                            By {segment.recordedBy}
+                          </p>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setHistoryRoom(null)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+              >
+                Close
               </button>
             </div>
           </div>

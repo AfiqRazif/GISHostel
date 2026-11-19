@@ -14,6 +14,7 @@ const STATUS_STYLES: Record<string, string> = {
   Pending: 'bg-amber-50 text-amber-800 border-amber-200',
   'Pending Issuance': 'bg-amber-50 text-amber-800 border-amber-200',
   'Receipt Pending': 'bg-amber-50 text-amber-800 border-amber-200',
+  'Room Unassigned': 'bg-amber-50 text-amber-800 border-amber-200',
   Suspended: 'bg-amber-50 text-amber-800 border-amber-200',
   Overdue: 'bg-red-50 text-red-800 border-red-200',
   Disabled: 'bg-red-50 text-red-800 border-red-200',

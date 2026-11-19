@@ -1,8 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import {
+  ArrowLeftRight,
+  Building2,
   FileSpreadsheet,
+  FileText,
   LogOut,
   Pencil,
+  Printer,
   RotateCcw,
   Search,
   UserPlus,
@@ -10,9 +14,12 @@ import {
 } from 'lucide-react';
 import {
   calculateFirstMonthDefaults,
-  calculateResidentBilling,
+  calculateStudentBilling,
   formatRM,
   formatTimestamp,
+  getPaymentBankRef,
+  getPaymentReceiptNo,
+  getPhysicalReceiptStatus,
   getTodayISO,
   HOSTEL_LOCATIONS,
   HostelLocation,
@@ -23,15 +30,27 @@ import {
   ProgramType,
   REBATE_REASONS,
   RESIDENT_TYPES,
+  ResidentHostelLocation,
   ResidentType,
   Room,
   STUDENT_STATUSES,
   Student,
   StudentStatus,
 } from '../types/hostel';
-import { registerStudent, updateStudentRecord } from '../lib/hostelService';
+import {
+  registerStudent,
+  transferStudentRoom,
+  updateStudentRecord,
+} from '../lib/hostelService';
 import { BulkImportModal } from './BulkImportModal';
 import { StatusBadge } from './StatusBadge';
+
+const TRANSFER_REASONS = [
+  'Student Request',
+  'Maintenance / Unit Upgrade',
+  'Disciplinary / Admin Relocation',
+  'Other',
+] as const;
 
 interface StudentsTabProps {
   students: Student[];
@@ -49,9 +68,9 @@ export function StudentsTab({
   loading,
 }: StudentsTabProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [locationFilter, setLocationFilter] = useState<'All' | HostelLocation>('All');
+  const [locationFilter, setLocationFilter] = useState<'All' | ResidentHostelLocation>('All');
   const [residentTypeFilter, setResidentTypeFilter] = useState<'All' | ResidentType>('All');
-  const [statusFilter, setStatusFilter] = useState<'All' | StudentStatus>('All');
+  const [statusFilter, setStatusFilter] = useState<'All' | StudentStatus | 'Room Unassigned'>('All');
 
   // Register modal state
   const [showRegisterModal, setShowRegisterModal] = useState(false);
@@ -94,6 +113,22 @@ export function StudentsTab({
   const [editFirstMonthNote, setEditFirstMonthNote] = useState('Standard Full Month');
   const [editFirstMonthManual, setEditFirstMonthManual] = useState(false);
   const [editNewRoomId, setEditNewRoomId] = useState('');
+
+  // Transfer Room modal state
+  const [transferStudent, setTransferStudent] = useState<Student | null>(null);
+  const [transferDate, setTransferDate] = useState(getTodayISO());
+  const [transferNewRoomId, setTransferNewRoomId] = useState('');
+  const [transferOccupancyMode, setTransferOccupancyMode] =
+    useState<OccupancyMode>('Single Bed');
+  const [transferStdRate, setTransferStdRate] = useState('250');
+  const [keepExistingRebate, setKeepExistingRebate] = useState(true);
+  const [transferMonthlyRebate, setTransferMonthlyRebate] = useState('0');
+  const [transferRebateReason, setTransferRebateReason] = useState('None');
+  const [transferReason, setTransferReason] = useState<string>('Student Request');
+  const [transferCustomReason, setTransferCustomReason] = useState('');
+
+  // View Statement modal state
+  const [statementStudent, setStatementStudent] = useState<Student | null>(null);
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -148,12 +183,91 @@ export function StudentsTab({
   }, [editStandardRate, editMonthlyRebate]);
 
   const billingByStudentId = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof calculateResidentBilling>>();
+    const map = new Map<string, ReturnType<typeof calculateStudentBilling>>();
     for (const s of students) {
-      map.set(s.studentId, calculateResidentBilling(s, payments));
+      map.set(s.studentId, calculateStudentBilling(s, payments));
     }
     return map;
   }, [students, payments]);
+
+  const liveStatementStudent = useMemo(() => {
+    if (!statementStudent) return null;
+    return (
+      students.find((s) => s.studentId === statementStudent.studentId) ||
+      statementStudent
+    );
+  }, [statementStudent, students]);
+
+  const statementBilling = useMemo(() => {
+    if (!liveStatementStudent) return null;
+    return (
+      billingByStudentId.get(liveStatementStudent.studentId) ||
+      calculateStudentBilling(liveStatementStudent, payments)
+    );
+  }, [liveStatementStudent, billingByStudentId, payments]);
+
+  const statementPayments = useMemo(() => {
+    if (!liveStatementStudent) return [];
+    return payments
+      .filter((p) => p.studentId === liveStatementStudent.studentId)
+      .sort((a, b) => {
+        const dCmp = (b.paymentDate || '').localeCompare(a.paymentDate || '');
+        if (dCmp !== 0) return dCmp;
+        return (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0);
+      });
+  }, [liveStatementStudent, payments]);
+
+  const transferVacantChoices = useMemo(() => {
+    if (!transferStudent) return vacantRooms;
+    return vacantRooms.filter((r) => r.roomId !== transferStudent.assignedRoomId);
+  }, [vacantRooms, transferStudent]);
+
+  const selectedTransferRoom = useMemo(() => {
+    return (
+      transferVacantChoices.find((r) => r.roomId === transferNewRoomId) || null
+    );
+  }, [transferVacantChoices, transferNewRoomId]);
+
+  const transferExclusiveSiblings = useMemo(() => {
+    if (
+      !selectedTransferRoom ||
+      transferOccupancyMode !== 'Whole Unit Exclusive'
+    ) {
+      return [];
+    }
+    return rooms
+      .filter(
+        (r) =>
+          r.roomId !== selectedTransferRoom.roomId &&
+          r.location === selectedTransferRoom.location &&
+          r.block === selectedTransferRoom.block &&
+          r.unitNo === selectedTransferRoom.unitNo &&
+          r.status === 'Vacant'
+      )
+      .sort((a, b) => a.roomId.localeCompare(b.roomId));
+  }, [rooms, selectedTransferRoom, transferOccupancyMode]);
+
+  const transferEffectiveFee = useMemo(() => {
+    if (!transferStudent) return 0;
+    const std = Number(transferStdRate) || 0;
+    const currentBilling = billingByStudentId.get(transferStudent.studentId);
+    const reb = keepExistingRebate
+      ? currentBilling?.monthlyRebate ?? 0
+      : Number(transferMonthlyRebate) || 0;
+    return Math.max(0, Math.round((std - reb) * 100) / 100);
+  }, [
+    transferStudent,
+    transferStdRate,
+    keepExistingRebate,
+    transferMonthlyRebate,
+    billingByStudentId,
+  ]);
+
+  const unassignedActiveCount = useMemo(() => {
+    return students.filter(
+      (s) => s.status === 'Active' && !(s.assignedRoomId || '').trim()
+    ).length;
+  }, [students]);
 
   const filteredStudents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -166,7 +280,13 @@ export function StudentsTab({
           ? true
           : (s.residentType || 'Student') === residentTypeFilter
       )
-      .filter((s) => (statusFilter === 'All' ? true : s.status === statusFilter))
+      .filter((s) => {
+        if (statusFilter === 'All') return true;
+        if (statusFilter === 'Room Unassigned') {
+          return s.status === 'Active' && !(s.assignedRoomId || '').trim();
+        }
+        return s.status === statusFilter;
+      })
       .filter((s) => {
         if (!q) return true;
         return (
@@ -347,7 +467,7 @@ export function StudentsTab({
 
   const openEditModal = (student: Student, presetCheckOut = false) => {
     setFormError(null);
-    const billing = calculateResidentBilling(student, payments);
+    const billing = calculateStudentBilling(student, payments);
     const autoDefaults = calculateFirstMonthDefaults(
       student.checkInDate,
       billing.effectiveMonthlyFee
@@ -462,7 +582,13 @@ export function StudentsTab({
 
       if (editingStudent.status !== 'Checked-Out' && editStatus === 'Checked-Out') {
         setFeedbackBanner(
-          `Checked out ${editingStudent.fullName} and released room ${editingStudent.assignedRoomId} (and any unit blocks) back to Vacant.`
+          editingStudent.assignedRoomId
+            ? `Checked out ${editingStudent.fullName} and released room ${editingStudent.assignedRoomId} (and any unit blocks) back to Vacant.`
+            : `Checked out ${editingStudent.fullName}.`
+        );
+      } else if (!editingStudent.assignedRoomId && chosenNewRoom && editStatus === 'Active') {
+        setFeedbackBanner(
+          `Assigned ${editFullName.trim()} to room ${chosenNewRoom.roomId} and marked bed as Occupied.`
         );
       } else {
         setFeedbackBanner(`Updated resident record for ${editFullName.trim()}.`);
@@ -477,8 +603,92 @@ export function StudentsTab({
     }
   };
 
+  const openTransferModal = (student: Student) => {
+    setFormError(null);
+    const billing =
+      billingByStudentId.get(student.studentId) ||
+      calculateStudentBilling(student, payments);
+    const firstVacant =
+      vacantRooms.find((r) => r.roomId !== student.assignedRoomId) || null;
+    setTransferStudent(student);
+    setTransferDate(getTodayISO());
+    setTransferNewRoomId(firstVacant ? firstVacant.roomId : '');
+    setTransferOccupancyMode(billing.occupancyMode);
+    setTransferStdRate(
+      firstVacant
+        ? String(firstVacant.monthlyRate)
+        : String(billing.standardRoomRate)
+    );
+    setKeepExistingRebate(true);
+    setTransferMonthlyRebate(String(billing.monthlyRebate));
+    setTransferRebateReason(billing.rebateReason || 'None');
+    setTransferReason('Student Request');
+    setTransferCustomReason('');
+  };
+
+  const handleTransferSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferStudent) return;
+    if (!selectedTransferRoom) {
+      setFormError('Please select an available Vacant bed to transfer into.');
+      return;
+    }
+
+    const currentBilling =
+      billingByStudentId.get(transferStudent.studentId) ||
+      calculateStudentBilling(transferStudent, payments);
+
+    const resolvedReason =
+      transferReason === 'Other'
+        ? transferCustomReason.trim() || 'Other'
+        : transferReason;
+
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      const result = await transferStudentRoom(
+        transferStudent,
+        {
+          effectiveTransferDate: transferDate,
+          newRoom: selectedTransferRoom,
+          newOccupancyMode: transferOccupancyMode,
+          newStandardRate: Number(transferStdRate),
+          keepExistingRebate,
+          newMonthlyRebate: keepExistingRebate
+            ? currentBilling.monthlyRebate
+            : Number(transferMonthlyRebate),
+          newRebateReason: keepExistingRebate
+            ? currentBilling.rebateReason
+            : transferRebateReason,
+          transferReason: resolvedReason,
+        },
+        rooms,
+        staffEmail
+      );
+
+      setTransferStudent(null);
+      const releasedNote = result.releasedRoomId
+        ? ` Released ${result.releasedRoomId} back to Vacant.`
+        : '';
+      const blockedNote =
+        result.blockedSiblings.length > 0
+          ? ` Blocked ${result.blockedSiblings.length} sibling bed(s): ${result.blockedSiblings.join(', ')}.`
+          : '';
+      setFeedbackBanner(
+        `Transferred ${transferStudent.fullName} to ${selectedTransferRoom.roomId} effective ${transferDate} (${formatRM(transferEffectiveFee)}/mo).${releasedNote}${blockedNote}`
+      );
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : 'Failed to transfer room.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
+      <div className={statementStudent ? 'print:hidden space-y-5' : 'space-y-5'}>
       {feedbackBanner && (
         <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-4 py-2.5 text-xs font-medium flex items-center justify-between gap-4">
           <span>{feedbackBanner}</span>
@@ -510,7 +720,7 @@ export function StudentsTab({
           <select
             value={locationFilter}
             onChange={(e) =>
-              setLocationFilter(e.target.value as 'All' | HostelLocation)
+              setLocationFilter(e.target.value as 'All' | ResidentHostelLocation)
             }
             aria-label="Filter residents by hostel location"
             className="px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
@@ -521,6 +731,7 @@ export function StudentsTab({
                 {loc}
               </option>
             ))}
+            <option value="Unassigned">Unassigned</option>
           </select>
 
           <select
@@ -542,12 +753,15 @@ export function StudentsTab({
           <select
             value={statusFilter}
             onChange={(e) =>
-              setStatusFilter(e.target.value as 'All' | StudentStatus)
+              setStatusFilter(
+                e.target.value as 'All' | StudentStatus | 'Room Unassigned'
+              )
             }
             aria-label="Filter residents by residency status"
             className="px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
           >
             <option value="All">All Statuses</option>
+            <option value="Room Unassigned">Room Unassigned</option>
             {STUDENT_STATUSES.map((st) => (
               <option key={st} value={st}>
                 {st}
@@ -585,6 +799,25 @@ export function StudentsTab({
         <span>
           <strong className="text-emerald-700">{vacantRooms.length}</strong> vacant beds available
         </span>
+        {unassignedActiveCount > 0 && (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              onClick={() =>
+                setStatusFilter(
+                  statusFilter === 'Room Unassigned' ? 'All' : 'Room Unassigned'
+                )
+              }
+              className="inline-flex items-center gap-1.5 text-amber-800 hover:text-amber-950 font-semibold cursor-pointer"
+            >
+              <span>{unassignedActiveCount} room unassigned</span>
+              <span className="underline font-normal">
+                {statusFilter === 'Room Unassigned' ? '(Show all)' : '(Filter)'}
+              </span>
+            </button>
+          </>
+        )}
         <span aria-hidden="true">·</span>
         <span>
           Cumulative Arrears:{' '}
@@ -638,16 +871,31 @@ export function StudentsTab({
                         <p className="text-xs text-slate-500 mt-0.5">
                           {billing.residentType} · {billing.occupancyMode} · {st.program}
                         </p>
-                        <p className="text-xs text-slate-400">
-                          {st.phone} · ICE: {st.emergencyContact}
-                        </p>
+                        {(st.phone || st.emergencyContact) && (
+                          <p className="text-xs text-slate-400">
+                            {[
+                              st.phone,
+                              st.emergencyContact ? `ICE: ${st.emergencyContact}` : '',
+                            ]
+                              .filter(Boolean)
+                              .join(' · ')}
+                          </p>
+                        )}
                       </td>
                       <td className="py-3 px-4">
-                        <p className="font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
-                          {st.assignedRoomId}
-                        </p>
-                        <p className="text-xs text-slate-500 whitespace-nowrap">
-                          {st.hostelLocation}
+                        {(st.assignedRoomId || '').trim() ? (
+                          <p className="font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
+                            {st.assignedRoomId}
+                          </p>
+                        ) : st.status === 'Active' ? (
+                          <StatusBadge status="Room Unassigned" />
+                        ) : (
+                          <p className="font-mono text-xs text-slate-400 whitespace-nowrap">
+                            No Room Assigned
+                          </p>
+                        )}
+                        <p className="text-xs text-slate-500 whitespace-nowrap mt-0.5">
+                          {st.hostelLocation || 'Unassigned'}
                         </p>
                       </td>
                       <td className="py-3 px-4 text-xs text-slate-600 tabular-nums whitespace-nowrap">
@@ -707,6 +955,26 @@ export function StudentsTab({
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setStatementStudent(st)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
+                            title="View room history & account statement"
+                          >
+                            <FileText className="w-3 h-3" />
+                            <span>View Statement</span>
+                          </button>
+                          {st.status === 'Active' && (
+                            <button
+                              type="button"
+                              onClick={() => openTransferModal(st)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-md cursor-pointer"
+                              title="Transfer resident to another bed/room"
+                            >
+                              <ArrowLeftRight className="w-3 h-3" />
+                              <span>Transfer Room</span>
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => openEditModal(st, false)}
@@ -1190,7 +1458,7 @@ export function StudentsTab({
                   Manage Resident · {editingStudent.studentId}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Room: {editingStudent.assignedRoomId} ({editingStudent.hostelLocation})
+                  Room: {editingStudent.assignedRoomId || 'Room Unassigned'} ({editingStudent.hostelLocation || 'Unassigned'})
                 </p>
               </div>
               <button
@@ -1272,12 +1540,21 @@ export function StudentsTab({
               {editingStudent.status !== 'Checked-Out' &&
                 editStatus === 'Checked-Out' && (
                   <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
-                    Saving with status <strong>Checked-Out</strong> will
-                    automatically release room{' '}
-                    <span className="font-mono font-semibold">
-                      {editingStudent.assignedRoomId}
-                    </span>{' '}
-                    and any exclusive-unit blocked beds back to <strong>Vacant</strong>.
+                    {editingStudent.assignedRoomId ? (
+                      <>
+                        Saving with status <strong>Checked-Out</strong> will
+                        automatically release room{' '}
+                        <span className="font-mono font-semibold">
+                          {editingStudent.assignedRoomId}
+                        </span>{' '}
+                        and any exclusive-unit blocked beds back to <strong>Vacant</strong>.
+                      </>
+                    ) : (
+                      <>
+                        Saving with status <strong>Checked-Out</strong> will mark this
+                        unassigned resident as checked out.
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -1311,7 +1588,9 @@ export function StudentsTab({
                   <label className="block text-xs font-medium text-slate-700 mb-1">
                     {editingStudent.status === 'Checked-Out'
                       ? 'Assign Vacant Room for Re-Check-In'
-                      : 'Transfer Room (Optional — Vacant Beds Only)'}
+                      : !editingStudent.assignedRoomId
+                        ? 'Assign Vacant Room / Bed'
+                        : 'Transfer Room (Optional — Vacant Beds Only)'}
                   </label>
                   <select
                     value={editNewRoomId}
@@ -1329,7 +1608,9 @@ export function StudentsTab({
                   >
                     {editingStudent.status !== 'Checked-Out' && (
                       <option value="">
-                        Keep current room ({editingStudent.assignedRoomId})
+                        {editingStudent.assignedRoomId
+                          ? `Keep current room (${editingStudent.assignedRoomId})`
+                          : 'Keep Unassigned (Select a Vacant Room to assign)'}
                       </option>
                     )}
                     {vacantRooms.map((r) => (
@@ -1381,11 +1662,10 @@ export function StudentsTab({
                   </label>
                   <input
                     type="text"
-                    required
-                    minLength={6}
                     maxLength={32}
                     value={editPhone}
                     onChange={(e) => setEditPhone(e.target.value)}
+                    placeholder="Optional — e.g. 012-345 6789"
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
@@ -1395,11 +1675,10 @@ export function StudentsTab({
                   </label>
                   <input
                     type="text"
-                    required
-                    minLength={6}
                     maxLength={120}
                     value={editEmergency}
                     onChange={(e) => setEditEmergency(e.target.value)}
+                    placeholder="Optional — e.g. Parent / Guardian contact"
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
@@ -1611,6 +1890,615 @@ export function StudentsTab({
         onClose={() => setShowImportModal(false)}
         onImportComplete={(msg) => setFeedbackBanner(msg)}
       />
+      </div>
+
+      {/* Transfer Room Modal */}
+      {transferStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 overflow-y-auto print:hidden">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-xl w-full p-6 space-y-5 my-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  Transfer Room · {transferStudent.fullName}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5 font-mono">
+                  {transferStudent.studentId} · Check-In: {transferStudent.checkInDate}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTransferStudent(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close transfer room modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {(() => {
+              const curr =
+                billingByStudentId.get(transferStudent.studentId) ||
+                calculateStudentBilling(transferStudent, payments);
+              return (
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div>
+                    <p className="text-slate-500 font-medium">Current Room &amp; Mode</p>
+                    <p className="font-mono font-semibold text-slate-900 mt-0.5">
+                      {transferStudent.assignedRoomId || 'Room Unassigned'} ·{' '}
+                      {transferStudent.hostelLocation || 'Unassigned'}
+                    </p>
+                    <p className="text-slate-600 mt-0.5">{curr.occupancyMode}</p>
+                  </div>
+                  <div className="sm:text-right font-mono tabular-nums">
+                    <p className="font-sans text-slate-500 font-medium">Current Rate</p>
+                    <p className="text-sm font-bold text-slate-900 mt-0.5">
+                      {formatRM(curr.effectiveMonthlyFee)}/mo
+                    </p>
+                    {curr.monthlyRebate > 0 && (
+                      <p className="text-emerald-700">
+                        Std {formatRM(curr.standardRoomRate)} - Rebate{' '}
+                        {formatRM(curr.monthlyRebate)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {formError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {formError}
+              </div>
+            )}
+
+            {transferVacantChoices.length === 0 ? (
+              <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
+                <p className="font-semibold">No Vacant Beds Available</p>
+                <p>
+                  There are currently no other Vacant beds in Room Inventory to
+                  transfer this resident into.
+                </p>
+                <div className="pt-1 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setTransferStudent(null)}
+                    className="px-3.5 py-1.5 bg-white border border-amber-300 rounded-md font-medium cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleTransferSubmit} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Effective Transfer Date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      min={transferStudent.checkInDate}
+                      value={transferDate}
+                      onChange={(e) => setTransferDate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      New Occupancy Mode
+                    </label>
+                    <select
+                      value={transferOccupancyMode}
+                      onChange={(e) =>
+                        setTransferOccupancyMode(e.target.value as OccupancyMode)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {OCCUPANCY_MODES.map((om) => (
+                        <option key={om} value={om}>
+                          {om}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Select Destination Vacant Bed
+                  </label>
+                  <select
+                    required
+                    value={transferNewRoomId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setTransferNewRoomId(nextId);
+                      const rm = transferVacantChoices.find(
+                        (r) => r.roomId === nextId
+                      );
+                      if (rm) {
+                        setTransferStdRate(String(rm.monthlyRate));
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    {transferVacantChoices.map((r) => (
+                      <option key={r.roomId} value={r.roomId}>
+                        {r.roomId} — {r.location} (Blk {r.block}, Unit {r.unitNo},{' '}
+                        {r.bedSlot}) · {formatRM(r.monthlyRate)}/mo
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {transferOccupancyMode === 'Whole Unit Exclusive' &&
+                  selectedTransferRoom && (
+                    <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                      {transferExclusiveSiblings.length > 0 ? (
+                        <p>
+                          <strong>Whole Unit Exclusive:</strong> Transferring into{' '}
+                          <span className="font-mono">{selectedTransferRoom.roomId}</span>{' '}
+                          will automatically block{' '}
+                          <strong className="font-mono">
+                            {transferExclusiveSiblings.map((b) => b.roomId).join(', ')}
+                          </strong>{' '}
+                          as <strong>Reserved / Blocked</strong>.
+                        </p>
+                      ) : (
+                        <p>
+                          <strong>Whole Unit Exclusive:</strong> No other Vacant beds
+                          remain in Block {selectedTransferRoom.block} Unit{' '}
+                          {selectedTransferRoom.unitNo}.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-700">
+                      New Segment Pricing &amp; Rebate
+                    </span>
+                    <span className="text-xs font-mono font-bold text-blue-900 tabular-nums">
+                      New Effective Rate: {formatRM(transferEffectiveFee)}/mo
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        New Standard Room Rate (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={10000}
+                        step="0.01"
+                        value={transferStdRate}
+                        onChange={(e) => setTransferStdRate(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 py-2 text-xs font-medium text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={keepExistingRebate}
+                        onChange={(e) => setKeepExistingRebate(e.target.checked)}
+                        className="w-4 h-4 rounded border-slate-300 text-blue-900 focus:ring-blue-900"
+                      />
+                      <span>
+                        Keep existing rebate (
+                        <span className="font-mono">
+                          {formatRM(
+                            billingByStudentId.get(transferStudent.studentId)
+                              ?.monthlyRebate ?? 0
+                          )}
+                        </span>
+                        )
+                      </span>
+                    </label>
+                  </div>
+
+                  {!keepExistingRebate && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Adjusted Monthly Rebate (RM)
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          max={10000}
+                          step="0.01"
+                          value={transferMonthlyRebate}
+                          onChange={(e) => setTransferMonthlyRebate(e.target.value)}
+                          className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Rebate Reason
+                        </label>
+                        <select
+                          value={transferRebateReason}
+                          onChange={(e) => setTransferRebateReason(e.target.value)}
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        >
+                          {REBATE_REASONS.map((rr) => (
+                            <option key={rr} value={rr}>
+                              {rr}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className={transferReason === 'Other' ? '' : 'sm:col-span-2'}>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Transfer Reason
+                    </label>
+                    <select
+                      value={transferReason}
+                      onChange={(e) => setTransferReason(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {TRANSFER_REASONS.map((reason) => (
+                        <option key={reason} value={reason}>
+                          {reason}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {transferReason === 'Other' && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Specify Reason
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={120}
+                        value={transferCustomReason}
+                        onChange={(e) => setTransferCustomReason(e.target.value)}
+                        placeholder="Describe reason for relocation..."
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900">
+                  {transferStudent.assignedRoomId ? (
+                    <>
+                      Saving will close the current stay segment in{' '}
+                      <span className="font-mono font-semibold">
+                        {transferStudent.assignedRoomId}
+                      </span>{' '}
+                      (releasing it to <strong>Vacant</strong>) and lock{' '}
+                      <span className="font-mono font-semibold">
+                        {selectedTransferRoom?.roomId}
+                      </span>{' '}
+                      as <strong>Occupied</strong> starting{' '}
+                      <span className="font-mono">{transferDate}</span>.
+                    </>
+                  ) : (
+                    <>
+                      Saving will assign{' '}
+                      <span className="font-mono font-semibold">
+                        {selectedTransferRoom?.roomId}
+                      </span>{' '}
+                      as the initial stay segment and mark the bed as{' '}
+                      <strong>Occupied</strong>.
+                    </>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setTransferStudent(null)}
+                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap"
+                  >
+                    {submitting ? 'Transferring...' : 'Confirm Room Transfer'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* View Statement Modal (Room & Rate History Timeline + Ledger) */}
+      {liveStatementStudent && statementBilling && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 overflow-y-auto print:static print:bg-white print:p-0">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-4xl w-full p-6 sm:p-8 space-y-6 my-8 print:my-0 print:border-0 print:max-w-none print:p-4">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-900 text-white flex items-center justify-center shrink-0">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="font-display text-lg font-bold text-slate-900">
+                    Global Institute of Studies (GIS) Nilai · Resident Statement
+                  </h2>
+                  <p className="text-xs text-slate-600 mt-0.5">
+                    <span className="font-semibold text-slate-900">
+                      {liveStatementStudent.fullName}
+                    </span>{' '}
+                    · <span className="font-mono">{liveStatementStudent.studentId}</span>{' '}
+                    · {statementBilling.residentType} ({liveStatementStudent.program})
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Current Room:{' '}
+                    <span className="font-mono font-semibold text-slate-800">
+                      {liveStatementStudent.assignedRoomId || 'Room Unassigned'}
+                    </span>{' '}
+                    ({liveStatementStudent.hostelLocation || 'Unassigned'}) · Check-In:{' '}
+                    <span className="font-mono">{liveStatementStudent.checkInDate}</span>
+                    {liveStatementStudent.checkOutDate
+                      ? ` · Check-Out: ${liveStatementStudent.checkOutDate}`
+                      : ''}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 print:hidden shrink-0">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Statement</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStatementStudent(null)}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  aria-label="Close statement modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Financial KPI Strip */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <p className="text-xs text-slate-500">Current Rate</p>
+                <p className="font-mono text-base font-bold text-slate-900 tabular-nums mt-0.5">
+                  {formatRM(statementBilling.effectiveMonthlyFee)}/mo
+                </p>
+                <p className="text-xs text-slate-500 font-mono mt-0.5">
+                  Dep: {formatRM(liveStatementStudent.depositPaid)}
+                </p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <p className="text-xs text-slate-500">
+                  Expected Rent ({statementBilling.monthsBilled} mo)
+                </p>
+                <p className="font-mono text-base font-bold text-slate-900 tabular-nums mt-0.5">
+                  {formatRM(statementBilling.totalExpectedRent)}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Across {statementBilling.segments.length}{' '}
+                  {statementBilling.segments.length === 1 ? 'stay segment' : 'stay segments'}
+                </p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <p className="text-xs text-slate-500">Rent &amp; Waivers Credited</p>
+                <p className="font-mono text-base font-bold text-emerald-700 tabular-nums mt-0.5">
+                  {formatRM(statementBilling.totalRentCredited)}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">Settled entries</p>
+              </div>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <p className="text-xs text-slate-500">Outstanding Balance</p>
+                <p
+                  className={`font-mono text-base font-bold tabular-nums mt-0.5 ${
+                    statementBilling.outstandingBalance > 0
+                      ? 'text-red-700'
+                      : 'text-emerald-700'
+                  }`}
+                >
+                  {formatRM(statementBilling.outstandingBalance)}
+                </p>
+                <div className="mt-1">
+                  <StatusBadge status={liveStatementStudent.status} />
+                </div>
+              </div>
+            </div>
+
+            {/* Room & Rate History Timeline */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h3 className="font-display text-sm font-semibold text-slate-900">
+                  Room &amp; Rate History Timeline
+                </h3>
+                <span className="text-xs text-slate-500">
+                  Chronological stay segments (multi-rate billing, no mid-month double charge)
+                </span>
+              </div>
+
+              <div className="border border-slate-200 rounded-lg divide-y divide-slate-200 overflow-hidden">
+                {statementBilling.segments.map((sb, idx) => {
+                  const seg = sb.segment;
+                  const isCurrentOpen =
+                    !seg.endDate && liveStatementStudent.status === 'Active';
+                  return (
+                    <div
+                      key={seg.id}
+                      className={`p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs ${
+                        isCurrentOpen ? 'bg-blue-50/40' : 'bg-white'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-mono text-xs font-semibold text-slate-500">
+                            #{idx + 1}
+                          </span>
+                          <span className="font-mono font-bold text-slate-900">
+                            {seg.roomId || 'Room Unassigned'}
+                          </span>
+                          <span className="text-slate-500">
+                            · {seg.hostelLocation || 'Unassigned'} · {seg.occupancyMode}
+                          </span>
+                          {isCurrentOpen && <StatusBadge status="Active" />}
+                        </div>
+                        <p className="text-slate-700 font-mono tabular-nums">
+                          {seg.startDate} →{' '}
+                          {seg.endDate ||
+                            (liveStatementStudent.status === 'Checked-Out'
+                              ? liveStatementStudent.checkOutDate || 'Checked-Out'
+                              : 'Present')}
+                          {sb.billedMonths.length > 0 && (
+                            <span className="font-sans text-slate-500 ml-2">
+                              (Billed months: {sb.billedMonths.join(', ')})
+                            </span>
+                          )}
+                        </p>
+                        <p className="text-slate-500">
+                          Reason: <span className="text-slate-700 font-medium">{seg.reason}</span> ·
+                          Recorded by <span className="font-mono">{seg.recordedBy}</span>
+                          {seg.recordedAt
+                            ? ` on ${new Date(seg.recordedAt).toLocaleDateString('en-MY')}`
+                            : ''}
+                        </p>
+                      </div>
+
+                      <div className="md:text-right font-mono tabular-nums shrink-0 space-y-0.5">
+                        <p className="font-semibold text-slate-900">
+                          {formatRM(seg.effectiveMonthlyFee)}/mo
+                          <span className="font-sans font-normal text-slate-500 ml-1.5">
+                            × {sb.monthsBilled} {sb.monthsBilled === 1 ? 'mo' : 'mos'}
+                          </span>
+                        </p>
+                        {seg.monthlyRebate > 0 && (
+                          <p className="text-emerald-700">
+                            Std {formatRM(seg.standardRoomRate)} · Rebate -
+                            {formatRM(seg.monthlyRebate)}
+                          </p>
+                        )}
+                        {idx === 0 &&
+                          typeof seg.firstMonthCharge === 'number' &&
+                          Math.abs(seg.firstMonthCharge - seg.effectiveMonthlyFee) > 0.01 && (
+                            <p className="text-blue-900">
+                              1st month prorated: {formatRM(seg.firstMonthCharge)}
+                            </p>
+                          )}
+                        <p className="text-slate-800 font-bold">
+                          Segment Subtotal: {formatRM(sb.expectedRent)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Payment Ledger */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="font-display text-sm font-semibold text-slate-900">
+                  Payment &amp; Fee Waiver Ledger
+                </h3>
+                <span className="text-xs text-slate-500 tabular-nums">
+                  {statementPayments.length}{' '}
+                  {statementPayments.length === 1 ? 'entry' : 'entries'}
+                </span>
+              </div>
+
+              {statementPayments.length === 0 ? (
+                <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
+                  No payment or fee waiver entries recorded for this resident yet.
+                </div>
+              ) : (
+                <div className="border border-slate-200 rounded-lg overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                        <th className="py-2.5 px-3">Receipt No.</th>
+                        <th className="py-2.5 px-3">Month / Type</th>
+                        <th className="py-2.5 px-3">Method &amp; Ref</th>
+                        <th className="py-2.5 px-3">Date</th>
+                        <th className="py-2.5 px-3 text-right">Amount</th>
+                        <th className="py-2.5 px-3">Physical Receipt</th>
+                        <th className="py-2.5 px-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {statementPayments.map((p) => {
+                        const physStatus = getPhysicalReceiptStatus(p);
+                        return (
+                          <tr key={p.paymentId}>
+                            <td className="py-2.5 px-3 font-mono font-semibold text-blue-900 whitespace-nowrap">
+                              {getPaymentReceiptNo(p)}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <p className="font-mono font-semibold text-slate-900">
+                                {p.billingMonth}
+                              </p>
+                              <p className="text-slate-500">{p.paymentType}</p>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <p className="text-slate-800">{p.paymentMethod}</p>
+                              {getPaymentBankRef(p) && (
+                                <p className="font-mono text-slate-500">
+                                  {getPaymentBankRef(p)}
+                                </p>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 font-mono tabular-nums whitespace-nowrap text-slate-700">
+                              {p.paymentDate}
+                            </td>
+                            <td className="py-2.5 px-3 text-right font-mono font-semibold tabular-nums whitespace-nowrap text-slate-900">
+                              {formatRM(p.amount)}
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <StatusBadge status={physStatus} />
+                              {p.physicalReceiptNo && (
+                                <p className="font-mono text-slate-500 mt-0.5">
+                                  #{p.physicalReceiptNo}
+                                </p>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 whitespace-nowrap">
+                              <StatusBadge status={p.status} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs text-slate-500">
+              <span>GIS Nilai Hostel Management System</span>
+              <button
+                type="button"
+                onClick={() => setStatementStudent(null)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer print:hidden"
+              >
+                Close Statement
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

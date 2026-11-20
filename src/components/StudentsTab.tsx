@@ -1739,9 +1739,10 @@ export function StudentsTab({
 
       {/* Register New Resident Modal */}
       {showRegisterModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-2xl w-full p-6 space-y-5 my-8">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   Register Resident / Import Past Record
@@ -1760,366 +1761,296 @@ export function StudentsTab({
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
-
             {allRoomsSorted.length === 0 ? (
-              <div className="p-5 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900 space-y-2">
-                <p className="font-semibold">No Rooms in Inventory</p>
-                <p className="text-xs leading-relaxed">
-                  Add rooms or beds in the Room Inventory tab before registering residents.
-                </p>
-                <div className="pt-2">
+              <>
+                <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                  {formError && (
+                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                      {formError}
+                    </div>
+                  )}
+                  <div className="p-5 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900 space-y-2">
+                    <p className="font-semibold">No Rooms in Inventory</p>
+                    <p className="text-xs leading-relaxed">
+                      Add rooms or beds in the Room Inventory tab before registering residents.
+                    </p>
+                  </div>
+                </div>
+                <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end">
                   <button
                     type="button"
                     onClick={() => setShowRegisterModal(false)}
-                    className="px-3.5 py-1.5 text-xs font-medium bg-white border border-amber-300 rounded-md cursor-pointer"
+                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
                   >
                     Close
                   </button>
                 </div>
-              </div>
+              </>
             ) : (
-              <form onSubmit={handleRegisterSubmit} className="space-y-4">
-                {/* Status + Resident Type + Occupancy Mode */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Registration Mode
-                    </label>
-                    <select
-                      value={regStatus}
-                      onChange={(e) =>
-                        handleRegStatusChange(e.target.value as 'Active' | 'Checked-Out')
-                      }
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    >
-                      <option value="Active" disabled={vacantRooms.length === 0}>
-                        Active (Occupy Bed){vacantRooms.length === 0 ? ' — No Vacant Beds' : ''}
-                      </option>
-                      <option value="Checked-Out">
-                        Checked-Out (Past Record Import)
-                      </option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Resident Type
-                    </label>
-                    <select
-                      value={regResidentType}
-                      onChange={(e) =>
-                        handleRegResidentTypeChange(e.target.value as ResidentType)
-                      }
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    >
-                      {RESIDENT_TYPES.map((rt) => (
-                        <option key={rt} value={rt}>
-                          {rt}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Occupancy Mode
-                    </label>
-                    <select
-                      value={regOccupancyMode}
-                      onChange={(e) =>
-                        setRegOccupancyMode(e.target.value as OccupancyMode)
-                      }
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    >
-                      {OCCUPANCY_MODES.map((om) => (
-                        <option key={om} value={om}>
-                          {om}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Resident ID (Matrix / IC / Staff No.)
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      minLength={3}
-                      maxLength={64}
-                      value={regStudentId}
-                      onChange={(e) => setRegStudentId(e.target.value)}
-                      placeholder="e.g. GIS250301 or STF-GIS-020"
-                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Program / Category
-                    </label>
-                    <select
-                      value={regProgram}
-                      onChange={(e) => setRegProgram(e.target.value as ProgramType)}
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    >
-                      {PROGRAMS.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Full Name (as per IC / Passport)
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    minLength={2}
-                    maxLength={120}
-                    value={regFullName}
-                    onChange={(e) => setRegFullName(e.target.value)}
-                    placeholder="e.g. Aisyah binti Mohd Farid"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Phone Number
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      minLength={6}
-                      maxLength={32}
-                      value={regPhone}
-                      onChange={(e) => setRegPhone(e.target.value)}
-                      placeholder="e.g. 012-345 6789"
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Emergency Contact
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      minLength={6}
-                      maxLength={120}
-                      value={regEmergency}
-                      onChange={(e) => setRegEmergency(e.target.value)}
-                      placeholder="e.g. Farid (Father) 019-221 8810"
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    {regStatus === 'Checked-Out'
-                      ? 'Historical Room / Bed Occupied (All Rooms Shown)'
-                      : 'Assign Vacant Room / Bed'}
-                  </label>
-                  <select
-                    value={regRoomId}
-                    onChange={(e) => handleRoomSelectionChange(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {registerRoomChoices.map((r) => (
-                      <option key={r.roomId} value={r.roomId}>
-                        {r.roomId} — {r.location} (Blk {r.block}, Unit {r.unitNo}, {r.bedSlot}) · {formatRM(r.monthlyRate)}/mo
-                        {regStatus === 'Checked-Out' ? ` [${r.status}]` : ''}
-                      </option>
-                    ))}
-                  </select>
-                  {regStatus === 'Checked-Out' && (
-                    <p className="text-xs text-slate-600 mt-1">
-                      Historical import: the selected room&apos;s current live status will <strong>not</strong> be changed.
-                    </p>
-                  )}
-                  {regStatus === 'Active' && regOccupancyMode === 'Whole Unit Exclusive' && selectedRegisterRoom && (
-                    <div className="mt-2 p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
-                      {regSiblingVacantBeds.length > 0 ? (
-                        <p>
-                          <strong>Whole Unit Exclusive:</strong> Registering in{' '}
-                          <span className="font-mono">{selectedRegisterRoom.roomId}</span> will also mark{' '}
-                          <strong className="font-mono">
-                            {regSiblingVacantBeds.map((b) => b.roomId).join(', ')}
-                          </strong>{' '}
-                          as <strong>Reserved / Blocked</strong>.
-                        </p>
-                      ) : (
-                        <p>
-                          <strong>Whole Unit Exclusive:</strong> No other Vacant beds remain in Block{' '}
-                          {selectedRegisterRoom.block} Unit {selectedRegisterRoom.unitNo}.
-                        </p>
-                      )}
+              <form
+                onSubmit={handleRegisterSubmit}
+                className="flex flex-col flex-1 min-h-0 overflow-hidden"
+              >
+                {/* Scrollable Body */}
+                <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                  {formError && (
+                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                      {formError}
                     </div>
                   )}
-                </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Check-In Date
-                    </label>
-                    <input
-                      type="date"
-                      required
-                      value={regCheckInDate}
-                      onChange={(e) => {
-                        setRegCheckInDate(e.target.value);
-                        syncRegFirstMonth(
-                          e.target.value,
-                          regStandardRate,
-                          regMonthlyRebate
-                        );
-                      }}
-                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  {regStatus === 'Checked-Out' && (
+                  {/* Status + Resident Type + Occupancy Mode */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Check-Out Date
-                      </label>
-                      <input
-                        type="date"
-                        required
-                        value={regCheckOutDate}
-                        onChange={(e) => setRegCheckOutDate(e.target.value)}
-                        className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                  )}
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Deposit Paid (RM)
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      max={50000}
-                      step="0.01"
-                      value={regDepositPaid}
-                      onChange={(e) => setRegDepositPaid(e.target.value)}
-                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                </div>
-
-                {/* Pricing, Monthly Rebates & First-Month Proration */}
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-xs font-semibold text-slate-700">
-                      Monthly Rate, Concession &amp; First-Month Proration
-                    </span>
-                    <span className="text-xs font-mono font-semibold text-blue-900 tabular-nums">
-                      Effective Monthly Fee: {formatRM(regEffectiveFee)}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Standard Room Rate (RM)
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min={0}
-                        max={10000}
-                        step="0.01"
-                        value={regStandardRate}
-                        onChange={(e) => {
-                          setRegStandardRate(e.target.value);
-                          syncRegFirstMonth(
-                            regCheckInDate,
-                            e.target.value,
-                            regMonthlyRebate
-                          );
-                        }}
-                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Monthly Rebate (RM)
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min={0}
-                        max={10000}
-                        step="0.01"
-                        value={regMonthlyRebate}
-                        onChange={(e) => {
-                          setRegMonthlyRebate(e.target.value);
-                          syncRegFirstMonth(
-                            regCheckInDate,
-                            regStandardRate,
-                            e.target.value
-                          );
-                        }}
-                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Rebate Reason
+                        Registration Mode
                       </label>
                       <select
-                        value={regRebateReason}
-                        onChange={(e) => setRegRebateReason(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        value={regStatus}
+                        onChange={(e) =>
+                          handleRegStatusChange(e.target.value as 'Active' | 'Checked-Out')
+                        }
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                       >
-                        {REBATE_REASONS.map((rr) => (
-                          <option key={rr} value={rr}>
-                            {rr}
+                        <option value="Active" disabled={vacantRooms.length === 0}>
+                          Active (Occupy Bed){vacantRooms.length === 0 ? ' — No Vacant Beds' : ''}
+                        </option>
+                        <option value="Checked-Out">
+                          Checked-Out (Past Record Import)
+                        </option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Resident Type
+                      </label>
+                      <select
+                        value={regResidentType}
+                        onChange={(e) =>
+                          handleRegResidentTypeChange(e.target.value as ResidentType)
+                        }
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {RESIDENT_TYPES.map((rt) => (
+                          <option key={rt} value={rt}>
+                            {rt}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Occupancy Mode
+                      </label>
+                      <select
+                        value={regOccupancyMode}
+                        onChange={(e) =>
+                          setRegOccupancyMode(e.target.value as OccupancyMode)
+                        }
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {OCCUPANCY_MODES.map((om) => (
+                          <option key={om} value={om}>
+                            {om}
                           </option>
                         ))}
                       </select>
                     </div>
                   </div>
 
-                  <div className="pt-2.5 border-t border-slate-200 space-y-2">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="text-xs font-medium text-slate-700">
-                        First Month Rule (Day &gt; 15 = 50% Half-Rate)
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          syncRegFirstMonth(
-                            regCheckInDate,
-                            regStandardRate,
-                            regMonthlyRebate,
-                            true
-                          )
-                        }
-                        className="inline-flex items-center gap-1 text-xs font-medium text-blue-900 hover:text-blue-700 cursor-pointer whitespace-nowrap"
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Resident ID (Matrix / IC / Staff No.)
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        minLength={3}
+                        maxLength={64}
+                        value={regStudentId}
+                        onChange={(e) => setRegStudentId(e.target.value)}
+                        placeholder="e.g. GIS250301 or STF-GIS-020"
+                        className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Program / Category
+                      </label>
+                      <select
+                        value={regProgram}
+                        onChange={(e) => setRegProgram(e.target.value as ProgramType)}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                       >
-                        <RotateCcw className="w-3 h-3" />
-                        <span>Apply Auto-Rule</span>
-                      </button>
+                        {PROGRAMS.map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Full Name (as per IC / Passport)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={2}
+                      maxLength={120}
+                      value={regFullName}
+                      onChange={(e) => setRegFullName(e.target.value)}
+                      placeholder="e.g. Aisyah binti Mohd Farid"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Phone Number
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        minLength={6}
+                        maxLength={32}
+                        value={regPhone}
+                        onChange={(e) => setRegPhone(e.target.value)}
+                        placeholder="e.g. 012-345 6789"
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Emergency Contact
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        minLength={6}
+                        maxLength={120}
+                        value={regEmergency}
+                        onChange={(e) => setRegEmergency(e.target.value)}
+                        placeholder="e.g. Farid (Father) 019-221 8810"
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      {regStatus === 'Checked-Out'
+                        ? 'Historical Room / Bed Occupied (All Rooms Shown)'
+                        : 'Assign Vacant Room / Bed'}
+                    </label>
+                    <select
+                      value={regRoomId}
+                      onChange={(e) => handleRoomSelectionChange(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {registerRoomChoices.map((r) => (
+                        <option key={r.roomId} value={r.roomId}>
+                          {r.roomId} — {r.location} (Blk {r.block}, Unit {r.unitNo}, {r.bedSlot}) · {formatRM(r.monthlyRate)}/mo
+                          {regStatus === 'Checked-Out' ? ` [${r.status}]` : ''}
+                        </option>
+                      ))}
+                    </select>
+                    {regStatus === 'Checked-Out' && (
+                      <p className="text-xs text-slate-600 mt-1">
+                        Historical import: the selected room&apos;s current live status will <strong>not</strong> be changed.
+                      </p>
+                    )}
+                    {regStatus === 'Active' && regOccupancyMode === 'Whole Unit Exclusive' && selectedRegisterRoom && (
+                      <div className="mt-2 p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                        {regSiblingVacantBeds.length > 0 ? (
+                          <p>
+                            <strong>Whole Unit Exclusive:</strong> Registering in{' '}
+                            <span className="font-mono">{selectedRegisterRoom.roomId}</span> will also mark{' '}
+                            <strong className="font-mono">
+                              {regSiblingVacantBeds.map((b) => b.roomId).join(', ')}
+                            </strong>{' '}
+                            as <strong>Reserved / Blocked</strong>.
+                          </p>
+                        ) : (
+                          <p>
+                            <strong>Whole Unit Exclusive:</strong> No other Vacant beds remain in Block{' '}
+                            {selectedRegisterRoom.block} Unit {selectedRegisterRoom.unitNo}.
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Check-In Date
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={regCheckInDate}
+                        onChange={(e) => {
+                          setRegCheckInDate(e.target.value);
+                          syncRegFirstMonth(
+                            e.target.value,
+                            regStandardRate,
+                            regMonthlyRebate
+                          );
+                        }}
+                        className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    {regStatus === 'Checked-Out' && (
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Check-Out Date
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={regCheckOutDate}
+                          onChange={(e) => setRegCheckOutDate(e.target.value)}
+                          className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                    )}
+                    <div className={regStatus === 'Checked-Out' ? 'sm:col-span-2' : ''}>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Deposit Paid (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={50000}
+                        step="0.01"
+                        value={regDepositPaid}
+                        onChange={(e) => setRegDepositPaid(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Pricing, Monthly Rebates & First-Month Proration */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-slate-700">
+                        Monthly Rate, Concession &amp; First-Month Proration
+                      </span>
+                      <span className="text-xs font-mono font-semibold text-blue-900 tabular-nums">
+                        Effective Monthly Fee: {formatRM(regEffectiveFee)}
+                      </span>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          First Month Charge (RM)
+                          Standard Room Rate (RM)
                         </label>
                         <input
                           type="number"
@@ -2127,35 +2058,121 @@ export function StudentsTab({
                           min={0}
                           max={10000}
                           step="0.01"
-                          value={regFirstMonthCharge}
+                          value={regStandardRate}
                           onChange={(e) => {
-                            setRegFirstMonthCharge(e.target.value);
-                            setRegFirstMonthManual(true);
+                            setRegStandardRate(e.target.value);
+                            syncRegFirstMonth(
+                              regCheckInDate,
+                              e.target.value,
+                              regMonthlyRebate
+                            );
                           }}
                           className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                         />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          First Month Proration Note
+                          Monthly Rebate (RM)
                         </label>
                         <input
-                          type="text"
-                          maxLength={64}
-                          value={regFirstMonthNote}
+                          type="number"
+                          required
+                          min={0}
+                          max={10000}
+                          step="0.01"
+                          value={regMonthlyRebate}
                           onChange={(e) => {
-                            setRegFirstMonthNote(e.target.value);
-                            setRegFirstMonthManual(true);
+                            setRegMonthlyRebate(e.target.value);
+                            syncRegFirstMonth(
+                              regCheckInDate,
+                              regStandardRate,
+                              e.target.value
+                            );
                           }}
-                          placeholder="e.g. After 15th Half-Rate"
-                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                         />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Rebate Reason
+                        </label>
+                        <select
+                          value={regRebateReason}
+                          onChange={(e) => setRegRebateReason(e.target.value)}
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        >
+                          {REBATE_REASONS.map((rr) => (
+                            <option key={rr} value={rr}>
+                              {rr}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="pt-2.5 border-t border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-xs font-medium text-slate-700">
+                          First Month Rule (Day &gt; 15 = 50% Half-Rate)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            syncRegFirstMonth(
+                              regCheckInDate,
+                              regStandardRate,
+                              regMonthlyRebate,
+                              true
+                            )
+                          }
+                          className="inline-flex items-center gap-1 text-xs font-medium text-blue-900 hover:text-blue-700 cursor-pointer whitespace-nowrap"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Apply Auto-Rule</span>
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">
+                            First Month Charge (RM)
+                          </label>
+                          <input
+                            type="number"
+                            required
+                            min={0}
+                            max={10000}
+                            step="0.01"
+                            value={regFirstMonthCharge}
+                            onChange={(e) => {
+                              setRegFirstMonthCharge(e.target.value);
+                              setRegFirstMonthManual(true);
+                            }}
+                            className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">
+                            First Month Proration Note
+                          </label>
+                          <input
+                            type="text"
+                            maxLength={64}
+                            value={regFirstMonthNote}
+                            onChange={(e) => {
+                              setRegFirstMonthNote(e.target.value);
+                              setRegFirstMonthManual(true);
+                            }}
+                            placeholder="e.g. After 15th Half-Rate"
+                            className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                {/* Pinned Footer */}
+                <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                   <button
                     type="button"
                     onClick={() => setShowRegisterModal(false)}
@@ -2183,9 +2200,10 @@ export function StudentsTab({
 
       {/* Edit / Check-Out Resident Modal */}
       {editingStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-2xl w-full p-6 space-y-5 my-8">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   Manage Resident · {editingStudent.studentId}
@@ -2204,360 +2222,281 @@ export function StudentsTab({
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleEditSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Residency Status
-                  </label>
-                  <select
-                    value={editStatus}
-                    onChange={(e) =>
-                      handleEditStatusChange(e.target.value as StudentStatus)
-                    }
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {STUDENT_STATUSES.map((st) => (
-                      <option key={st} value={st}>
-                        {st}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Resident Type
-                  </label>
-                  <select
-                    value={editResidentType}
-                    onChange={(e) =>
-                      setEditResidentType(e.target.value as ResidentType)
-                    }
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {RESIDENT_TYPES.map((rt) => (
-                      <option key={rt} value={rt}>
-                        {rt}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Occupancy Mode
-                  </label>
-                  <select
-                    value={editOccupancyMode}
-                    onChange={(e) =>
-                      setEditOccupancyMode(e.target.value as OccupancyMode)
-                    }
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {OCCUPANCY_MODES.map((om) => (
-                      <option key={om} value={om}>
-                        {om}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {editingStudent.status !== 'Checked-Out' &&
-                editStatus === 'Checked-Out' && (
-                  <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
-                    {editingStudent.assignedRoomId ? (
-                      <>
-                        Saving with status <strong>Checked-Out</strong> will
-                        automatically release room{' '}
-                        <span className="font-mono font-semibold">
-                          {editingStudent.assignedRoomId}
-                        </span>{' '}
-                        and any exclusive-unit blocked beds back to <strong>Vacant</strong>.
-                      </>
-                    ) : (
-                      <>
-                        Saving with status <strong>Checked-Out</strong> will mark this
-                        unassigned resident as checked out.
-                      </>
-                    )}
+            <form
+              onSubmit={handleEditSubmit}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
                   </div>
                 )}
 
-              {editStatus === 'Active' &&
-                editOccupancyMode === 'Whole Unit Exclusive' && (
-                  <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
-                    <strong>Whole Unit Exclusive:</strong>{' '}
-                    {editExclusiveSiblingCount > 0
-                      ? `${editExclusiveSiblingCount} sibling bed(s) in the same unit will be held as Reserved / Blocked.`
-                      : 'All sibling beds in this unit are already occupied or none exist.'}
-                  </div>
-                )}
-
-              {editStatus === 'Checked-Out' && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Check-Out Date (YYYY-MM-DD)
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={editCheckOutDate}
-                    onChange={(e) => setEditCheckOutDate(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              )}
-
-              {editStatus !== 'Checked-Out' && (
-                <div
-                  className={
-                    !(editingStudent.assignedRoomId || '').trim()
-                      ? 'p-3.5 rounded-lg bg-amber-50/70 border border-amber-200'
-                      : ''
-                  }
-                >
-                  <label className="block text-xs font-semibold text-slate-800 mb-1">
-                    {editingStudent.status === 'Checked-Out'
-                      ? 'Assign Vacant Room for Re-Check-In'
-                      : !(editingStudent.assignedRoomId || '').trim()
-                        ? 'Assign Vacant Room / Bed (Currently Unassigned)'
-                        : 'Transfer Room (Optional — Vacant Beds Only)'}
-                  </label>
-                  <select
-                    value={editNewRoomId}
-                    onChange={(e) => {
-                      setEditNewRoomId(e.target.value);
-                      const rm = vacantRooms.find((r) => r.roomId === e.target.value);
-                      if (rm) {
-                        const nextStd = String(rm.monthlyRate);
-                        setEditStandardRate(nextStd);
-                        syncEditFirstMonth(editCheckInDate, nextStd, editMonthlyRebate);
-                      }
-                    }}
-                    required={editingStudent.status === 'Checked-Out'}
-                    className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {editingStudent.status !== 'Checked-Out' && (
-                      <option value="">
-                        {editingStudent.assignedRoomId
-                          ? `Keep current room (${editingStudent.assignedRoomId})`
-                          : 'Keep Unassigned (Select a Vacant Room to assign)'}
-                      </option>
-                    )}
-                    {vacantRooms.map((r) => (
-                      <option key={r.roomId} value={r.roomId}>
-                        {r.roomId} — {r.location} ({formatRM(r.monthlyRate)}/mo)
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Full Name
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    minLength={2}
-                    maxLength={120}
-                    value={editFullName}
-                    onChange={(e) => setEditFullName(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Program / Category
-                  </label>
-                  <select
-                    value={editProgram}
-                    onChange={(e) => setEditProgram(e.target.value as ProgramType)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {PROGRAMS.map((p) => (
-                      <option key={p} value={p}>
-                        {p}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Phone Number
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={32}
-                    value={editPhone}
-                    onChange={(e) => setEditPhone(e.target.value)}
-                    placeholder="Optional — e.g. 012-345 6789"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Emergency Contact
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={120}
-                    value={editEmergency}
-                    onChange={(e) => setEditEmergency(e.target.value)}
-                    placeholder="Optional — e.g. Parent / Guardian contact"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Check-In Date
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={editCheckInDate}
-                    onChange={(e) => {
-                      setEditCheckInDate(e.target.value);
-                      syncEditFirstMonth(
-                        e.target.value,
-                        editStandardRate,
-                        editMonthlyRebate
-                      );
-                    }}
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Deposit Paid (RM)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    max={50000}
-                    step="0.01"
-                    value={editDepositPaid}
-                    onChange={(e) => setEditDepositPaid(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              </div>
-
-              {/* Pricing, Monthly Rebates & First-Month Proration */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <span className="text-xs font-semibold text-slate-700">
-                    Monthly Rate, Concession &amp; First-Month Proration
-                  </span>
-                  <span className="text-xs font-mono font-semibold text-blue-900 tabular-nums">
-                    Effective Monthly Fee: {formatRM(editEffectiveFee)}
-                  </span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Standard Room Rate (RM)
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      max={10000}
-                      step="0.01"
-                      value={editStandardRate}
-                      onChange={(e) => {
-                        setEditStandardRate(e.target.value);
-                        syncEditFirstMonth(
-                          editCheckInDate,
-                          e.target.value,
-                          editMonthlyRebate
-                        );
-                      }}
-                      className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Monthly Rebate (RM)
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      max={10000}
-                      step="0.01"
-                      value={editMonthlyRebate}
-                      onChange={(e) => {
-                        setEditMonthlyRebate(e.target.value);
-                        syncEditFirstMonth(
-                          editCheckInDate,
-                          editStandardRate,
-                          e.target.value
-                        );
-                      }}
-                      className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Rebate Reason
+                      Residency Status
                     </label>
                     <select
-                      value={editRebateReason}
-                      onChange={(e) => setEditRebateReason(e.target.value)}
-                      className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      value={editStatus}
+                      onChange={(e) =>
+                        handleEditStatusChange(e.target.value as StudentStatus)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     >
-                      {REBATE_REASONS.map((rr) => (
-                        <option key={rr} value={rr}>
-                          {rr}
+                      {STUDENT_STATUSES.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Resident Type
+                    </label>
+                    <select
+                      value={editResidentType}
+                      onChange={(e) =>
+                        setEditResidentType(e.target.value as ResidentType)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {RESIDENT_TYPES.map((rt) => (
+                        <option key={rt} value={rt}>
+                          {rt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Occupancy Mode
+                    </label>
+                    <select
+                      value={editOccupancyMode}
+                      onChange={(e) =>
+                        setEditOccupancyMode(e.target.value as OccupancyMode)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {OCCUPANCY_MODES.map((om) => (
+                        <option key={om} value={om}>
+                          {om}
                         </option>
                       ))}
                     </select>
                   </div>
                 </div>
 
-                <div className="pt-2.5 border-t border-slate-200 space-y-2">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-xs font-medium text-slate-700">
-                      First Month Rule (Day &gt; 15 = 50% Half-Rate)
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        syncEditFirstMonth(
-                          editCheckInDate,
-                          editStandardRate,
-                          editMonthlyRebate,
-                          true
-                        )
-                      }
-                      className="inline-flex items-center gap-1 text-xs font-medium text-blue-900 hover:text-blue-700 cursor-pointer whitespace-nowrap"
+                {editingStudent.status !== 'Checked-Out' &&
+                  editStatus === 'Checked-Out' && (
+                    <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                      {editingStudent.assignedRoomId ? (
+                        <>
+                          Saving with status <strong>Checked-Out</strong> will
+                          automatically release room{' '}
+                          <span className="font-mono font-semibold">
+                            {editingStudent.assignedRoomId}
+                          </span>{' '}
+                          and any exclusive-unit blocked beds back to <strong>Vacant</strong>.
+                        </>
+                      ) : (
+                        <>
+                          Saving with status <strong>Checked-Out</strong> will mark this
+                          unassigned resident as checked out.
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                {editStatus === 'Active' &&
+                  editOccupancyMode === 'Whole Unit Exclusive' && (
+                    <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                      <strong>Whole Unit Exclusive:</strong>{' '}
+                      {editExclusiveSiblingCount > 0
+                        ? `${editExclusiveSiblingCount} sibling bed(s) in the same unit will be held as Reserved / Blocked.`
+                        : 'All sibling beds in this unit are already occupied or none exist.'}
+                    </div>
+                  )}
+
+                {editStatus === 'Checked-Out' && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Check-Out Date (YYYY-MM-DD)
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={editCheckOutDate}
+                      onChange={(e) => setEditCheckOutDate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                )}
+
+                {editStatus !== 'Checked-Out' && (
+                  <div
+                    className={
+                      !(editingStudent.assignedRoomId || '').trim()
+                        ? 'p-3.5 rounded-lg bg-amber-50/70 border border-amber-200'
+                        : ''
+                    }
+                  >
+                    <label className="block text-xs font-semibold text-slate-800 mb-1">
+                      {editingStudent.status === 'Checked-Out'
+                        ? 'Assign Vacant Room for Re-Check-In'
+                        : !(editingStudent.assignedRoomId || '').trim()
+                          ? 'Assign Vacant Room / Bed (Currently Unassigned)'
+                          : 'Transfer Room (Optional — Vacant Beds Only)'}
+                    </label>
+                    <select
+                      value={editNewRoomId}
+                      onChange={(e) => {
+                        setEditNewRoomId(e.target.value);
+                        const rm = vacantRooms.find((r) => r.roomId === e.target.value);
+                        if (rm) {
+                          const nextStd = String(rm.monthlyRate);
+                          setEditStandardRate(nextStd);
+                          syncEditFirstMonth(editCheckInDate, nextStd, editMonthlyRebate);
+                        }
+                      }}
+                      required={editingStudent.status === 'Checked-Out'}
+                      className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     >
-                      <RotateCcw className="w-3 h-3" />
-                      <span>Apply Auto-Rule</span>
-                    </button>
+                      {editingStudent.status !== 'Checked-Out' && (
+                        <option value="">
+                          {editingStudent.assignedRoomId
+                            ? `Keep current room (${editingStudent.assignedRoomId})`
+                            : 'Keep Unassigned (Select a Vacant Room to assign)'}
+                        </option>
+                      )}
+                      {vacantRooms.map((r) => (
+                        <option key={r.roomId} value={r.roomId}>
+                          {r.roomId} — {r.location} ({formatRM(r.monthlyRate)}/mo)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Full Name
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={2}
+                      maxLength={120}
+                      value={editFullName}
+                      onChange={(e) => setEditFullName(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Program / Category
+                    </label>
+                    <select
+                      value={editProgram}
+                      onChange={(e) => setEditProgram(e.target.value as ProgramType)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {PROGRAMS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Phone Number
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={32}
+                      value={editPhone}
+                      onChange={(e) => setEditPhone(e.target.value)}
+                      placeholder="Optional — e.g. 012-345 6789"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Emergency Contact
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={120}
+                      value={editEmergency}
+                      onChange={(e) => setEditEmergency(e.target.value)}
+                      placeholder="Optional — e.g. Parent / Guardian contact"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Check-In Date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={editCheckInDate}
+                      onChange={(e) => {
+                        setEditCheckInDate(e.target.value);
+                        syncEditFirstMonth(
+                          e.target.value,
+                          editStandardRate,
+                          editMonthlyRebate
+                        );
+                      }}
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Deposit Paid (RM)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={50000}
+                      step="0.01"
+                      value={editDepositPaid}
+                      onChange={(e) => setEditDepositPaid(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                {/* Pricing, Monthly Rebates & First-Month Proration */}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Monthly Rate, Concession &amp; First-Month Proration
+                    </span>
+                    <span className="text-xs font-mono font-semibold text-blue-900 tabular-nums">
+                      Effective Monthly Fee: {formatRM(editEffectiveFee)}
+                    </span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        First Month Charge (RM)
+                        Standard Room Rate (RM)
                       </label>
                       <input
                         type="number"
@@ -2565,35 +2504,121 @@ export function StudentsTab({
                         min={0}
                         max={10000}
                         step="0.01"
-                        value={editFirstMonthCharge}
+                        value={editStandardRate}
                         onChange={(e) => {
-                          setEditFirstMonthCharge(e.target.value);
-                          setEditFirstMonthManual(true);
+                          setEditStandardRate(e.target.value);
+                          syncEditFirstMonth(
+                            editCheckInDate,
+                            e.target.value,
+                            editMonthlyRebate
+                          );
                         }}
                         className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                       />
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        First Month Proration Note
+                        Monthly Rebate (RM)
                       </label>
                       <input
-                        type="text"
-                        maxLength={64}
-                        value={editFirstMonthNote}
+                        type="number"
+                        required
+                        min={0}
+                        max={10000}
+                        step="0.01"
+                        value={editMonthlyRebate}
                         onChange={(e) => {
-                          setEditFirstMonthNote(e.target.value);
-                          setEditFirstMonthManual(true);
+                          setEditMonthlyRebate(e.target.value);
+                          syncEditFirstMonth(
+                            editCheckInDate,
+                            editStandardRate,
+                            e.target.value
+                          );
                         }}
-                        placeholder="e.g. After 15th Half-Rate"
-                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                       />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Rebate Reason
+                      </label>
+                      <select
+                        value={editRebateReason}
+                        onChange={(e) => setEditRebateReason(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {REBATE_REASONS.map((rr) => (
+                          <option key={rr} value={rr}>
+                            {rr}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="pt-2.5 border-t border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs font-medium text-slate-700">
+                        First Month Rule (Day &gt; 15 = 50% Half-Rate)
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          syncEditFirstMonth(
+                            editCheckInDate,
+                            editStandardRate,
+                            editMonthlyRebate,
+                            true
+                          )
+                        }
+                        className="inline-flex items-center gap-1 text-xs font-medium text-blue-900 hover:text-blue-700 cursor-pointer whitespace-nowrap"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Apply Auto-Rule</span>
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          First Month Charge (RM)
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          max={10000}
+                          step="0.01"
+                          value={editFirstMonthCharge}
+                          onChange={(e) => {
+                            setEditFirstMonthCharge(e.target.value);
+                            setEditFirstMonthManual(true);
+                          }}
+                          className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          First Month Proration Note
+                        </label>
+                        <input
+                          type="text"
+                          maxLength={64}
+                          value={editFirstMonthNote}
+                          onChange={(e) => {
+                            setEditFirstMonthNote(e.target.value);
+                            setEditFirstMonthManual(true);
+                          }}
+                          placeholder="e.g. After 15th Half-Rate"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+              {/* Pinned Footer */}
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setEditingStudent(null)}
@@ -2634,9 +2659,10 @@ export function StudentsTab({
 
       {/* Transfer Room Modal */}
       {transferStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 overflow-y-auto print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-xl w-full p-6 space-y-5 my-8">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   Transfer Room · {transferStudent.fullName}
@@ -2655,197 +2681,203 @@ export function StudentsTab({
               </button>
             </div>
 
-            {(() => {
-              const curr =
-                billingByStudentId.get(transferStudent.studentId) ||
-                calculateStudentBilling(transferStudent, payments);
-              return (
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div>
-                    <p className="text-slate-500 font-medium">Current Room &amp; Mode</p>
-                    <p className="font-mono font-semibold text-slate-900 mt-0.5">
-                      {transferStudent.assignedRoomId || 'Room Unassigned'} ·{' '}
-                      {transferStudent.hostelLocation || 'Unassigned'}
+            {transferVacantChoices.length === 0 ? (
+              <>
+                <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                  {(() => {
+                    const curr =
+                      billingByStudentId.get(transferStudent.studentId) ||
+                      calculateStudentBilling(transferStudent, payments);
+                    return (
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        <div>
+                          <p className="text-slate-500 font-medium">Current Room &amp; Mode</p>
+                          <p className="font-mono font-semibold text-slate-900 mt-0.5">
+                            {transferStudent.assignedRoomId || 'Room Unassigned'} ·{' '}
+                            {transferStudent.hostelLocation || 'Unassigned'}
+                          </p>
+                          <p className="text-slate-600 mt-0.5">{curr.occupancyMode}</p>
+                        </div>
+                        <div className="sm:text-right font-mono tabular-nums">
+                          <p className="font-sans text-slate-500 font-medium">Current Rate</p>
+                          <p className="text-sm font-bold text-slate-900 mt-0.5">
+                            {formatRM(curr.effectiveMonthlyFee)}/mo
+                          </p>
+                          {curr.monthlyRebate > 0 && (
+                            <p className="text-emerald-700">
+                              Std {formatRM(curr.standardRoomRate)} - Rebate{' '}
+                              {formatRM(curr.monthlyRebate)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {formError && (
+                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                      {formError}
+                    </div>
+                  )}
+                  <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1.5">
+                    <p className="font-semibold">No Vacant Beds Available</p>
+                    <p>
+                      There are currently no other Vacant beds in Room Inventory to
+                      transfer this resident into.
                     </p>
-                    <p className="text-slate-600 mt-0.5">{curr.occupancyMode}</p>
-                  </div>
-                  <div className="sm:text-right font-mono tabular-nums">
-                    <p className="font-sans text-slate-500 font-medium">Current Rate</p>
-                    <p className="text-sm font-bold text-slate-900 mt-0.5">
-                      {formatRM(curr.effectiveMonthlyFee)}/mo
-                    </p>
-                    {curr.monthlyRebate > 0 && (
-                      <p className="text-emerald-700">
-                        Std {formatRM(curr.standardRoomRate)} - Rebate{' '}
-                        {formatRM(curr.monthlyRebate)}
-                      </p>
-                    )}
                   </div>
                 </div>
-              );
-            })()}
-
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
-
-            {transferVacantChoices.length === 0 ? (
-              <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
-                <p className="font-semibold">No Vacant Beds Available</p>
-                <p>
-                  There are currently no other Vacant beds in Room Inventory to
-                  transfer this resident into.
-                </p>
-                <div className="pt-1 flex justify-end">
+                <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end">
                   <button
                     type="button"
                     onClick={() => setTransferStudent(null)}
-                    className="px-3.5 py-1.5 bg-white border border-amber-300 rounded-md font-medium cursor-pointer"
+                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
                   >
                     Close
                   </button>
                 </div>
-              </div>
+              </>
             ) : (
-              <form onSubmit={handleTransferSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Effective Transfer Date
-                    </label>
-                    <input
-                      type="date"
-                      required
-                      min={transferStudent.checkInDate}
-                      value={transferDate}
-                      onChange={(e) => setTransferDate(e.target.value)}
-                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
+              <form
+                onSubmit={handleTransferSubmit}
+                className="flex flex-col flex-1 min-h-0 overflow-hidden"
+              >
+                {/* Scrollable Body */}
+                <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                  {(() => {
+                    const curr =
+                      billingByStudentId.get(transferStudent.studentId) ||
+                      calculateStudentBilling(transferStudent, payments);
+                    return (
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        <div>
+                          <p className="text-slate-500 font-medium">Current Room &amp; Mode</p>
+                          <p className="font-mono font-semibold text-slate-900 mt-0.5">
+                            {transferStudent.assignedRoomId || 'Room Unassigned'} ·{' '}
+                            {transferStudent.hostelLocation || 'Unassigned'}
+                          </p>
+                          <p className="text-slate-600 mt-0.5">{curr.occupancyMode}</p>
+                        </div>
+                        <div className="sm:text-right font-mono tabular-nums">
+                          <p className="font-sans text-slate-500 font-medium">Current Rate</p>
+                          <p className="text-sm font-bold text-slate-900 mt-0.5">
+                            {formatRM(curr.effectiveMonthlyFee)}/mo
+                          </p>
+                          {curr.monthlyRebate > 0 && (
+                            <p className="text-emerald-700">
+                              Std {formatRM(curr.standardRoomRate)} - Rebate{' '}
+                              {formatRM(curr.monthlyRebate)}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {formError && (
+                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                      {formError}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Effective Transfer Date
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        min={transferStudent.checkInDate}
+                        value={transferDate}
+                        onChange={(e) => setTransferDate(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        New Occupancy Mode
+                      </label>
+                      <select
+                        value={transferOccupancyMode}
+                        onChange={(e) =>
+                          setTransferOccupancyMode(e.target.value as OccupancyMode)
+                        }
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {OCCUPANCY_MODES.map((om) => (
+                          <option key={om} value={om}>
+                            {om}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
+
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      New Occupancy Mode
+                      Select Destination Vacant Bed
                     </label>
                     <select
-                      value={transferOccupancyMode}
-                      onChange={(e) =>
-                        setTransferOccupancyMode(e.target.value as OccupancyMode)
-                      }
+                      required
+                      value={transferNewRoomId}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        setTransferNewRoomId(nextId);
+                        const rm = transferVacantChoices.find(
+                          (r) => r.roomId === nextId
+                        );
+                        if (rm) {
+                          setTransferStdRate(String(rm.monthlyRate));
+                        }
+                      }}
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     >
-                      {OCCUPANCY_MODES.map((om) => (
-                        <option key={om} value={om}>
-                          {om}
+                      {transferVacantChoices.map((r) => (
+                        <option key={r.roomId} value={r.roomId}>
+                          {r.roomId} — {r.location} (Blk {r.block}, Unit {r.unitNo},{' '}
+                          {r.bedSlot}) · {formatRM(r.monthlyRate)}/mo
                         </option>
                       ))}
                     </select>
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Select Destination Vacant Bed
-                  </label>
-                  <select
-                    required
-                    value={transferNewRoomId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setTransferNewRoomId(nextId);
-                      const rm = transferVacantChoices.find(
-                        (r) => r.roomId === nextId
-                      );
-                      if (rm) {
-                        setTransferStdRate(String(rm.monthlyRate));
-                      }
-                    }}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {transferVacantChoices.map((r) => (
-                      <option key={r.roomId} value={r.roomId}>
-                        {r.roomId} — {r.location} (Blk {r.block}, Unit {r.unitNo},{' '}
-                        {r.bedSlot}) · {formatRM(r.monthlyRate)}/mo
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                  {transferOccupancyMode === 'Whole Unit Exclusive' &&
+                    selectedTransferRoom && (
+                      <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                        {transferExclusiveSiblings.length > 0 ? (
+                          <p>
+                            <strong>Whole Unit Exclusive:</strong> Transferring into{' '}
+                            <span className="font-mono">{selectedTransferRoom.roomId}</span>{' '}
+                            will automatically block{' '}
+                            <strong className="font-mono">
+                              {transferExclusiveSiblings.map((b) => b.roomId).join(', ')}
+                            </strong>{' '}
+                            as <strong>Reserved / Blocked</strong>.
+                          </p>
+                        ) : (
+                          <p>
+                            <strong>Whole Unit Exclusive:</strong> No other Vacant beds
+                            remain in Block {selectedTransferRoom.block} Unit{' '}
+                            {selectedTransferRoom.unitNo}.
+                          </p>
+                        )}
+                      </div>
+                    )}
 
-                {transferOccupancyMode === 'Whole Unit Exclusive' &&
-                  selectedTransferRoom && (
-                    <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
-                      {transferExclusiveSiblings.length > 0 ? (
-                        <p>
-                          <strong>Whole Unit Exclusive:</strong> Transferring into{' '}
-                          <span className="font-mono">{selectedTransferRoom.roomId}</span>{' '}
-                          will automatically block{' '}
-                          <strong className="font-mono">
-                            {transferExclusiveSiblings.map((b) => b.roomId).join(', ')}
-                          </strong>{' '}
-                          as <strong>Reserved / Blocked</strong>.
-                        </p>
-                      ) : (
-                        <p>
-                          <strong>Whole Unit Exclusive:</strong> No other Vacant beds
-                          remain in Block {selectedTransferRoom.block} Unit{' '}
-                          {selectedTransferRoom.unitNo}.
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-xs font-semibold text-slate-700">
-                      New Segment Pricing &amp; Rebate
-                    </span>
-                    <span className="text-xs font-mono font-bold text-blue-900 tabular-nums">
-                      New Effective Rate: {formatRM(transferEffectiveFee)}/mo
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        New Standard Room Rate (RM)
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min={0}
-                        max={10000}
-                        step="0.01"
-                        value={transferStdRate}
-                        onChange={(e) => setTransferStdRate(e.target.value)}
-                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                    <label className="flex items-center gap-2 py-2 text-xs font-medium text-slate-700 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={keepExistingRebate}
-                        onChange={(e) => setKeepExistingRebate(e.target.checked)}
-                        className="w-4 h-4 rounded border-slate-300 text-blue-900 focus:ring-blue-900"
-                      />
-                      <span>
-                        Keep existing rebate (
-                        <span className="font-mono">
-                          {formatRM(
-                            billingByStudentId.get(transferStudent.studentId)
-                              ?.monthlyRebate ?? 0
-                          )}
-                        </span>
-                        )
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-slate-700">
+                        New Segment Pricing &amp; Rebate
                       </span>
-                    </label>
-                  </div>
+                      <span className="text-xs font-mono font-bold text-blue-900 tabular-nums">
+                        New Effective Rate: {formatRM(transferEffectiveFee)}/mo
+                      </span>
+                    </div>
 
-                  {!keepExistingRebate && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Adjusted Monthly Rebate (RM)
+                          New Standard Room Rate (RM)
                         </label>
                         <input
                           type="number"
@@ -2853,92 +2885,131 @@ export function StudentsTab({
                           min={0}
                           max={10000}
                           step="0.01"
-                          value={transferMonthlyRebate}
-                          onChange={(e) => setTransferMonthlyRebate(e.target.value)}
+                          value={transferStdRate}
+                          onChange={(e) => setTransferStdRate(e.target.value)}
                           className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                         />
                       </div>
+                      <label className="flex items-center gap-2 py-2 text-xs font-medium text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={keepExistingRebate}
+                          onChange={(e) => setKeepExistingRebate(e.target.checked)}
+                          className="w-4 h-4 rounded border-slate-300 text-blue-900 focus:ring-blue-900"
+                        />
+                        <span>
+                          Keep existing rebate (
+                          <span className="font-mono">
+                            {formatRM(
+                              billingByStudentId.get(transferStudent.studentId)
+                                ?.monthlyRebate ?? 0
+                            )}
+                          </span>
+                          )
+                        </span>
+                      </label>
+                    </div>
+
+                    {!keepExistingRebate && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-slate-200">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">
+                            Adjusted Monthly Rebate (RM)
+                          </label>
+                          <input
+                            type="number"
+                            required
+                            min={0}
+                            max={10000}
+                            step="0.01"
+                            value={transferMonthlyRebate}
+                            onChange={(e) => setTransferMonthlyRebate(e.target.value)}
+                            className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">
+                            Rebate Reason
+                          </label>
+                          <select
+                            value={transferRebateReason}
+                            onChange={(e) => setTransferRebateReason(e.target.value)}
+                            className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          >
+                            {REBATE_REASONS.map((rr) => (
+                              <option key={rr} value={rr}>
+                                {rr}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className={transferReason === 'Other' ? '' : 'sm:col-span-2'}>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Transfer Reason
+                      </label>
+                      <select
+                        value={transferReason}
+                        onChange={(e) => setTransferReason(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {TRANSFER_REASONS.map((reason) => (
+                          <option key={reason} value={reason}>
+                            {reason}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {transferReason === 'Other' && (
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Rebate Reason
+                          Specify Reason
                         </label>
-                        <select
-                          value={transferRebateReason}
-                          onChange={(e) => setTransferRebateReason(e.target.value)}
-                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                        >
-                          {REBATE_REASONS.map((rr) => (
-                            <option key={rr} value={rr}>
-                              {rr}
-                            </option>
-                          ))}
-                        </select>
+                        <input
+                          type="text"
+                          maxLength={120}
+                          value={transferCustomReason}
+                          onChange={(e) => setTransferCustomReason(e.target.value)}
+                          placeholder="Describe reason for relocation..."
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
                       </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className={transferReason === 'Other' ? '' : 'sm:col-span-2'}>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Transfer Reason
-                    </label>
-                    <select
-                      value={transferReason}
-                      onChange={(e) => setTransferReason(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    >
-                      {TRANSFER_REASONS.map((reason) => (
-                        <option key={reason} value={reason}>
-                          {reason}
-                        </option>
-                      ))}
-                    </select>
+                    )}
                   </div>
-                  {transferReason === 'Other' && (
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Specify Reason
-                      </label>
-                      <input
-                        type="text"
-                        maxLength={120}
-                        value={transferCustomReason}
-                        onChange={(e) => setTransferCustomReason(e.target.value)}
-                        placeholder="Describe reason for relocation..."
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                  )}
+
+                  <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900">
+                    {transferStudent.assignedRoomId ? (
+                      <>
+                        Saving will close the current stay segment in{' '}
+                        <span className="font-mono font-semibold">
+                          {transferStudent.assignedRoomId}
+                        </span>{' '}
+                        (releasing it to <strong>Vacant</strong>) and lock{' '}
+                        <span className="font-mono font-semibold">
+                          {selectedTransferRoom?.roomId}
+                        </span>{' '}
+                        as <strong>Occupied</strong> starting{' '}
+                        <span className="font-mono">{transferDate}</span>.
+                      </>
+                    ) : (
+                      <>
+                        Saving will assign{' '}
+                        <span className="font-mono font-semibold">
+                          {selectedTransferRoom?.roomId}
+                        </span>{' '}
+                        as the initial stay segment and mark the bed as{' '}
+                        <strong>Occupied</strong>.
+                      </>
+                    )}
+                  </div>
                 </div>
 
-                <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900">
-                  {transferStudent.assignedRoomId ? (
-                    <>
-                      Saving will close the current stay segment in{' '}
-                      <span className="font-mono font-semibold">
-                        {transferStudent.assignedRoomId}
-                      </span>{' '}
-                      (releasing it to <strong>Vacant</strong>) and lock{' '}
-                      <span className="font-mono font-semibold">
-                        {selectedTransferRoom?.roomId}
-                      </span>{' '}
-                      as <strong>Occupied</strong> starting{' '}
-                      <span className="font-mono">{transferDate}</span>.
-                    </>
-                  ) : (
-                    <>
-                      Saving will assign{' '}
-                      <span className="font-mono font-semibold">
-                        {selectedTransferRoom?.roomId}
-                      </span>{' '}
-                      as the initial stay segment and mark the bed as{' '}
-                      <strong>Occupied</strong>.
-                    </>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                {/* Pinned Footer */}
+                <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                   <button
                     type="button"
                     onClick={() => setTransferStudent(null)}
@@ -2962,9 +3033,10 @@ export function StudentsTab({
 
       {/* Direct Assign Room Modal (for Room Unassigned students) */}
       {assigningStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 overflow-y-auto print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5 my-8">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   Assign Room · {assigningStudent.fullName}
@@ -2983,159 +3055,175 @@ export function StudentsTab({
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
-
             {vacantRooms.length === 0 ? (
-              <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
-                <p className="font-semibold">No Vacant Beds Available</p>
-                <p>
-                  There are currently no Vacant beds in Room Inventory. Add or free a bed
-                  first.
-                </p>
-                <div className="flex justify-end pt-1">
+              <>
+                <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                  {formError && (
+                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                      {formError}
+                    </div>
+                  )}
+                  <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1.5">
+                    <p className="font-semibold">No Vacant Beds Available</p>
+                    <p>
+                      There are currently no Vacant beds in Room Inventory. Add or free a bed
+                      first.
+                    </p>
+                  </div>
+                </div>
+                <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end">
                   <button
                     type="button"
                     onClick={() => setAssigningStudent(null)}
-                    className="px-3.5 py-1.5 bg-white border border-amber-300 rounded-md font-medium cursor-pointer"
+                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
                   >
                     Close
                   </button>
                 </div>
-              </div>
+              </>
             ) : (
-              <form onSubmit={handleAssignRoomSubmit} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Select Vacant Room / Bed
-                  </label>
-                  <select
-                    required
-                    value={assignRoomId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setAssignRoomId(nextId);
-                      const rm = vacantRooms.find((r) => r.roomId === nextId);
-                      if (rm) {
-                        setAssignStdRate(String(rm.monthlyRate));
-                      }
-                    }}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {vacantRooms.map((r) => (
-                      <option key={r.roomId} value={r.roomId}>
-                        {r.roomId} — {r.location} (Blk {r.block}, Unit {r.unitNo},{' '}
-                        {r.bedSlot}) · {formatRM(r.monthlyRate)}/mo
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <form
+                onSubmit={handleAssignRoomSubmit}
+                className="flex flex-col flex-1 min-h-0 overflow-hidden"
+              >
+                {/* Scrollable Body */}
+                <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                  {formError && (
+                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                      {formError}
+                    </div>
+                  )}
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Placement / Start Date
-                    </label>
-                    <input
-                      type="date"
-                      required
-                      value={assignPlacementDate}
-                      onChange={(e) => setAssignPlacementDate(e.target.value)}
-                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Occupancy Mode
+                      Select Vacant Room / Bed
                     </label>
                     <select
-                      value={assignOccupancyMode}
-                      onChange={(e) =>
-                        setAssignOccupancyMode(e.target.value as OccupancyMode)
-                      }
+                      required
+                      value={assignRoomId}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        setAssignRoomId(nextId);
+                        const rm = vacantRooms.find((r) => r.roomId === nextId);
+                        if (rm) {
+                          setAssignStdRate(String(rm.monthlyRate));
+                        }
+                      }}
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     >
-                      {OCCUPANCY_MODES.map((om) => (
-                        <option key={om} value={om}>
-                          {om}
+                      {vacantRooms.map((r) => (
+                        <option key={r.roomId} value={r.roomId}>
+                          {r.roomId} — {r.location} (Blk {r.block}, Unit {r.unitNo},{' '}
+                          {r.bedSlot}) · {formatRM(r.monthlyRate)}/mo
                         </option>
                       ))}
                     </select>
                   </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Placement / Start Date
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={assignPlacementDate}
+                        onChange={(e) => setAssignPlacementDate(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Occupancy Mode
+                      </label>
+                      <select
+                        value={assignOccupancyMode}
+                        onChange={(e) =>
+                          setAssignOccupancyMode(e.target.value as OccupancyMode)
+                        }
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {OCCUPANCY_MODES.map((om) => (
+                          <option key={om} value={om}>
+                            {om}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {assignOccupancyMode === 'Whole Unit Exclusive' && selectedAssignRoom && (
+                    <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                      {assignSiblingBeds.length > 0 ? (
+                        <p>
+                          <strong>Whole Unit Exclusive:</strong> Will also mark{' '}
+                          <strong className="font-mono">
+                            {assignSiblingBeds.map((b) => b.roomId).join(', ')}
+                          </strong>{' '}
+                          as <strong>Reserved / Blocked</strong>.
+                        </p>
+                      ) : (
+                        <p>
+                          <strong>Whole Unit Exclusive:</strong> No other Vacant beds remain in
+                          Block {selectedAssignRoom.block} Unit {selectedAssignRoom.unitNo}.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Standard Rate (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={10000}
+                        step="0.01"
+                        value={assignStdRate}
+                        onChange={(e) => setAssignStdRate(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Monthly Rebate (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={10000}
+                        step="0.01"
+                        value={assignRebate}
+                        onChange={(e) => setAssignRebate(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Rebate Reason
+                      </label>
+                      <select
+                        value={assignRebateReason}
+                        onChange={(e) => setAssignRebateReason(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {REBATE_REASONS.map((rr) => (
+                          <option key={rr} value={rr}>
+                            {rr}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
 
-                {assignOccupancyMode === 'Whole Unit Exclusive' && selectedAssignRoom && (
-                  <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
-                    {assignSiblingBeds.length > 0 ? (
-                      <p>
-                        <strong>Whole Unit Exclusive:</strong> Will also mark{' '}
-                        <strong className="font-mono">
-                          {assignSiblingBeds.map((b) => b.roomId).join(', ')}
-                        </strong>{' '}
-                        as <strong>Reserved / Blocked</strong>.
-                      </p>
-                    ) : (
-                      <p>
-                        <strong>Whole Unit Exclusive:</strong> No other Vacant beds remain in
-                        Block {selectedAssignRoom.block} Unit {selectedAssignRoom.unitNo}.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Standard Rate (RM)
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      max={10000}
-                      step="0.01"
-                      value={assignStdRate}
-                      onChange={(e) => setAssignStdRate(e.target.value)}
-                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Monthly Rebate (RM)
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      max={10000}
-                      step="0.01"
-                      value={assignRebate}
-                      onChange={(e) => setAssignRebate(e.target.value)}
-                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Rebate Reason
-                    </label>
-                    <select
-                      value={assignRebateReason}
-                      onChange={(e) => setAssignRebateReason(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    >
-                      {REBATE_REASONS.map((rr) => (
-                        <option key={rr} value={rr}>
-                          {rr}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+                {/* Pinned Footer */}
+                <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                   <button
                     type="button"
                     onClick={() => setAssigningStudent(null)}
@@ -3159,9 +3247,10 @@ export function StudentsTab({
 
       {/* View Statement / Profile Modal (Editable Room & Tenancy History + Inline Payment Ledger) */}
       {liveStatementStudent && statementBilling && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 overflow-y-auto print:static print:bg-white print:p-0">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-4xl w-full p-6 sm:p-8 space-y-6 my-8 print:my-0 print:border-0 print:max-w-none print:p-4">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 pb-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4 print:static print:bg-white print:p-0 print:block">
+          <div className="w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200 print:max-h-none print:overflow-visible print:shadow-none print:border-0 print:rounded-none print:max-w-none">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-200 flex items-start justify-between gap-4 print:px-4">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-lg bg-blue-900 text-white flex items-center justify-center shrink-0">
                   <Building2 className="w-5 h-5" />
@@ -3211,326 +3300,189 @@ export function StudentsTab({
               </div>
             </div>
 
-            {feedbackBanner && (
-              <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-3.5 py-2 text-xs font-medium flex items-center justify-between gap-3 print:hidden">
-                <span>{feedbackBanner}</span>
-                <button
-                  type="button"
-                  onClick={() => setFeedbackBanner(null)}
-                  className="text-blue-900 hover:text-blue-700 cursor-pointer"
-                  aria-label="Dismiss message"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )}
-
-            {/* Financial KPI Strip */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <p className="text-xs text-slate-500">Current Rate</p>
-                <p className="font-mono text-base font-bold text-slate-900 tabular-nums mt-0.5">
-                  {formatRM(statementBilling.effectiveMonthlyFee)}/mo
-                </p>
-                <p className="text-xs text-slate-500 font-mono mt-0.5">
-                  Dep: {formatRM(liveStatementStudent.depositPaid)}
-                </p>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <p className="text-xs text-slate-500">
-                  Expected Rent ({statementBilling.monthsBilled} mo)
-                </p>
-                <p className="font-mono text-base font-bold text-slate-900 tabular-nums mt-0.5">
-                  {formatRM(statementBilling.totalExpectedRent)}
-                </p>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Across {statementBilling.segments.length}{' '}
-                  {statementBilling.segments.length === 1 ? 'stay segment' : 'stay segments'}
-                </p>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <p className="text-xs text-slate-500">Rent &amp; Waivers Credited</p>
-                <p className="font-mono text-base font-bold text-emerald-700 tabular-nums mt-0.5">
-                  {formatRM(statementBilling.totalRentCredited)}
-                </p>
-                <p className="text-xs text-slate-500 mt-0.5">Settled entries</p>
-              </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                <p className="text-xs text-slate-500">Outstanding Balance</p>
-                <p
-                  className={`font-mono text-base font-bold tabular-nums mt-0.5 ${
-                    statementBilling.outstandingBalance > 0
-                      ? 'text-red-700'
-                      : 'text-emerald-700'
-                  }`}
-                >
-                  {formatRM(statementBilling.outstandingBalance)}
-                </p>
-                <div className="mt-1">
-                  <StatusBadge status={liveStatementStudent.status} />
-                </div>
-              </div>
-            </div>
-
-            {/* Editable Room & Tenancy History */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <h3 className="font-display text-sm font-semibold text-slate-900">
-                    Room &amp; Tenancy History
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {isMasterAdmin
-                      ? 'Chronological stay segments (Master Admin can add historical stays or edit rates without changing live bed occupancy)'
-                      : 'Chronological stay segments (historical stay editing is restricted to Master Admin)'}
-                  </p>
-                </div>
-                {isMasterAdmin && (
+            {/* Scrollable Body */}
+            <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-6 print:overflow-visible print:p-4">
+              {feedbackBanner && (
+                <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-3.5 py-2 text-xs font-medium flex items-center justify-between gap-3 print:hidden">
+                  <span>{feedbackBanner}</span>
                   <button
                     type="button"
-                    onClick={openAddStaySegmentModal}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap print:hidden"
+                    onClick={() => setFeedbackBanner(null)}
+                    className="text-blue-900 hover:text-blue-700 cursor-pointer"
+                    aria-label="Dismiss message"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Past Stay Record</span>
+                    <X className="w-3.5 h-3.5" />
                   </button>
-                )}
-              </div>
-
-              {statementBilling.segments.length === 0 ? (
-                <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500 space-y-2">
-                  <p>No room stay segments recorded yet.</p>
-                  <p>
-                    {isMasterAdmin
-                      ? 'Click “Add Past Stay Record” above for historical stays or assign a live Vacant room from the resident’s row.'
-                      : 'Assign a live Vacant room from the resident’s row, or ask a Master Admin to import historical stays.'}
-                  </p>
-                </div>
-              ) : (
-                <div className="border border-slate-200 rounded-lg divide-y divide-slate-200 overflow-hidden">
-                  {statementBilling.segments.map((sb, idx) => {
-                    const seg = sb.segment;
-                    const isClosedSegment = seg.endDate !== null;
-                    const isCurrentOpen =
-                      !isClosedSegment && liveStatementStudent.status === 'Active';
-                    return (
-                      <div
-                        key={seg.id}
-                        className={`p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs ${
-                          isCurrentOpen ? 'bg-blue-50/40' : 'bg-white'
-                        }`}
-                      >
-                        <div className="space-y-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="font-mono text-xs font-semibold text-slate-500">
-                              #{idx + 1}
-                            </span>
-                            <span className="font-mono font-bold text-slate-900">
-                              {seg.roomId || 'Room Unassigned'}
-                            </span>
-                            <span className="text-slate-500">
-                              · {seg.hostelLocation || 'Unassigned'} · {seg.occupancyMode}
-                            </span>
-                            {isClosedSegment ? (
-                              <StatusBadge status="Historical Rate (Locked to Period)" />
-                            ) : isCurrentOpen ? (
-                              <StatusBadge status="Active" />
-                            ) : null}
-                          </div>
-                          <p className="text-slate-700 font-mono tabular-nums">
-                            {seg.startDate} →{' '}
-                            {seg.endDate ||
-                              (liveStatementStudent.status === 'Checked-Out'
-                                ? liveStatementStudent.checkOutDate || 'Checked-Out'
-                                : 'Present')}
-                            {sb.billedMonths.length > 0 && (
-                              <span className="font-sans text-slate-500 ml-2">
-                                (Billed months: {sb.billedMonths.join(', ')})
-                              </span>
-                            )}
-                          </p>
-                          <p className="text-slate-500">
-                            Reason:{' '}
-                            <span className="text-slate-700 font-medium">{seg.reason}</span> ·
-                            Recorded by <span className="font-mono">{seg.recordedBy}</span>
-                            {seg.recordedAt
-                              ? ` on ${new Date(seg.recordedAt).toLocaleDateString('en-MY')}`
-                              : ''}
-                          </p>
-                        </div>
-
-                        <div className="flex flex-col md:items-end gap-2 shrink-0">
-                          <div className="md:text-right font-mono tabular-nums space-y-0.5">
-                            <p className="font-semibold text-slate-900">
-                              {formatRM(seg.effectiveMonthlyFee)}/mo
-                              <span className="font-sans font-normal text-slate-500 ml-1.5">
-                                × {sb.monthsBilled} {sb.monthsBilled === 1 ? 'mo' : 'mos'}
-                              </span>
-                            </p>
-                            {seg.monthlyRebate > 0 && (
-                              <p className="text-emerald-700">
-                                Std {formatRM(seg.standardRoomRate)} · Rebate -
-                                {formatRM(seg.monthlyRebate)}
-                              </p>
-                            )}
-                            {sb.billedMonths[0] === seg.startDate.slice(0, 7) &&
-                              typeof seg.firstMonthCharge === 'number' &&
-                              Math.abs(seg.firstMonthCharge - seg.effectiveMonthlyFee) >
-                                0.01 && (
-                                <p className="text-blue-900">
-                                  1st month prorated: {formatRM(seg.firstMonthCharge)}
-                                </p>
-                              )}
-                            <p className="text-slate-800 font-bold">
-                              Segment Subtotal: {formatRM(sb.expectedRent)}
-                            </p>
-                          </div>
-
-                          {isMasterAdmin && (
-                            <div className="inline-flex items-center gap-1.5 print:hidden">
-                              <button
-                                type="button"
-                                onClick={() => openEditStaySegmentModal(seg)}
-                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded cursor-pointer"
-                              >
-                                <Pencil className="w-3 h-3" />
-                                <span>Edit</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setFormError(null);
-                                  setDeletingStaySegment(seg);
-                                }}
-                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-700 bg-white border border-red-200 hover:bg-red-50 rounded cursor-pointer"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                <span>Delete</span>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
                 </div>
               )}
-            </div>
 
-            {/* Payment Ledger with Inline Record / Backdate / Edit / Delete */}
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div>
-                  <h3 className="font-display text-sm font-semibold text-slate-900">
-                    Payment &amp; Fee Waiver Ledger
-                  </h3>
-                  <p className="text-xs text-slate-500 tabular-nums">
-                    {statementPayments.length}{' '}
-                    {statementPayments.length === 1 ? 'entry' : 'entries'} recorded
+              {/* Financial KPI Strip */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <p className="text-xs text-slate-500">Current Rate</p>
+                  <p className="font-mono text-base font-bold text-slate-900 tabular-nums mt-0.5">
+                    {formatRM(statementBilling.effectiveMonthlyFee)}/mo
+                  </p>
+                  <p className="text-xs text-slate-500 font-mono mt-0.5">
+                    Dep: {formatRM(liveStatementStudent.depositPaid)}
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 print:hidden">
-                  {isMasterAdmin &&
-                    liveStatementStudent.status === 'Checked-Out' &&
-                    statementBilling.outstandingBalance > 0.009 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setFormError(null);
-                          setSettleBalanceConfirmOpen(true);
-                        }}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-lg cursor-pointer whitespace-nowrap"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Settle Full Historical Balance</span>
-                      </button>
-                    )}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <p className="text-xs text-slate-500">
+                    Expected Rent ({statementBilling.monthsBilled} mo)
+                  </p>
+                  <p className="font-mono text-base font-bold text-slate-900 tabular-nums mt-0.5">
+                    {formatRM(statementBilling.totalExpectedRent)}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Across {statementBilling.segments.length}{' '}
+                    {statementBilling.segments.length === 1 ? 'stay segment' : 'stay segments'}
+                  </p>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <p className="text-xs text-slate-500">Rent &amp; Waivers Credited</p>
+                  <p className="font-mono text-base font-bold text-emerald-700 tabular-nums mt-0.5">
+                    {formatRM(statementBilling.totalRentCredited)}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-0.5">Settled entries</p>
+                </div>
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+                  <p className="text-xs text-slate-500">Outstanding Balance</p>
+                  <p
+                    className={`font-mono text-base font-bold tabular-nums mt-0.5 ${
+                      statementBilling.outstandingBalance > 0
+                        ? 'text-red-700'
+                        : 'text-emerald-700'
+                    }`}
+                  >
+                    {formatRM(statementBilling.outstandingBalance)}
+                  </p>
+                  <div className="mt-1">
+                    <StatusBadge status={liveStatementStudent.status} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Editable Room & Tenancy History */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <h3 className="font-display text-sm font-semibold text-slate-900">
+                      Room &amp; Tenancy History
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      {isMasterAdmin
+                        ? 'Chronological stay segments (Master Admin can add historical stays or edit rates without changing live bed occupancy)'
+                        : 'Chronological stay segments (historical stay editing is restricted to Master Admin)'}
+                    </p>
+                  </div>
                   {isMasterAdmin && (
                     <button
                       type="button"
-                      onClick={openBatchPastPaymentsModal}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
+                      onClick={openAddStaySegmentModal}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap print:hidden"
                     >
-                      <CalendarCheck2 className="w-3.5 h-3.5" />
-                      <span>Batch Add Past Payments</span>
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Past Stay Record</span>
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={openStmtRecordPaymentModal}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Record / Backdate Payment</span>
-                  </button>
                 </div>
-              </div>
 
-              {statementPayments.length === 0 ? (
-                <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
-                  No payment or fee waiver entries recorded for this resident yet.
-                </div>
-              ) : (
-                <div className="border border-slate-200 rounded-lg overflow-x-auto">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                        <th className="py-2.5 px-3">Receipt No.</th>
-                        <th className="py-2.5 px-3">Month / Type</th>
-                        <th className="py-2.5 px-3">Method &amp; Ref</th>
-                        <th className="py-2.5 px-3">Date</th>
-                        <th className="py-2.5 px-3 text-right">Amount</th>
-                        <th className="py-2.5 px-3">Physical Receipt</th>
-                        <th className="py-2.5 px-3">Status</th>
-                        <th className="py-2.5 px-3 text-right print:hidden">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {statementPayments.map((p) => {
-                        const physStatus = getPhysicalReceiptStatus(p);
-                        return (
-                          <tr key={p.paymentId}>
-                            <td className="py-2.5 px-3 font-mono font-semibold text-blue-900 whitespace-nowrap">
-                              {getPaymentReceiptNo(p)}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <p className="font-mono font-semibold text-slate-900">
-                                {p.billingMonth}
+                {statementBilling.segments.length === 0 ? (
+                  <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500 space-y-2">
+                    <p>No room stay segments recorded yet.</p>
+                    <p>
+                      {isMasterAdmin
+                        ? 'Click “Add Past Stay Record” above for historical stays or assign a live Vacant room from the resident’s row.'
+                        : 'Assign a live Vacant room from the resident’s row, or ask a Master Admin to import historical stays.'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-lg divide-y divide-slate-200 overflow-hidden">
+                    {statementBilling.segments.map((sb, idx) => {
+                      const seg = sb.segment;
+                      const isClosedSegment = seg.endDate !== null;
+                      const isCurrentOpen =
+                        !isClosedSegment && liveStatementStudent.status === 'Active';
+                      return (
+                        <div
+                          key={seg.id}
+                          className={`p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs ${
+                            isCurrentOpen ? 'bg-blue-50/40' : 'bg-white'
+                          }`}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-xs font-semibold text-slate-500">
+                                #{idx + 1}
+                              </span>
+                              <span className="font-mono font-bold text-slate-900">
+                                {seg.roomId || 'Room Unassigned'}
+                              </span>
+                              <span className="text-slate-500">
+                                · {seg.hostelLocation || 'Unassigned'} · {seg.occupancyMode}
+                              </span>
+                              {isClosedSegment ? (
+                                <StatusBadge status="Historical Rate (Locked to Period)" />
+                              ) : isCurrentOpen ? (
+                                <StatusBadge status="Active" />
+                              ) : null}
+                            </div>
+                            <p className="text-slate-700 font-mono tabular-nums">
+                              {seg.startDate} →{' '}
+                              {seg.endDate ||
+                                (liveStatementStudent.status === 'Checked-Out'
+                                  ? liveStatementStudent.checkOutDate || 'Checked-Out'
+                                  : 'Present')}
+                              {sb.billedMonths.length > 0 && (
+                                <span className="font-sans text-slate-500 ml-2">
+                                  (Billed months: {sb.billedMonths.join(', ')})
+                                </span>
+                              )}
+                            </p>
+                            <p className="text-slate-500">
+                              Reason:{' '}
+                              <span className="text-slate-700 font-medium">{seg.reason}</span> ·
+                              Recorded by <span className="font-mono">{seg.recordedBy}</span>
+                              {seg.recordedAt
+                                ? ` on ${new Date(seg.recordedAt).toLocaleDateString('en-MY')}`
+                                : ''}
+                            </p>
+                          </div>
+
+                          <div className="flex flex-col md:items-end gap-2 shrink-0">
+                            <div className="md:text-right font-mono tabular-nums space-y-0.5">
+                              <p className="font-semibold text-slate-900">
+                                {formatRM(seg.effectiveMonthlyFee)}/mo
+                                <span className="font-sans font-normal text-slate-500 ml-1.5">
+                                  × {sb.monthsBilled} {sb.monthsBilled === 1 ? 'mo' : 'mos'}
+                                </span>
                               </p>
-                              <p className="text-slate-500">{p.paymentType}</p>
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <p className="text-slate-800">{p.paymentMethod}</p>
-                              {getPaymentBankRef(p) && (
-                                <p className="font-mono text-slate-500">
-                                  {getPaymentBankRef(p)}
+                              {seg.monthlyRebate > 0 && (
+                                <p className="text-emerald-700">
+                                  Std {formatRM(seg.standardRoomRate)} · Rebate -
+                                  {formatRM(seg.monthlyRebate)}
                                 </p>
                               )}
-                            </td>
-                            <td className="py-2.5 px-3 font-mono tabular-nums whitespace-nowrap text-slate-700">
-                              {p.paymentDate}
-                            </td>
-                            <td className="py-2.5 px-3 text-right font-mono font-semibold tabular-nums whitespace-nowrap text-slate-900">
-                              {formatRM(p.amount)}
-                            </td>
-                            <td className="py-2.5 px-3 whitespace-nowrap">
-                              <StatusBadge status={physStatus} />
-                              {p.physicalReceiptNo && (
-                                <p className="font-mono text-slate-500 mt-0.5">
-                                  #{p.physicalReceiptNo}
-                                </p>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 whitespace-nowrap">
-                              <StatusBadge status={p.status} />
-                            </td>
-                            <td className="py-2.5 px-3 text-right whitespace-nowrap print:hidden">
-                              <div className="inline-flex items-center gap-1">
+                              {sb.billedMonths[0] === seg.startDate.slice(0, 7) &&
+                                typeof seg.firstMonthCharge === 'number' &&
+                                Math.abs(seg.firstMonthCharge - seg.effectiveMonthlyFee) >
+                                  0.01 && (
+                                  <p className="text-blue-900">
+                                    1st month prorated: {formatRM(seg.firstMonthCharge)}
+                                  </p>
+                                )}
+                              <p className="text-slate-800 font-bold">
+                                Segment Subtotal: {formatRM(sb.expectedRent)}
+                              </p>
+                            </div>
+
+                            {isMasterAdmin && (
+                              <div className="inline-flex items-center gap-1.5 print:hidden">
                                 <button
                                   type="button"
-                                  onClick={() => openStmtEditPaymentModal(p)}
+                                  onClick={() => openEditStaySegmentModal(seg)}
                                   className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded cursor-pointer"
-                                  title="Edit payment entry"
                                 >
                                   <Pencil className="w-3 h-3" />
                                   <span>Edit</span>
@@ -3539,26 +3491,167 @@ export function StudentsTab({
                                   type="button"
                                   onClick={() => {
                                     setFormError(null);
-                                    setStmtDeletingPayment(p);
+                                    setDeletingStaySegment(seg);
                                   }}
-                                  className="p-1 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded cursor-pointer"
-                                  title="Delete payment entry"
-                                  aria-label={`Delete ${getPaymentReceiptNo(p)}`}
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-700 bg-white border border-red-200 hover:bg-red-50 rounded cursor-pointer"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <Trash2 className="w-3 h-3" />
+                                  <span>Delete</span>
                                 </button>
                               </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Payment Ledger with Inline Record / Backdate / Edit / Delete */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <h3 className="font-display text-sm font-semibold text-slate-900">
+                      Payment &amp; Fee Waiver Ledger
+                    </h3>
+                    <p className="text-xs text-slate-500 tabular-nums">
+                      {statementPayments.length}{' '}
+                      {statementPayments.length === 1 ? 'entry' : 'entries'} recorded
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 print:hidden">
+                    {isMasterAdmin &&
+                      liveStatementStudent.status === 'Checked-Out' &&
+                      statementBilling.outstandingBalance > 0.009 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormError(null);
+                            setSettleBalanceConfirmOpen(true);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-lg cursor-pointer whitespace-nowrap"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Settle Full Historical Balance</span>
+                        </button>
+                      )}
+                    {isMasterAdmin && (
+                      <button
+                        type="button"
+                        onClick={openBatchPastPaymentsModal}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
+                      >
+                        <CalendarCheck2 className="w-3.5 h-3.5" />
+                        <span>Batch Add Past Payments</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={openStmtRecordPaymentModal}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Record / Backdate Payment</span>
+                    </button>
+                  </div>
                 </div>
-              )}
+
+                {statementPayments.length === 0 ? (
+                  <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
+                    No payment or fee waiver entries recorded for this resident yet.
+                  </div>
+                ) : (
+                  <div className="border border-slate-200 rounded-lg overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                          <th className="py-2.5 px-3">Receipt No.</th>
+                          <th className="py-2.5 px-3">Month / Type</th>
+                          <th className="py-2.5 px-3">Method &amp; Ref</th>
+                          <th className="py-2.5 px-3">Date</th>
+                          <th className="py-2.5 px-3 text-right">Amount</th>
+                          <th className="py-2.5 px-3">Physical Receipt</th>
+                          <th className="py-2.5 px-3">Status</th>
+                          <th className="py-2.5 px-3 text-right print:hidden">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {statementPayments.map((p) => {
+                          const physStatus = getPhysicalReceiptStatus(p);
+                          return (
+                            <tr key={p.paymentId}>
+                              <td className="py-2.5 px-3 font-mono font-semibold text-blue-900 whitespace-nowrap">
+                                {getPaymentReceiptNo(p)}
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <p className="font-mono font-semibold text-slate-900">
+                                  {p.billingMonth}
+                                </p>
+                                <p className="text-slate-500">{p.paymentType}</p>
+                              </td>
+                              <td className="py-2.5 px-3">
+                                <p className="text-slate-800">{p.paymentMethod}</p>
+                                {getPaymentBankRef(p) && (
+                                  <p className="font-mono text-slate-500">
+                                    {getPaymentBankRef(p)}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 font-mono tabular-nums whitespace-nowrap text-slate-700">
+                                {p.paymentDate}
+                              </td>
+                              <td className="py-2.5 px-3 text-right font-mono font-semibold tabular-nums whitespace-nowrap text-slate-900">
+                                {formatRM(p.amount)}
+                              </td>
+                              <td className="py-2.5 px-3 whitespace-nowrap">
+                                <StatusBadge status={physStatus} />
+                                {p.physicalReceiptNo && (
+                                  <p className="font-mono text-slate-500 mt-0.5">
+                                    #{p.physicalReceiptNo}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-3 whitespace-nowrap">
+                                <StatusBadge status={p.status} />
+                              </td>
+                              <td className="py-2.5 px-3 text-right whitespace-nowrap print:hidden">
+                                <div className="inline-flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => openStmtEditPaymentModal(p)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded cursor-pointer"
+                                    title="Edit payment entry"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                    <span>Edit</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setFormError(null);
+                                      setStmtDeletingPayment(p);
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded cursor-pointer"
+                                    title="Delete payment entry"
+                                    aria-label={`Delete ${getPaymentReceiptNo(p)}`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs text-slate-500">
+            {/* Pinned Footer */}
+            <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-between gap-3 text-xs text-slate-500 print:px-4 print:bg-white">
               <span>GIS Nilai Hostel Management System</span>
               <button
                 type="button"
@@ -3574,9 +3667,10 @@ export function StudentsTab({
 
       {/* Add / Edit Stay Segment Sub-Modal (Master Admin Only) */}
       {isMasterAdmin && liveStatementStudent && stayModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 overflow-y-auto print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-4 my-8">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   {editingStaySegment ? 'Edit Stay Segment' : 'Add Past Stay Record'}
@@ -3591,273 +3685,280 @@ export function StudentsTab({
                   setStayModalOpen(false);
                   setEditingStaySegment(null);
                 }}
-                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer shrink-0"
                 aria-label="Close stay segment modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
+            <form
+              onSubmit={handleSaveStaySegment}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
+                  </div>
+                )}
 
-            <form onSubmit={handleSaveStaySegment} className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <label className="text-xs font-medium text-slate-700">
-                    Room / Bed ID
-                  </label>
-                  {allRoomsSorted.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setStayRoomInputMode(
-                          stayRoomInputMode === 'select' ? 'custom' : 'select'
-                        )
-                      }
-                      className="text-xs font-medium text-blue-900 hover:underline cursor-pointer"
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs font-medium text-slate-700">
+                      Room / Bed ID
+                    </label>
+                    {allRoomsSorted.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setStayRoomInputMode(
+                            stayRoomInputMode === 'select' ? 'custom' : 'select'
+                          )
+                        }
+                        className="text-xs font-medium text-blue-900 hover:underline cursor-pointer"
+                      >
+                        {stayRoomInputMode === 'select'
+                          ? 'Enter custom Room ID text'
+                          : 'Pick from Room Inventory'}
+                      </button>
+                    )}
+                  </div>
+
+                  {stayRoomInputMode === 'select' && allRoomsSorted.length > 0 ? (
+                    <select
+                      value={stayRoomId}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        setStayRoomId(nextId);
+                        const rm = allRoomsSorted.find((r) => r.roomId === nextId);
+                        if (rm) {
+                          setStayLocation(rm.location);
+                        }
+                      }}
+                      required
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     >
-                      {stayRoomInputMode === 'select'
-                        ? 'Enter custom Room ID text'
-                        : 'Pick from Room Inventory'}
-                    </button>
+                      <option value="">Select Room / Bed...</option>
+                      {allRoomsSorted.map((r) => (
+                        <option key={r.roomId} value={r.roomId}>
+                          {r.roomId} — {r.location} [{r.status}]
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      required
+                      maxLength={64}
+                      value={stayRoomId}
+                      onChange={(e) => setStayRoomId(e.target.value)}
+                      placeholder="e.g. DJ2-A-02-B1"
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
                   )}
                 </div>
 
-                {stayRoomInputMode === 'select' && allRoomsSorted.length > 0 ? (
-                  <select
-                    value={stayRoomId}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setStayRoomId(nextId);
-                      const rm = allRoomsSorted.find((r) => r.roomId === nextId);
-                      if (rm) {
-                        setStayLocation(rm.location);
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Hostel Location
+                    </label>
+                    <select
+                      value={stayLocation}
+                      onChange={(e) =>
+                        setStayLocation(e.target.value as ResidentHostelLocation)
                       }
-                    }}
-                    required
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    <option value="">Select Room / Bed...</option>
-                    {allRoomsSorted.map((r) => (
-                      <option key={r.roomId} value={r.roomId}>
-                        {r.roomId} — {r.location} [{r.status}]
-                      </option>
-                    ))}
-                  </select>
-                ) : (
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {HOSTEL_LOCATIONS.map((loc) => (
+                        <option key={loc} value={loc}>
+                          {loc}
+                        </option>
+                      ))}
+                      <option value="Unassigned">Unassigned</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Occupancy Mode
+                    </label>
+                    <select
+                      value={stayOccupancyMode}
+                      onChange={(e) =>
+                        setStayOccupancyMode(e.target.value as OccupancyMode)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {OCCUPANCY_MODES.map((om) => (
+                        <option key={om} value={om}>
+                          {om}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Start Date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={stayStartDate}
+                      onChange={(e) => {
+                        setStayStartDate(e.target.value);
+                        syncStayFirstMonth(e.target.value, stayStdRate, stayRebate);
+                      }}
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-slate-700">
+                        End Date
+                      </label>
+                      <label
+                        className={`inline-flex items-center gap-1.5 text-xs ${
+                          liveStatementStudent.status !== 'Active'
+                            ? 'text-slate-400 cursor-not-allowed'
+                            : 'text-slate-600 cursor-pointer'
+                        }`}
+                        title={
+                          liveStatementStudent.status !== 'Active'
+                            ? 'Checked-Out residents must specify a past End Date'
+                            : undefined
+                        }
+                      >
+                        <input
+                          type="checkbox"
+                          checked={stayIsOngoing}
+                          disabled={liveStatementStudent.status !== 'Active'}
+                          onChange={(e) => setStayIsOngoing(e.target.checked)}
+                          className="w-3.5 h-3.5 rounded border-slate-300 text-blue-900"
+                        />
+                        <span>Present (Ongoing)</span>
+                      </label>
+                    </div>
+                    <input
+                      type="date"
+                      required={!stayIsOngoing}
+                      disabled={stayIsOngoing}
+                      value={stayIsOngoing ? '' : stayEndDate}
+                      onChange={(e) => setStayEndDate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Standard Rate (RM)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={10000}
+                      step="0.01"
+                      value={stayStdRate}
+                      onChange={(e) => {
+                        setStayStdRate(e.target.value);
+                        syncStayFirstMonth(stayStartDate, e.target.value, stayRebate);
+                      }}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Monthly Rebate (RM)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={10000}
+                      step="0.01"
+                      value={stayRebate}
+                      onChange={(e) => {
+                        setStayRebate(e.target.value);
+                        syncStayFirstMonth(stayStartDate, stayStdRate, e.target.value);
+                      }}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <div className="flex items-center justify-between gap-1 mb-1">
+                      <label className="text-xs font-medium text-slate-700">
+                        1st Month Charge (RM)
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          syncStayFirstMonth(stayStartDate, stayStdRate, stayRebate, true)
+                        }
+                        className="text-[11px] font-medium text-blue-900 hover:underline cursor-pointer"
+                      >
+                        Auto
+                      </button>
+                    </div>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={10000}
+                      step="0.01"
+                      value={stayFirstMonthCharge}
+                      onChange={(e) => {
+                        setStayFirstMonthCharge(e.target.value);
+                        setStayFirstMonthManual(true);
+                      }}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Reason / Segment Note
+                  </label>
                   <input
                     type="text"
                     required
-                    maxLength={64}
-                    value={stayRoomId}
-                    onChange={(e) => setStayRoomId(e.target.value)}
-                    placeholder="e.g. DJ2-A-02-B1"
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    maxLength={120}
+                    value={stayReason}
+                    onChange={(e) => setStayReason(e.target.value)}
+                    placeholder="e.g. Historical Stay, Initial Check-In, Room Transfer"
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />
+                </div>
+
+                {!stayIsOngoing ? (
+                  <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
+                    <p className="font-semibold text-slate-900">
+                      Historical Rate (Locked to Period)
+                    </p>
+                    <p>
+                      This period stores its own independent rate snapshot and will{' '}
+                      <strong>not</strong> overwrite the resident&apos;s current room, active
+                      monthly fee, or live Room Inventory occupancy.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900">
+                    <strong>Active Open Segment:</strong> Because End Date is Present
+                    (ongoing), saving will sync this resident&apos;s current room and active
+                    monthly billing rate.
+                  </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Hostel Location
-                  </label>
-                  <select
-                    value={stayLocation}
-                    onChange={(e) =>
-                      setStayLocation(e.target.value as ResidentHostelLocation)
-                    }
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {HOSTEL_LOCATIONS.map((loc) => (
-                      <option key={loc} value={loc}>
-                        {loc}
-                      </option>
-                    ))}
-                    <option value="Unassigned">Unassigned</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Occupancy Mode
-                  </label>
-                  <select
-                    value={stayOccupancyMode}
-                    onChange={(e) =>
-                      setStayOccupancyMode(e.target.value as OccupancyMode)
-                    }
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {OCCUPANCY_MODES.map((om) => (
-                      <option key={om} value={om}>
-                        {om}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Start Date
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={stayStartDate}
-                    onChange={(e) => {
-                      setStayStartDate(e.target.value);
-                      syncStayFirstMonth(e.target.value, stayStdRate, stayRebate);
-                    }}
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-medium text-slate-700">
-                      End Date
-                    </label>
-                    <label
-                      className={`inline-flex items-center gap-1.5 text-xs ${
-                        liveStatementStudent.status !== 'Active'
-                          ? 'text-slate-400 cursor-not-allowed'
-                          : 'text-slate-600 cursor-pointer'
-                      }`}
-                      title={
-                        liveStatementStudent.status !== 'Active'
-                          ? 'Checked-Out residents must specify a past End Date'
-                          : undefined
-                      }
-                    >
-                      <input
-                        type="checkbox"
-                        checked={stayIsOngoing}
-                        disabled={liveStatementStudent.status !== 'Active'}
-                        onChange={(e) => setStayIsOngoing(e.target.checked)}
-                        className="w-3.5 h-3.5 rounded border-slate-300 text-blue-900"
-                      />
-                      <span>Present (Ongoing)</span>
-                    </label>
-                  </div>
-                  <input
-                    type="date"
-                    required={!stayIsOngoing}
-                    disabled={stayIsOngoing}
-                    value={stayIsOngoing ? '' : stayEndDate}
-                    onChange={(e) => setStayEndDate(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-400"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Standard Rate (RM)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    max={10000}
-                    step="0.01"
-                    value={stayStdRate}
-                    onChange={(e) => {
-                      setStayStdRate(e.target.value);
-                      syncStayFirstMonth(stayStartDate, e.target.value, stayRebate);
-                    }}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Monthly Rebate (RM)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    max={10000}
-                    step="0.01"
-                    value={stayRebate}
-                    onChange={(e) => {
-                      setStayRebate(e.target.value);
-                      syncStayFirstMonth(stayStartDate, stayStdRate, e.target.value);
-                    }}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between gap-1 mb-1">
-                    <label className="text-xs font-medium text-slate-700">
-                      1st Month Charge (RM)
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        syncStayFirstMonth(stayStartDate, stayStdRate, stayRebate, true)
-                      }
-                      className="text-[11px] font-medium text-blue-900 hover:underline cursor-pointer"
-                    >
-                      Auto
-                    </button>
-                  </div>
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    max={10000}
-                    step="0.01"
-                    value={stayFirstMonthCharge}
-                    onChange={(e) => {
-                      setStayFirstMonthCharge(e.target.value);
-                      setStayFirstMonthManual(true);
-                    }}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Reason / Segment Note
-                </label>
-                <input
-                  type="text"
-                  required
-                  maxLength={120}
-                  value={stayReason}
-                  onChange={(e) => setStayReason(e.target.value)}
-                  placeholder="e.g. Historical Stay, Initial Check-In, Room Transfer"
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
-              </div>
-
-              {!stayIsOngoing ? (
-                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
-                  <p className="font-semibold text-slate-900">
-                    Historical Rate (Locked to Period)
-                  </p>
-                  <p>
-                    This period stores its own independent rate snapshot and will{' '}
-                    <strong>not</strong> overwrite the resident&apos;s current room, active
-                    monthly fee, or live Room Inventory occupancy.
-                  </p>
-                </div>
-              ) : (
-                <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900">
-                  <strong>Active Open Segment:</strong> Because End Date is Present
-                  (ongoing), saving will sync this resident&apos;s current room and active
-                  monthly billing rate.
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              {/* Pinned Footer */}
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => {
@@ -3871,7 +3972,7 @@ export function StudentsTab({
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
+                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap"
                 >
                   {submitting ? 'Saving...' : 'Save Stay Record'}
                 </button>
@@ -3883,39 +3984,63 @@ export function StudentsTab({
 
       {/* Delete Stay Segment Confirmation Sub-Modal (Master Admin Only) */}
       {isMasterAdmin && liveStatementStudent && deletingStaySegment && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
-            <h2 className="font-display text-lg font-semibold text-slate-900">
-              Delete Stay Segment ({deletingStaySegment.roomId || 'Unassigned'})?
-            </h2>
-            <p className="text-sm text-slate-600">
-              This will remove the{' '}
-              <span className="font-mono font-semibold text-slate-900">
-                {deletingStaySegment.startDate} →{' '}
-                {deletingStaySegment.endDate || 'Present'}
-              </span>{' '}
-              segment at{' '}
-              <span className="font-mono">
-                {formatRM(deletingStaySegment.effectiveMonthlyFee)}/mo
-              </span>{' '}
-              and automatically recalculate {liveStatementStudent.fullName}&apos;s expected
-              rent and outstanding balance.
-            </p>
-            {deletingStaySegment.endDate !== null && (
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700">
-                <strong>Historical Rate (Locked to Period):</strong> Removing this past
-                stay leaves the resident&apos;s current assigned room and active monthly rate
-                untouched.
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  Delete Stay Segment ({deletingStaySegment.roomId || 'Unassigned'})?
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {liveStatementStudent.fullName} ({liveStatementStudent.studentId})
+                </p>
               </div>
-            )}
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
-            <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="button"
+                disabled={submitting}
+                onClick={() => setDeletingStaySegment(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer shrink-0"
+                aria-label="Close delete stay segment dialog"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+              <p className="text-sm text-slate-600">
+                This will remove the{' '}
+                <span className="font-mono font-semibold text-slate-900">
+                  {deletingStaySegment.startDate} →{' '}
+                  {deletingStaySegment.endDate || 'Present'}
+                </span>{' '}
+                segment at{' '}
+                <span className="font-mono">
+                  {formatRM(deletingStaySegment.effectiveMonthlyFee)}/mo
+                </span>{' '}
+                and automatically recalculate {liveStatementStudent.fullName}&apos;s expected
+                rent and outstanding balance.
+              </p>
+              {deletingStaySegment.endDate !== null && (
+                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700">
+                  <strong>Historical Rate (Locked to Period):</strong> Removing this past
+                  stay leaves the resident&apos;s current assigned room and active monthly rate
+                  untouched.
+                </div>
+              )}
+              {formError && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                  {formError}
+                </div>
+              )}
+            </div>
+
+            {/* Pinned Footer */}
+            <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={submitting}
                 onClick={() => setDeletingStaySegment(null)}
                 className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
               >
@@ -3925,7 +4050,7 @@ export function StudentsTab({
                 type="button"
                 onClick={handleConfirmDeleteStaySegment}
                 disabled={submitting}
-                className="px-4 py-2 text-xs font-semibold text-white bg-red-700 hover:bg-red-800 disabled:opacity-60 rounded-lg cursor-pointer"
+                className="px-4 py-2 text-xs font-semibold text-white bg-red-700 hover:bg-red-800 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap"
               >
                 {submitting ? 'Deleting...' : 'Delete Stay Segment'}
               </button>
@@ -3936,9 +4061,10 @@ export function StudentsTab({
 
       {/* Record / Backdate / Edit Payment Sub-Modal inside Statement */}
       {liveStatementStudent && stmtPaymentModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 overflow-y-auto print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-4 my-8">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   {stmtEditingPayment
@@ -3956,225 +4082,232 @@ export function StudentsTab({
                   setStmtPaymentModalOpen(false);
                   setStmtEditingPayment(null);
                 }}
-                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer shrink-0"
                 aria-label="Close payment modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
+            <form
+              onSubmit={handleSaveStmtPayment}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
+                  </div>
+                )}
 
-            <form onSubmit={handleSaveStmtPayment} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Billing Month
-                  </label>
-                  <input
-                    type="month"
-                    required
-                    value={stmtBillingMonth}
-                    onChange={(e) => {
-                      const m = e.target.value;
-                      setStmtBillingMonth(m);
-                      if (!stmtEditingPayment && stmtPaymentType === 'Monthly Rent') {
-                        const info = calculateMonthInstallmentStatus(
-                          liveStatementStudent,
-                          payments,
-                          m,
-                          0
-                        );
-                        setStmtAmount(
-                          (info.remainingBeforeEntry > 0
-                            ? info.remainingBeforeEntry
-                            : info.monthTargetCharge
-                          ).toFixed(2)
-                        );
-                      }
-                    }}
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Payment Type
-                  </label>
-                  <select
-                    value={stmtPaymentType}
-                    onChange={(e) => {
-                      const next = e.target.value as PaymentType;
-                      setStmtPaymentType(next);
-                      if (next === 'Rebate / Fee Waiver') {
-                        setStmtMethod('Internal Adjustment');
-                        setStmtStatus('Waived');
-                      } else if (stmtStatus === 'Waived') {
-                        setStmtStatus('Paid');
-                      }
-                    }}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {PAYMENT_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Amount (RM)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    max={50000}
-                    step="0.01"
-                    value={stmtAmount}
-                    onChange={(e) => setStmtAmount(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Payment Status
-                  </label>
-                  <select
-                    value={stmtStatus}
-                    onChange={(e) => setStmtStatus(e.target.value as PaymentStatus)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {PAYMENT_STATUSES.map((st) => (
-                      <option key={st} value={st}>
-                        {st}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {stmtInstallmentPreview && (
-                <div
-                  className={`p-3 rounded-lg border text-xs space-y-1 ${
-                    stmtInstallmentPreview.isFullSettlement
-                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                      : 'bg-amber-50 border-amber-200 text-amber-900'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2 font-semibold">
-                    <span>
-                      {stmtInstallmentPreview.remainingBeforeEntry <= 0.009
-                        ? `${stmtBillingMonth} Already Settled`
-                        : stmtInstallmentPreview.isFullSettlement
-                          ? `Full Settlement for ${stmtBillingMonth}`
-                          : `Partial Payment (${formatRM(stmtInstallmentPreview.remainingAfterEntry)} remaining)`}
-                    </span>
-                    <span className="font-mono tabular-nums">
-                      Target: {formatRM(stmtInstallmentPreview.monthTargetCharge)}
-                    </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Billing Month
+                    </label>
+                    <input
+                      type="month"
+                      required
+                      value={stmtBillingMonth}
+                      onChange={(e) => {
+                        const m = e.target.value;
+                        setStmtBillingMonth(m);
+                        if (!stmtEditingPayment && stmtPaymentType === 'Monthly Rent') {
+                          const info = calculateMonthInstallmentStatus(
+                            liveStatementStudent,
+                            payments,
+                            m,
+                            0
+                          );
+                          setStmtAmount(
+                            (info.remainingBeforeEntry > 0
+                              ? info.remainingBeforeEntry
+                              : info.monthTargetCharge
+                            ).toFixed(2)
+                          );
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Payment Type
+                    </label>
+                    <select
+                      value={stmtPaymentType}
+                      onChange={(e) => {
+                        const next = e.target.value as PaymentType;
+                        setStmtPaymentType(next);
+                        if (next === 'Rebate / Fee Waiver') {
+                          setStmtMethod('Internal Adjustment');
+                          setStmtStatus('Waived');
+                        } else if (stmtStatus === 'Waived') {
+                          setStmtStatus('Paid');
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {PAYMENT_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-              )}
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Payment Method
-                  </label>
-                  <select
-                    value={stmtMethod}
-                    onChange={(e) => setStmtMethod(e.target.value as PaymentMethod)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Amount (RM)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={50000}
+                      step="0.01"
+                      value={stmtAmount}
+                      onChange={(e) => setStmtAmount(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Payment Status
+                    </label>
+                    <select
+                      value={stmtStatus}
+                      onChange={(e) => setStmtStatus(e.target.value as PaymentStatus)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {PAYMENT_STATUSES.map((st) => (
+                        <option key={st} value={st}>
+                          {st}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {stmtInstallmentPreview && (
+                  <div
+                    className={`p-3 rounded-lg border text-xs space-y-1 ${
+                      stmtInstallmentPreview.isFullSettlement
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                        : 'bg-amber-50 border-amber-200 text-amber-900'
+                    }`}
                   >
-                    {PAYMENT_METHODS.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Transaction Date
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={stmtPaymentDate}
-                    onChange={(e) => setStmtPaymentDate(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              </div>
+                    <div className="flex items-center justify-between gap-2 font-semibold">
+                      <span>
+                        {stmtInstallmentPreview.remainingBeforeEntry <= 0.009
+                          ? `${stmtBillingMonth} Already Settled`
+                          : stmtInstallmentPreview.isFullSettlement
+                            ? `Full Settlement for ${stmtBillingMonth}`
+                            : `Partial Payment (${formatRM(stmtInstallmentPreview.remainingAfterEntry)} remaining)`}
+                      </span>
+                      <span className="font-mono tabular-nums">
+                        Target: {formatRM(stmtInstallmentPreview.monthTargetCharge)}
+                      </span>
+                    </div>
+                  </div>
+                )}
 
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Bank Reference No.
-                </label>
-                <input
-                  type="text"
-                  maxLength={64}
-                  value={stmtBankRefNo}
-                  onChange={(e) => setStmtBankRefNo(e.target.value)}
-                  placeholder="e.g. DUITNOW-20260915-01"
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Physical Receipt Status
-                  </label>
-                  <select
-                    value={stmtPhysStatus}
-                    onChange={(e) =>
-                      setStmtPhysStatus(e.target.value as PhysicalReceiptStatus)
-                    }
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    <option value="Issued">Issued</option>
-                    <option value="Pending Issuance">Pending Issuance</option>
-                  </select>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Payment Method
+                    </label>
+                    <select
+                      value={stmtMethod}
+                      onChange={(e) => setStmtMethod(e.target.value as PaymentMethod)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {PAYMENT_METHODS.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Transaction Date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={stmtPaymentDate}
+                      onChange={(e) => setStmtPaymentDate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
                 </div>
+
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Physical Receipt Book No.
+                    Bank Reference No.
                   </label>
                   <input
                     type="text"
                     maxLength={64}
-                    value={stmtPhysNo}
-                    onChange={(e) => setStmtPhysNo(e.target.value)}
-                    placeholder="e.g. BK-DJ2-0042"
+                    value={stmtBankRefNo}
+                    onChange={(e) => setStmtBankRefNo(e.target.value)}
+                    placeholder="e.g. DUITNOW-20260915-01"
                     className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Physical Receipt Status
+                    </label>
+                    <select
+                      value={stmtPhysStatus}
+                      onChange={(e) =>
+                        setStmtPhysStatus(e.target.value as PhysicalReceiptStatus)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      <option value="Issued">Issued</option>
+                      <option value="Pending Issuance">Pending Issuance</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Physical Receipt Book No.
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={64}
+                      value={stmtPhysNo}
+                      onChange={(e) => setStmtPhysNo(e.target.value)}
+                      placeholder="e.g. BK-DJ2-0042"
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Remarks / Notes
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={240}
+                    value={stmtNotes}
+                    onChange={(e) => setStmtNotes(e.target.value)}
+                    placeholder="Optional backdated payment note"
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Remarks / Notes
-                </label>
-                <input
-                  type="text"
-                  maxLength={240}
-                  value={stmtNotes}
-                  onChange={(e) => setStmtNotes(e.target.value)}
-                  placeholder="Optional backdated payment note"
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              {/* Pinned Footer */}
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => {
@@ -4188,7 +4321,7 @@ export function StudentsTab({
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
+                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap"
                 >
                   {submitting
                     ? 'Saving...'
@@ -4204,27 +4337,51 @@ export function StudentsTab({
 
       {/* Delete Payment Confirmation Sub-Modal inside Statement */}
       {liveStatementStudent && stmtDeletingPayment && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
-            <h2 className="font-display text-lg font-semibold text-slate-900">
-              Delete Payment {getPaymentReceiptNo(stmtDeletingPayment)}?
-            </h2>
-            <p className="text-sm text-slate-600">
-              This will permanently remove the{' '}
-              <span className="font-mono font-semibold text-slate-900">
-                {formatRM(stmtDeletingPayment.amount)}
-              </span>{' '}
-              ({stmtDeletingPayment.paymentType} · {stmtDeletingPayment.billingMonth})
-              entry from {liveStatementStudent.fullName}&apos;s ledger.
-            </p>
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  Delete Payment {getPaymentReceiptNo(stmtDeletingPayment)}?
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {liveStatementStudent.fullName} ({liveStatementStudent.studentId})
+                </p>
               </div>
-            )}
-            <div className="flex items-center justify-end gap-3 pt-2">
               <button
                 type="button"
+                disabled={submitting}
+                onClick={() => setStmtDeletingPayment(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer shrink-0"
+                aria-label="Close delete payment dialog"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Scrollable Body */}
+            <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+              <p className="text-sm text-slate-600">
+                This will permanently remove the{' '}
+                <span className="font-mono font-semibold text-slate-900">
+                  {formatRM(stmtDeletingPayment.amount)}
+                </span>{' '}
+                ({stmtDeletingPayment.paymentType} · {stmtDeletingPayment.billingMonth})
+                entry from {liveStatementStudent.fullName}&apos;s ledger.
+              </p>
+              {formError && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                  {formError}
+                </div>
+              )}
+            </div>
+
+            {/* Pinned Footer */}
+            <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                disabled={submitting}
                 onClick={() => setStmtDeletingPayment(null)}
                 className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
               >
@@ -4234,7 +4391,7 @@ export function StudentsTab({
                 type="button"
                 onClick={handleConfirmDeleteStmtPayment}
                 disabled={submitting}
-                className="px-4 py-2 text-xs font-semibold text-white bg-red-700 hover:bg-red-800 disabled:opacity-60 rounded-lg cursor-pointer"
+                className="px-4 py-2 text-xs font-semibold text-white bg-red-700 hover:bg-red-800 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap"
               >
                 {submitting ? 'Deleting...' : 'Delete Payment'}
               </button>
@@ -4245,9 +4402,10 @@ export function StudentsTab({
 
       {/* Multi-Month Batch Past Payments Modal (Master Admin Only) */}
       {isMasterAdmin && liveStatementStudent && batchModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 overflow-y-auto print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-3xl w-full p-6 space-y-5 my-8">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   Batch Add Past Payments · {liveStatementStudent.fullName}
@@ -4263,242 +4421,246 @@ export function StudentsTab({
                 type="button"
                 disabled={submitting}
                 onClick={() => setBatchModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer shrink-0"
                 aria-label="Close batch past payments modal"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
+            <form
+              onSubmit={handleSaveBatchPastPayments}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
+                  </div>
+                )}
 
-            <form onSubmit={handleSaveBatchPastPayments} className="space-y-4">
-              {/* Shared Payment Settings */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
-                <p className="text-xs font-semibold text-slate-800">
-                  Shared Payment Settings (Applied to All Checked Months)
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Payment Method
-                    </label>
-                    <select
-                      value={batchPaymentMethod}
-                      onChange={(e) =>
-                        setBatchPaymentMethod(e.target.value as PaymentMethod)
-                      }
-                      className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                {/* Shared Payment Settings */}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+                  <p className="text-xs font-semibold text-slate-800">
+                    Shared Payment Settings (Applied to All Checked Months)
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Payment Method
+                      </label>
+                      <select
+                        value={batchPaymentMethod}
+                        onChange={(e) =>
+                          setBatchPaymentMethod(e.target.value as PaymentMethod)
+                        }
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {BATCH_PAST_PAYMENT_METHODS.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Bank / Migration Ref No.
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={64}
+                        value={batchBankRefNo}
+                        onChange={(e) => setBatchBankRefNo(e.target.value)}
+                        placeholder="HIST-MIGRATION"
+                        className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Physical Receipt Status
+                      </label>
+                      <select
+                        value={batchPhysStatus}
+                        onChange={(e) =>
+                          setBatchPhysStatus(e.target.value as PhysicalReceiptStatus)
+                        }
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        <option value="Issued">Issued</option>
+                        <option value="Pending Issuance">Pending Issuance</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Physical Receipt Book No. (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={64}
+                        value={batchPhysNo}
+                        onChange={(e) => setBatchPhysNo(e.target.value)}
+                        placeholder="e.g. BK-HIST-2026"
+                        className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Notes / Remarks
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={240}
+                        value={batchNotes}
+                        onChange={(e) => setBatchNotes(e.target.value)}
+                        placeholder="Historical monthly payment migration"
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Monthly Checklist Header */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-slate-600">
+                    Showing <strong className="text-slate-900">{batchMonthRows.length}</strong>{' '}
+                    calendar {batchMonthRows.length === 1 ? 'month' : 'months'} (rates sourced from stay history).
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSelectAllUnpaidMonths}
+                      className="px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
                     >
-                      {BATCH_PAST_PAYMENT_METHODS.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Bank / Migration Ref No.
-                    </label>
-                    <input
-                      type="text"
-                      maxLength={64}
-                      value={batchBankRefNo}
-                      onChange={(e) => setBatchBankRefNo(e.target.value)}
-                      placeholder="HIST-MIGRATION"
-                      className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Physical Receipt Status
-                    </label>
-                    <select
-                      value={batchPhysStatus}
-                      onChange={(e) =>
-                        setBatchPhysStatus(e.target.value as PhysicalReceiptStatus)
-                      }
-                      className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      Select All Unpaid Months
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBatchSelectedMonths({})}
+                      className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer whitespace-nowrap"
                     >
-                      <option value="Issued">Issued</option>
-                      <option value="Pending Issuance">Pending Issuance</option>
-                    </select>
+                      Clear All
+                    </button>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Physical Receipt Book No. (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      maxLength={64}
-                      value={batchPhysNo}
-                      onChange={(e) => setBatchPhysNo(e.target.value)}
-                      placeholder="e.g. BK-HIST-2026"
-                      className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
+                {/* Monthly Checklist Table */}
+                {batchMonthRows.length === 0 ? (
+                  <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
+                    No calendar months fall between this resident&apos;s Check-In Date and end date.
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Notes / Remarks
-                    </label>
-                    <input
-                      type="text"
-                      maxLength={240}
-                      value={batchNotes}
-                      onChange={(e) => setBatchNotes(e.target.value)}
-                      placeholder="Historical monthly payment migration"
-                      className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Monthly Checklist Header */}
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-slate-600">
-                  Showing <strong className="text-slate-900">{batchMonthRows.length}</strong>{' '}
-                  calendar {batchMonthRows.length === 1 ? 'month' : 'months'} (rates sourced from stay history).
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleSelectAllUnpaidMonths}
-                    className="px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
-                  >
-                    Select All Unpaid Months
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBatchSelectedMonths({})}
-                    className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer whitespace-nowrap"
-                  >
-                    Clear All
-                  </button>
-                </div>
-              </div>
-
-              {/* Monthly Checklist Table */}
-              {batchMonthRows.length === 0 ? (
-                <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
-                  No calendar months fall between this resident&apos;s Check-In Date and end date.
-                </div>
-              ) : (
-                <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-lg">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold z-10">
-                      <tr>
-                        <th className="py-2.5 px-3 w-10">Select</th>
-                        <th className="py-2.5 px-3">Month &amp; Room</th>
-                        <th className="py-2.5 px-3 text-right">Expected Rate</th>
-                        <th className="py-2.5 px-3 text-right">Credited</th>
-                        <th className="py-2.5 px-3">Status</th>
-                        <th className="py-2.5 px-3 text-right">Payment Amount (RM)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {batchMonthRows.map((row) => {
-                        const checked = !!batchSelectedMonths[row.billingMonth];
-                        return (
-                          <tr
-                            key={row.billingMonth}
-                            className={
-                              checked
-                                ? 'bg-blue-50/50'
-                                : row.monthStatus === 'Paid'
-                                  ? 'bg-emerald-50/30'
-                                  : 'bg-white hover:bg-slate-50'
-                            }
-                          >
-                            <td className="py-2 px-3">
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                aria-label={`Select ${row.billingMonth}`}
-                                onChange={(e) => {
-                                  const nextChecked = e.target.checked;
-                                  setBatchSelectedMonths((prev) => ({
-                                    ...prev,
-                                    [row.billingMonth]: nextChecked,
-                                  }));
-                                  if (nextChecked && !batchAmounts[row.billingMonth]) {
+                ) : (
+                  <div className="max-h-72 overflow-auto border border-slate-200 rounded-lg">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold z-10">
+                        <tr>
+                          <th className="py-2.5 px-3 w-10">Select</th>
+                          <th className="py-2.5 px-3">Month &amp; Room</th>
+                          <th className="py-2.5 px-3 text-right">Expected Rate</th>
+                          <th className="py-2.5 px-3 text-right">Credited</th>
+                          <th className="py-2.5 px-3">Status</th>
+                          <th className="py-2.5 px-3 text-right">Payment Amount (RM)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {batchMonthRows.map((row) => {
+                          const checked = !!batchSelectedMonths[row.billingMonth];
+                          return (
+                            <tr
+                              key={row.billingMonth}
+                              className={
+                                checked
+                                  ? 'bg-blue-50/50'
+                                  : row.monthStatus === 'Paid'
+                                    ? 'bg-emerald-50/30'
+                                    : 'bg-white hover:bg-slate-50'
+                              }
+                            >
+                              <td className="py-2 px-3">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  aria-label={`Select ${row.billingMonth}`}
+                                  onChange={(e) => {
+                                    const nextChecked = e.target.checked;
+                                    setBatchSelectedMonths((prev) => ({
+                                      ...prev,
+                                      [row.billingMonth]: nextChecked,
+                                    }));
+                                    if (nextChecked && !batchAmounts[row.billingMonth]) {
+                                      setBatchAmounts((prev) => ({
+                                        ...prev,
+                                        [row.billingMonth]: (
+                                          row.remaining > 0.009
+                                            ? row.remaining
+                                            : row.expectedRate
+                                        ).toFixed(2),
+                                      }));
+                                    }
+                                  }}
+                                  className="w-4 h-4 rounded border-slate-300 text-blue-900 cursor-pointer"
+                                />
+                              </td>
+                              <td className="py-2 px-3 whitespace-nowrap">
+                                <p className="font-mono font-semibold text-slate-900">
+                                  {row.billingMonth}
+                                </p>
+                                <p className="font-mono text-slate-500">
+                                  {row.roomId || 'Unassigned'}
+                                </p>
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-800 whitespace-nowrap">
+                                {formatRM(row.expectedRate)}
+                              </td>
+                              <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-600 whitespace-nowrap">
+                                {formatRM(row.alreadyPaid)}
+                              </td>
+                              <td className="py-2 px-3 whitespace-nowrap">
+                                <StatusBadge
+                                  status={
+                                    row.monthStatus === 'Paid'
+                                      ? 'Paid'
+                                      : row.monthStatus === 'Partial'
+                                        ? 'Pending'
+                                        : 'Overdue'
+                                  }
+                                />
+                                {row.monthStatus === 'Partial' && (
+                                  <p className="text-[11px] font-mono text-amber-800 mt-0.5">
+                                    Rem {formatRM(row.remaining)}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="py-2 px-3 text-right whitespace-nowrap">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min={0}
+                                  max={50000}
+                                  disabled={!checked}
+                                  value={batchAmounts[row.billingMonth] ?? ''}
+                                  aria-label={`Payment amount for ${row.billingMonth}`}
+                                  onChange={(e) =>
                                     setBatchAmounts((prev) => ({
                                       ...prev,
-                                      [row.billingMonth]: (
-                                        row.remaining > 0.009
-                                          ? row.remaining
-                                          : row.expectedRate
-                                      ).toFixed(2),
-                                    }));
+                                      [row.billingMonth]: e.target.value,
+                                    }))
                                   }
-                                }}
-                                className="w-4 h-4 rounded border-slate-300 text-blue-900 cursor-pointer"
-                              />
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <p className="font-mono font-semibold text-slate-900">
-                                {row.billingMonth}
-                              </p>
-                              <p className="font-mono text-slate-500">
-                                {row.roomId || 'Unassigned'}
-                              </p>
-                            </td>
-                            <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-800 whitespace-nowrap">
-                              {formatRM(row.expectedRate)}
-                            </td>
-                            <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-600 whitespace-nowrap">
-                              {formatRM(row.alreadyPaid)}
-                            </td>
-                            <td className="py-2 px-3 whitespace-nowrap">
-                              <StatusBadge
-                                status={
-                                  row.monthStatus === 'Paid'
-                                    ? 'Paid'
-                                    : row.monthStatus === 'Partial'
-                                      ? 'Pending'
-                                      : 'Overdue'
-                                }
-                              />
-                              {row.monthStatus === 'Partial' && (
-                                <p className="text-[11px] font-mono text-amber-800 mt-0.5">
-                                  Rem {formatRM(row.remaining)}
-                                </p>
-                              )}
-                            </td>
-                            <td className="py-2 px-3 text-right whitespace-nowrap">
-                              <input
-                                type="number"
-                                step="0.01"
-                                min={0}
-                                max={50000}
-                                disabled={!checked}
-                                value={batchAmounts[row.billingMonth] ?? ''}
-                                aria-label={`Payment amount for ${row.billingMonth}`}
-                                onChange={(e) =>
-                                  setBatchAmounts((prev) => ({
-                                    ...prev,
-                                    [row.billingMonth]: e.target.value,
-                                  }))
-                                }
-                                className="w-28 px-2.5 py-1 text-right text-xs font-mono tabular-nums bg-white border border-slate-200 rounded focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-400"
-                              />
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                                  className="w-28 px-2.5 py-1 text-right text-xs font-mono tabular-nums bg-white border border-slate-200 rounded focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-400"
+                                />
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
 
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
+              {/* Pinned Footer */}
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <p className="text-xs text-slate-600 tabular-nums">
                   Selected:{' '}
                   <strong className="text-slate-900">
@@ -4540,9 +4702,10 @@ export function StudentsTab({
         liveStatementStudent &&
         statementBilling &&
         settleBalanceConfirmOpen && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 print:hidden">
-            <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
-              <div className="flex items-start justify-between gap-3">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+            <div className="w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+              {/* Pinned Header */}
+              <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
                 <div>
                   <h2 className="font-display text-lg font-semibold text-slate-900">
                     Settle Full Historical Balance?
@@ -4555,38 +4718,42 @@ export function StudentsTab({
                   type="button"
                   disabled={submitting}
                   onClick={() => setSettleBalanceConfirmOpen(false)}
-                  className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer shrink-0"
                   aria-label="Close settle balance modal"
                 >
                   <X className="w-5 h-5" />
                 </button>
               </div>
 
-              <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-1.5">
-                <p>
-                  This will record a single{' '}
-                  <strong>Monthly Rent</strong> ledger entry of{' '}
-                  <strong className="font-mono">
-                    {formatRM(statementBilling.outstandingBalance)}
-                  </strong>{' '}
-                  for this Checked-Out resident, bringing their outstanding balance to{' '}
-                  <strong className="font-mono">RM 0.00</strong>.
-                </p>
-                <p className="text-emerald-800 font-mono">
-                  Method: Historical Migration · Receipt: Issued · Ref: HIST-MIGRATION
-                </p>
-                <p className="text-emerald-800">
-                  Notes: Historical ledger balance settled during system migration
-                </p>
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-1.5">
+                  <p>
+                    This will record a single{' '}
+                    <strong>Monthly Rent</strong> ledger entry of{' '}
+                    <strong className="font-mono">
+                      {formatRM(statementBilling.outstandingBalance)}
+                    </strong>{' '}
+                    for this Checked-Out resident, bringing their outstanding balance to{' '}
+                    <strong className="font-mono">RM 0.00</strong>.
+                  </p>
+                  <p className="text-emerald-800 font-mono">
+                    Method: Historical Migration · Receipt: Issued · Ref: HIST-MIGRATION
+                  </p>
+                  <p className="text-emerald-800">
+                    Notes: Historical ledger balance settled during system migration
+                  </p>
+                </div>
+
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
+                  </div>
+                )}
               </div>
 
-              {formError && (
-                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                  {formError}
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              {/* Pinned Footer */}
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   disabled={submitting}

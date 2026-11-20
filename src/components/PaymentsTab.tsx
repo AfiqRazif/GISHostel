@@ -922,9 +922,10 @@ export function PaymentsTab({
 
       {/* Record Payment Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5 my-8">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4">
               <h2 className="font-display text-lg font-semibold text-slate-900">
                 Record Hostel Transaction
               </h2>
@@ -938,106 +939,351 @@ export function PaymentsTab({
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
-
             {students.length === 0 ? (
-              <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
-                Register at least one resident in the Students tab before recording payments.
-              </div>
-            ) : (
-              <form onSubmit={handleRecordPayment} className="space-y-4">
-                {/* AI Proof of Payment Upload & Scanner */}
-                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-800">
-                      <Sparkles className="w-3.5 h-3.5 text-blue-900" />
-                      <span>Upload Proof of Payment (AI Auto-Fill)</span>
-                    </span>
-                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-white border border-blue-200 hover:bg-blue-50 rounded-md cursor-pointer whitespace-nowrap">
-                      <Upload className="w-3.5 h-3.5" />
-                      <span>{proofImageData ? 'Replace Slip' : 'Upload Slip Image'}</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="sr-only"
-                        disabled={scanningProof}
-                        onChange={(e) => void handleProofFileSelected(e, true)}
-                      />
-                    </label>
+              <>
+                <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6">
+                  <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                    Register at least one resident in the Students tab before recording payments.
                   </div>
-
-                  {scanningProof && (
-                    <div className="flex items-center gap-2 text-xs text-blue-900 font-medium py-1">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>Compressing slip &amp; extracting receipt details with AI...</span>
+                </div>
+                <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </>
+            ) : (
+              <form
+                onSubmit={handleRecordPayment}
+                className="flex flex-col flex-1 min-h-0 overflow-hidden"
+              >
+                {/* Scrollable Body */}
+                <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                  {formError && (
+                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                      {formError}
                     </div>
                   )}
 
-                  {aiScanInfo && (
+                  {/* AI Proof of Payment Upload & Scanner */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-800">
+                        <Sparkles className="w-3.5 h-3.5 text-blue-900" />
+                        <span>Upload Proof of Payment (AI Auto-Fill)</span>
+                      </span>
+                      <label className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-white border border-blue-200 hover:bg-blue-50 rounded-md cursor-pointer whitespace-nowrap">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>{proofImageData ? 'Replace Slip' : 'Upload Slip Image'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="sr-only"
+                          disabled={scanningProof}
+                          onChange={(e) => void handleProofFileSelected(e, true)}
+                        />
+                      </label>
+                    </div>
+
+                    {scanningProof && (
+                      <div className="flex items-center gap-2 text-xs text-blue-900 font-medium py-1">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Compressing slip &amp; extracting receipt details with AI...</span>
+                      </div>
+                    )}
+
+                    {aiScanInfo && (
+                      <div
+                        className={`p-2.5 rounded-md border text-xs ${
+                          aiScanInfo.status === 'verified'
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                            : 'bg-amber-50 border-amber-200 text-amber-900'
+                        }`}
+                      >
+                        {aiScanInfo.message}
+                      </div>
+                    )}
+
+                    {proofImageData && (
+                      <div className="flex items-center justify-between gap-3 pt-1">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <img
+                            src={proofImageData}
+                            alt="Uploaded payment proof preview"
+                            className="w-12 h-12 object-cover rounded border border-slate-200 bg-white shrink-0"
+                          />
+                          <div className="text-xs text-slate-600 min-w-0">
+                            <p className="font-medium text-slate-800">
+                              Compressed JPEG attached
+                            </p>
+                            <p className="truncate text-slate-500">
+                              Saved securely with ledger record
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setProofImageData(null);
+                            setAiScanInfo(null);
+                          }}
+                          className="text-xs font-medium text-red-700 hover:text-red-800 cursor-pointer shrink-0"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Resident
+                    </label>
+                    <select
+                      value={selectedStudentId}
+                      onChange={(e) => handleStudentChange(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {sortedStudents.map((s) => (
+                        <option key={s.studentId} value={s.studentId}>
+                          {s.fullName} ({s.studentId} · {s.assignedRoomId || 'Unassigned'}) [{s.status}]
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Billing Month
+                      </label>
+                      <input
+                        type="month"
+                        required
+                        value={billingMonth}
+                        onChange={(e) => setBillingMonth(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Payment Type
+                      </label>
+                      <select
+                        value={paymentType}
+                        onChange={(e) =>
+                          handlePaymentTypeChange(e.target.value as PaymentType)
+                        }
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {PAYMENT_TYPES.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {paymentType === 'Rebate / Fee Waiver' && (
+                    <div className="p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                      One-time waiver credits the resident&apos;s rent balance without adding to Cash/Bank collected totals.
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Amount (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={50000}
+                        step="0.01"
+                        value={amount}
+                        onChange={(e) => setAmount(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Payment Status
+                      </label>
+                      <select
+                        value={status}
+                        onChange={(e) => setStatus(e.target.value as PaymentStatus)}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {PAYMENT_STATUSES.map((st) => (
+                          <option key={st} value={st}>
+                            {st}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {installmentPreview && (
                     <div
-                      className={`p-2.5 rounded-md border text-xs ${
-                        aiScanInfo.status === 'verified'
+                      className={`p-3 rounded-lg border text-xs space-y-1 ${
+                        installmentPreview.isFullSettlement
                           ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
                           : 'bg-amber-50 border-amber-200 text-amber-900'
                       }`}
                     >
-                      {aiScanInfo.message}
-                    </div>
-                  )}
-
-                  {proofImageData && (
-                    <div className="flex items-center justify-between gap-3 pt-1">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <img
-                          src={proofImageData}
-                          alt="Uploaded payment proof preview"
-                          className="w-12 h-12 object-cover rounded border border-slate-200 bg-white shrink-0"
-                        />
-                        <div className="text-xs text-slate-600 min-w-0">
-                          <p className="font-medium text-slate-800">
-                            Compressed JPEG attached
-                          </p>
-                          <p className="truncate text-slate-500">
-                            Saved securely with ledger record
-                          </p>
-                        </div>
+                      <div className="flex items-center justify-between gap-2 font-semibold">
+                        <span>
+                          {installmentPreview.remainingBeforeEntry <= 0.009
+                            ? `${billingMonth} Already Settled`
+                            : installmentPreview.isFullSettlement
+                              ? `Full Settlement for ${billingMonth}`
+                              : `Partial / Installment Payment (${formatRM(installmentPreview.remainingAfterEntry)} remaining)`}
+                        </span>
+                        <span className="font-mono tabular-nums">
+                          Target: {formatRM(installmentPreview.monthTargetCharge)}
+                        </span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setProofImageData(null);
-                          setAiScanInfo(null);
-                        }}
-                        className="text-xs font-medium text-red-700 hover:text-red-800 cursor-pointer shrink-0"
-                      >
-                        Remove
-                      </button>
+                      <p className="text-xs opacity-90 tabular-nums">
+                        Prior credited for {billingMonth}:{' '}
+                        <strong className="font-mono">
+                          {formatRM(installmentPreview.alreadyCreditedForMonth)}
+                        </strong>{' '}
+                        ({installmentPreview.existingInstallmentsCount} prior{' '}
+                        {installmentPreview.existingInstallmentsCount === 1
+                          ? 'entry'
+                          : 'entries'}
+                        )
+                      </p>
                     </div>
                   )}
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Resident
-                  </label>
-                  <select
-                    value={selectedStudentId}
-                    onChange={(e) => handleStudentChange(e.target.value)}
-                    required
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {sortedStudents.map((s) => (
-                      <option key={s.studentId} value={s.studentId}>
-                        {s.fullName} ({s.studentId} · {s.assignedRoomId}) [{s.status}]
-                      </option>
-                    ))}
-                  </select>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Payment Method
+                      </label>
+                      <select
+                        value={paymentMethod}
+                        onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
+                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      >
+                        {PAYMENT_METHODS.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Transaction Date
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={paymentDate}
+                        onChange={(e) => setPaymentDate(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Bank Reference No.
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={64}
+                      value={bankRefNo}
+                      onChange={(e) => setBankRefNo(e.target.value)}
+                      placeholder="e.g. DUITNOW-20261118-01"
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Remarks / Notes
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={240}
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                      placeholder="Optional receipt notes or waiver justification"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                {/* Pinned Footer */}
+                <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
+                  >
+                    {submitting ? 'Recording...' : 'Issue Receipt & Save'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit Payment Modal */}
+      {editingPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            {/* Pinned Header */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  Edit Transaction · {getPaymentReceiptNo(editingPayment)}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {editingPayment.studentName} ({editingPayment.roomId})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingPayment(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form
+              onSubmit={handleSaveEdit}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
                       Billing Month
@@ -1056,9 +1302,7 @@ export function PaymentsTab({
                     </label>
                     <select
                       value={paymentType}
-                      onChange={(e) =>
-                        handlePaymentTypeChange(e.target.value as PaymentType)
-                      }
+                      onChange={(e) => setPaymentType(e.target.value as PaymentType)}
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     >
                       {PAYMENT_TYPES.map((t) => (
@@ -1070,13 +1314,7 @@ export function PaymentsTab({
                   </div>
                 </div>
 
-                {paymentType === 'Rebate / Fee Waiver' && (
-                  <div className="p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
-                    One-time waiver credits the resident&apos;s rent balance without adding to Cash/Bank collected totals.
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
                       Amount (RM)
@@ -1094,7 +1332,7 @@ export function PaymentsTab({
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Payment Status
+                      Status
                     </label>
                     <select
                       value={status}
@@ -1110,41 +1348,7 @@ export function PaymentsTab({
                   </div>
                 </div>
 
-                {installmentPreview && (
-                  <div
-                    className={`p-3 rounded-lg border text-xs space-y-1 ${
-                      installmentPreview.isFullSettlement
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                        : 'bg-amber-50 border-amber-200 text-amber-900'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2 font-semibold">
-                      <span>
-                        {installmentPreview.remainingBeforeEntry <= 0.009
-                          ? `${billingMonth} Already Settled`
-                          : installmentPreview.isFullSettlement
-                            ? `Full Settlement for ${billingMonth}`
-                            : `Partial / Installment Payment (${formatRM(installmentPreview.remainingAfterEntry)} remaining)`}
-                      </span>
-                      <span className="font-mono tabular-nums">
-                        Target: {formatRM(installmentPreview.monthTargetCharge)}
-                      </span>
-                    </div>
-                    <p className="text-xs opacity-90 tabular-nums">
-                      Prior credited for {billingMonth}:{' '}
-                      <strong className="font-mono">
-                        {formatRM(installmentPreview.alreadyCreditedForMonth)}
-                      </strong>{' '}
-                      ({installmentPreview.existingInstallmentsCount} prior{' '}
-                      {installmentPreview.existingInstallmentsCount === 1
-                        ? 'entry'
-                        : 'entries'}
-                      )
-                    </p>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
                       Payment Method
@@ -1184,258 +1388,84 @@ export function PaymentsTab({
                     maxLength={64}
                     value={bankRefNo}
                     onChange={(e) => setBankRefNo(e.target.value)}
-                    placeholder="e.g. DUITNOW-20261118-01"
                     className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Remarks / Notes
+                    Notes
                   </label>
                   <input
                     type="text"
                     maxLength={240}
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
-                    placeholder="Optional receipt notes or waiver justification"
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
 
-                <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddModal(false)}
-                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
-                  >
-                    {submitting ? 'Recording...' : 'Issue Receipt & Save'}
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Edit Payment Modal */}
-      {editingPayment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5 my-8">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="font-display text-lg font-semibold text-slate-900">
-                  Edit Transaction · {getPaymentReceiptNo(editingPayment)}
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {editingPayment.studentName} ({editingPayment.roomId})
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setEditingPayment(null)}
-                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
-                aria-label="Close modal"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Billing Month
-                  </label>
-                  <input
-                    type="month"
-                    required
-                    value={billingMonth}
-                    onChange={(e) => setBillingMonth(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Payment Type
-                  </label>
-                  <select
-                    value={paymentType}
-                    onChange={(e) => setPaymentType(e.target.value as PaymentType)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {PAYMENT_TYPES.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Amount (RM)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    max={50000}
-                    step="0.01"
-                    value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Status
-                  </label>
-                  <select
-                    value={status}
-                    onChange={(e) => setStatus(e.target.value as PaymentStatus)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {PAYMENT_STATUSES.map((st) => (
-                      <option key={st} value={st}>
-                        {st}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Payment Method
-                  </label>
-                  <select
-                    value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {PAYMENT_METHODS.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Transaction Date
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={paymentDate}
-                    onChange={(e) => setPaymentDate(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Bank Reference No.
-                </label>
-                <input
-                  type="text"
-                  maxLength={64}
-                  value={bankRefNo}
-                  onChange={(e) => setBankRefNo(e.target.value)}
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Notes
-                </label>
-                <input
-                  type="text"
-                  maxLength={240}
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Physical Receipt Status
-                  </label>
-                  <select
-                    value={editPhysStatus}
-                    onChange={(e) =>
-                      setEditPhysStatus(e.target.value as PhysicalReceiptStatus)
-                    }
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    <option value="Pending Issuance">Pending Issuance</option>
-                    <option value="Issued">Issued</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Physical Receipt Book No.
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={64}
-                    value={editPhysNo}
-                    onChange={(e) => setEditPhysNo(e.target.value)}
-                    placeholder="e.g. BK-DJ2-0148"
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              </div>
-
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center justify-between gap-3">
-                <span className="text-xs text-slate-600">
-                  {proofImageData ? 'Payment proof image attached' : 'No payment proof attached'}
-                </span>
-                <div className="flex items-center gap-2">
-                  {proofImageData && (
-                    <button
-                      type="button"
-                      onClick={() => setProofImageData(null)}
-                      className="text-xs font-medium text-red-700 hover:text-red-800 cursor-pointer"
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Physical Receipt Status
+                    </label>
+                    <select
+                      value={editPhysStatus}
+                      onChange={(e) =>
+                        setEditPhysStatus(e.target.value as PhysicalReceiptStatus)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     >
-                      Remove
-                    </button>
-                  )}
-                  <label className="px-2.5 py-1 text-xs font-semibold text-blue-900 bg-white border border-blue-200 hover:bg-blue-50 rounded-md cursor-pointer whitespace-nowrap">
-                    <span>{proofImageData ? 'Replace Image' : 'Attach Image'}</span>
+                      <option value="Pending Issuance">Pending Issuance</option>
+                      <option value="Issued">Issued</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Physical Receipt Book No.
+                    </label>
                     <input
-                      type="file"
-                      accept="image/*"
-                      className="sr-only"
-                      disabled={scanningProof}
-                      onChange={(e) => void handleProofFileSelected(e, false)}
+                      type="text"
+                      maxLength={64}
+                      value={editPhysNo}
+                      onChange={(e) => setEditPhysNo(e.target.value)}
+                      placeholder="e.g. BK-DJ2-0148"
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     />
-                  </label>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center justify-between gap-3">
+                  <span className="text-xs text-slate-600">
+                    {proofImageData ? 'Payment proof image attached' : 'No payment proof attached'}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {proofImageData && (
+                      <button
+                        type="button"
+                        onClick={() => setProofImageData(null)}
+                        className="text-xs font-medium text-red-700 hover:text-red-800 cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                    <label className="px-2.5 py-1 text-xs font-semibold text-blue-900 bg-white border border-blue-200 hover:bg-blue-50 rounded-md cursor-pointer whitespace-nowrap">
+                      <span>{proofImageData ? 'Replace Image' : 'Attach Image'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="sr-only"
+                        disabled={scanningProof}
+                        onChange={(e) => void handleProofFileSelected(e, false)}
+                      />
+                    </label>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              {/* Pinned Footer */}
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setEditingPayment(null)}
@@ -1458,26 +1488,40 @@ export function PaymentsTab({
 
       {/* Delete Payment Confirmation Modal */}
       {deletingPayment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
-            <h2 className="font-display text-lg font-semibold text-slate-900">
-              Delete Payment {getPaymentReceiptNo(deletingPayment)}?
-            </h2>
-            <p className="text-sm text-slate-600">
-              This will permanently remove the{' '}
-              <span className="font-mono font-semibold text-slate-900">
-                {formatRM(deletingPayment.amount)}
-              </span>{' '}
-              ({deletingPayment.paymentType} · {deletingPayment.billingMonth}) entry for{' '}
-              <strong>{deletingPayment.studentName}</strong> and recalculate their ledger
-              balance.
-            </p>
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
-            <div className="flex items-center justify-end gap-3 pt-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4">
+              <h2 className="font-display text-lg font-semibold text-slate-900">
+                Delete Payment {getPaymentReceiptNo(deletingPayment)}?
+              </h2>
+              <button
+                type="button"
+                onClick={() => setDeletingPayment(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+              <p className="text-sm text-slate-600">
+                This will permanently remove the{' '}
+                <span className="font-mono font-semibold text-slate-900">
+                  {formatRM(deletingPayment.amount)}
+                </span>{' '}
+                ({deletingPayment.paymentType} · {deletingPayment.billingMonth}) entry for{' '}
+                <strong>{deletingPayment.studentName}</strong> and recalculate their ledger
+                balance.
+              </p>
+              {formError && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                  {formError}
+                </div>
+              )}
+            </div>
+
+            <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setDeletingPayment(null)}
@@ -1500,9 +1544,9 @@ export function PaymentsTab({
 
       {/* View Proof Lightbox Modal */}
       {viewingProofPayment && viewingProofPayment.proofImageData && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 overflow-y-auto print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-2xl w-full p-5 space-y-4 my-8">
-            <div className="flex items-center justify-between gap-4 border-b border-slate-100 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-base font-semibold text-slate-900">
                   Payment Proof · {getPaymentReceiptNo(viewingProofPayment)}
@@ -1522,14 +1566,18 @@ export function PaymentsTab({
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="bg-slate-100 rounded-lg p-3 flex items-center justify-center max-h-[70vh] overflow-auto">
-              <img
-                src={viewingProofPayment.proofImageData}
-                alt={`Payment proof for ${getPaymentReceiptNo(viewingProofPayment)}`}
-                className="max-w-full max-h-[65vh] object-contain rounded"
-              />
+
+            <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6">
+              <div className="bg-slate-100 rounded-lg p-3 flex items-center justify-center">
+                <img
+                  src={viewingProofPayment.proofImageData}
+                  alt={`Payment proof for ${getPaymentReceiptNo(viewingProofPayment)}`}
+                  className="max-w-full max-h-[65vh] object-contain rounded"
+                />
+              </div>
             </div>
-            <div className="flex justify-end">
+
+            <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex justify-end">
               <button
                 type="button"
                 onClick={() => setViewingProofPayment(null)}
@@ -1544,9 +1592,9 @@ export function PaymentsTab({
 
       {/* Mark Physical Receipt Issued Modal */}
       {issuingReceiptPayment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto print:hidden">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4 my-8">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4 print:hidden">
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-base font-semibold text-slate-900">
                   Mark Physical Receipt Issued
@@ -1565,31 +1613,36 @@ export function PaymentsTab({
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
+            <form
+              onSubmit={handleConfirmPhysicalReceiptIssued}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
+                  </div>
+                )}
 
-            <form onSubmit={handleConfirmPhysicalReceiptIssued} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Physical Receipt Book No. (Optional)
-                </label>
-                <input
-                  type="text"
-                  maxLength={64}
-                  value={physicalReceiptNoInput}
-                  onChange={(e) => setPhysicalReceiptNoInput(e.target.value)}
-                  placeholder="e.g. BK-DJ2-0148"
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Confirm that the hardcopy GIS official receipt has been written and handed to the resident.
-                </p>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Physical Receipt Book No. (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={64}
+                    value={physicalReceiptNoInput}
+                    onChange={(e) => setPhysicalReceiptNoInput(e.target.value)}
+                    placeholder="e.g. BK-DJ2-0148"
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Confirm that the hardcopy GIS official receipt has been written and handed to the resident.
+                  </p>
+                </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setIssuingReceiptPayment(null)}
@@ -1612,10 +1665,10 @@ export function PaymentsTab({
 
       {/* Printable Official Receipt Modal */}
       {printingPayment && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 overflow-y-auto print:static print:bg-white print:p-0 print:block">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-2xl w-full p-8 space-y-6 my-8 print:my-0 print:border-0 print:rounded-none print:max-w-none print:p-6">
-            {/* Modal Action Bar (hidden when printing) */}
-            <div className="flex items-center justify-between pb-4 border-b border-slate-200 print:hidden">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4 print:static print:bg-white print:p-0 print:block">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200 print:max-h-none print:overflow-visible print:shadow-none print:border-0 print:rounded-none print:max-w-none">
+            {/* Pinned Header (hidden when printing) */}
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-4 print:hidden">
               <span className="text-xs font-semibold text-slate-600 uppercase tracking-wider">
                 Official Receipt Preview
               </span>
@@ -1623,7 +1676,7 @@ export function PaymentsTab({
                 <button
                   type="button"
                   onClick={() => window.print()}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
                 >
                   <Printer className="w-3.5 h-3.5" />
                   <span>Print Receipt</span>
@@ -1631,180 +1684,201 @@ export function PaymentsTab({
                 <button
                   type="button"
                   onClick={() => setPrintingPayment(null)}
-                  className="inline-flex items-center gap-1 px-3 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                  className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  aria-label="Close receipt preview"
                 >
-                  <X className="w-3.5 h-3.5" />
-                  <span>Close</span>
+                  <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            {/* Institutional Receipt Sheet */}
-            <div className="space-y-6 text-slate-900">
-              <div className="flex items-start justify-between gap-4 border-b-2 border-slate-900 pb-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-blue-900 text-white flex items-center justify-center shrink-0">
-                    <Building2 className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h2 className="font-display text-lg font-bold tracking-tight text-slate-900">
-                      GLOBAL INSTITUTE OF STUDIES (GIS) NILAI
-                    </h2>
-                    <p className="text-xs text-slate-600">
-                      Hostel Management &amp; Student Finance Office · Nilai, Negeri Sembilan
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Properties: Apartment Desa Jati 2 · Nilai Square
-                    </p>
-                  </div>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-xs font-bold uppercase tracking-wider text-blue-900">
-                    {printingPayment.paymentType === 'Rebate / Fee Waiver'
-                      ? 'Official Waiver Credit Note'
-                      : 'Official Payment Receipt'}
-                  </p>
-                  <p className="font-mono text-sm font-bold text-slate-900 mt-1">
-                    {getPaymentReceiptNo(printingPayment)}
-                  </p>
-                  <p className="text-xs text-slate-500 font-mono mt-0.5">
-                    Date: {printingPayment.paymentDate}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-6 text-xs">
-                <div className="space-y-1.5">
-                  <p className="font-semibold uppercase tracking-wider text-slate-500">
-                    Received From / Resident
-                  </p>
-                  <p className="text-sm font-semibold text-slate-900">
-                    {printingPayment.studentName}
-                  </p>
-                  <p className="font-mono text-slate-700">
-                    ID: {printingPayment.studentId}
-                  </p>
-                  <p className="text-slate-700">
-                    Hostel: {printingPayment.hostelLocation}
-                  </p>
-                  <p className="font-mono text-slate-700">
-                    Room / Bed: {printingPayment.roomId}
-                  </p>
-                </div>
-                <div className="space-y-1.5 text-right">
-                  <p className="font-semibold uppercase tracking-wider text-slate-500">
-                    Transaction Metadata
-                  </p>
-                  <p className="text-slate-700">
-                    Billing Month:{' '}
-                    <span className="font-mono font-semibold text-slate-900">
-                      {printingPayment.billingMonth}
-                    </span>
-                  </p>
-                  <p className="text-slate-700">
-                    Method:{' '}
-                    <span className="font-medium text-slate-900">
-                      {printingPayment.paymentMethod}
-                    </span>
-                  </p>
-                  <p className="text-slate-700">
-                    Bank Ref:{' '}
-                    <span className="font-mono text-slate-900">
-                      {getPaymentBankRef(printingPayment) || '—'}
-                    </span>
-                  </p>
-                  <p className="text-slate-700">
-                    Ledger Status:{' '}
-                    <span className="font-semibold text-slate-900">
-                      {printingPayment.status}
-                    </span>
-                  </p>
-                  <p className="text-slate-700">
-                    Physical Receipt:{' '}
-                    <span className="font-mono text-slate-900">
-                      {getPhysicalReceiptStatus(printingPayment)}
-                      {printingPayment.physicalReceiptNo
-                        ? ` (${printingPayment.physicalReceiptNo})`
-                        : ''}
-                    </span>
-                  </p>
-                </div>
-              </div>
-
-              <table className="w-full text-left border border-slate-200 rounded-lg overflow-hidden text-xs">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                    <th className="py-2.5 px-4">Item Description</th>
-                    <th className="py-2.5 px-4">Billing Period</th>
-                    <th className="py-2.5 px-4 text-right">Amount (RM)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-slate-100">
-                    <td className="py-3 px-4">
-                      <p className="font-semibold text-slate-900">
-                        {printingPayment.paymentType}
+            {/* Scrollable Institutional Receipt Sheet */}
+            <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 print:overflow-visible print:p-4">
+              <div className="space-y-6 text-slate-900">
+                <div className="flex items-start justify-between gap-4 border-b-2 border-slate-900 pb-4">
+                  <div className="flex items-start gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-blue-900 text-white flex items-center justify-center shrink-0">
+                      <Building2 className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="font-display text-lg font-bold tracking-tight text-slate-900">
+                        GLOBAL INSTITUTE OF STUDIES (GIS) NILAI
+                      </h2>
+                      <p className="text-xs text-slate-600">
+                        Hostel Management &amp; Student Finance Office · Nilai, Negeri Sembilan
                       </p>
-                      {printingPayment.notes && (
-                        <p className="text-slate-600 mt-0.5">
-                          {printingPayment.notes}
+                      <p className="text-xs text-slate-500">
+                        Properties: Apartment Desa Jati 2 · Nilai Square
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs font-bold uppercase tracking-wider text-blue-900">
+                      {printingPayment.paymentType === 'Rebate / Fee Waiver'
+                        ? 'Official Waiver Credit Note'
+                        : 'Official Payment Receipt'}
+                    </p>
+                    <p className="font-mono text-sm font-bold text-slate-900 mt-1">
+                      {getPaymentReceiptNo(printingPayment)}
+                    </p>
+                    <p className="text-xs text-slate-500 font-mono mt-0.5">
+                      Date: {printingPayment.paymentDate}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs">
+                  <div className="space-y-1.5">
+                    <p className="font-semibold uppercase tracking-wider text-slate-500">
+                      Received From / Resident
+                    </p>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {printingPayment.studentName}
+                    </p>
+                    <p className="font-mono text-slate-700">
+                      ID: {printingPayment.studentId}
+                    </p>
+                    <p className="text-slate-700">
+                      Hostel: {printingPayment.hostelLocation}
+                    </p>
+                    <p className="font-mono text-slate-700">
+                      Room / Bed: {printingPayment.roomId}
+                    </p>
+                  </div>
+                  <div className="space-y-1.5 sm:text-right">
+                    <p className="font-semibold uppercase tracking-wider text-slate-500">
+                      Transaction Metadata
+                    </p>
+                    <p className="text-slate-700">
+                      Billing Month:{' '}
+                      <span className="font-mono font-semibold text-slate-900">
+                        {printingPayment.billingMonth}
+                      </span>
+                    </p>
+                    <p className="text-slate-700">
+                      Method:{' '}
+                      <span className="font-medium text-slate-900">
+                        {printingPayment.paymentMethod}
+                      </span>
+                    </p>
+                    <p className="text-slate-700">
+                      Bank Ref:{' '}
+                      <span className="font-mono text-slate-900">
+                        {getPaymentBankRef(printingPayment) || '—'}
+                      </span>
+                    </p>
+                    <p className="text-slate-700">
+                      Ledger Status:{' '}
+                      <span className="font-semibold text-slate-900">
+                        {printingPayment.status}
+                      </span>
+                    </p>
+                    <p className="text-slate-700">
+                      Physical Receipt:{' '}
+                      <span className="font-mono text-slate-900">
+                        {getPhysicalReceiptStatus(printingPayment)}
+                        {printingPayment.physicalReceiptNo
+                          ? ` (${printingPayment.physicalReceiptNo})`
+                          : ''}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+
+                <table className="w-full text-left border border-slate-200 rounded-lg overflow-hidden text-xs">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                      <th className="py-2.5 px-4">Item Description</th>
+                      <th className="py-2.5 px-4">Billing Period</th>
+                      <th className="py-2.5 px-4 text-right">Amount (RM)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b border-slate-100">
+                      <td className="py-3 px-4">
+                        <p className="font-semibold text-slate-900">
+                          {printingPayment.paymentType}
                         </p>
-                      )}
-                    </td>
-                    <td className="py-3 px-4 font-mono text-slate-700">
-                      {printingPayment.billingMonth}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono font-semibold text-slate-900 tabular-nums">
-                      {formatRM(printingPayment.amount)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+                        {printingPayment.notes && (
+                          <p className="text-slate-600 mt-0.5">
+                            {printingPayment.notes}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-3 px-4 font-mono text-slate-700">
+                        {printingPayment.billingMonth}
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono font-semibold text-slate-900 tabular-nums">
+                        {formatRM(printingPayment.amount)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
 
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 border border-slate-200 rounded-lg p-4">
-                <div className="text-xs text-slate-600">
-                  {isCashPaymentType(printingPayment.paymentType) ? (
-                    <span>
-                      Cash / Bank Settlement Amount ({printingPayment.paymentMethod})
-                    </span>
-                  ) : (
-                    <span>
-                      Non-cash internal rebate / fee waiver applied to rent balance (excluded from cash collection totals).
-                    </span>
-                  )}
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">
-                    Total Cash Received
-                  </p>
-                  <p className="font-mono text-xl font-bold text-slate-900 tabular-nums">
-                    {isCashPaymentType(printingPayment.paymentType) &&
-                    printingPayment.status === 'Paid'
-                      ? formatRM(printingPayment.amount)
-                      : formatRM(0)}
-                  </p>
-                </div>
-              </div>
-
-              <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500">
-                <div>
-                  <p>
-                    Recorded By:{' '}
-                    <span className="font-medium text-slate-700">
-                      {getPaymentRecordedBy(printingPayment)}
-                    </span>
-                  </p>
-                  <p className="tabular-nums">
-                    Timestamp:{' '}
-                    {formatTimestamp(
-                      printingPayment.recordedAt || printingPayment.updatedAt
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 border border-slate-200 rounded-lg p-4">
+                  <div className="text-xs text-slate-600">
+                    {isCashPaymentType(printingPayment.paymentType) ? (
+                      <span>
+                        Cash / Bank Settlement Amount ({printingPayment.paymentMethod})
+                      </span>
+                    ) : (
+                      <span>
+                        Non-cash internal rebate / fee waiver applied to rent balance (excluded from cash collection totals).
+                      </span>
                     )}
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">
+                      Total Cash Received
+                    </p>
+                    <p className="font-mono text-xl font-bold text-slate-900 tabular-nums">
+                      {isCashPaymentType(printingPayment.paymentType) &&
+                      printingPayment.status === 'Paid'
+                        ? formatRM(printingPayment.amount)
+                        : formatRM(0)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-slate-500">
+                  <div>
+                    <p>
+                      Recorded By:{' '}
+                      <span className="font-medium text-slate-700">
+                        {getPaymentRecordedBy(printingPayment)}
+                      </span>
+                    </p>
+                    <p className="tabular-nums">
+                      Timestamp:{' '}
+                      {formatTimestamp(
+                        printingPayment.recordedAt || printingPayment.updatedAt
+                      )}
+                    </p>
+                  </div>
+                  <p className="italic text-slate-400">
+                    Computer-generated official receipt · GIS Nilai Hostel System
                   </p>
                 </div>
-                <p className="italic text-slate-400">
-                  Computer-generated official receipt · GIS Nilai Hostel System
-                </p>
               </div>
+            </div>
+
+            {/* Pinned Footer (hidden when printing) */}
+            <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3 print:hidden">
+              <button
+                type="button"
+                onClick={() => setPrintingPayment(null)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+              >
+                Close
+              </button>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print Receipt</span>
+              </button>
             </div>
           </div>
         </div>

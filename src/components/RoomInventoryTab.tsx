@@ -729,9 +729,9 @@ export function RoomInventoryTab({
 
       {/* Add Single Room/Bed Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4">
               <h2 className="font-display text-lg font-semibold text-slate-900">
                 Add Room / Bed Slot
               </h2>
@@ -745,126 +745,131 @@ export function RoomInventoryTab({
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
+            <form
+              onSubmit={handleCreateSingle}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
+                  </div>
+                )}
 
-            <form onSubmit={handleCreateSingle} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Hostel Location
-                </label>
-                <select
-                  value={singleLocation}
-                  onChange={(e) => setSingleLocation(e.target.value as HostelLocation)}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                >
-                  {HOSTEL_LOCATIONS.map((loc) => (
-                    <option key={loc} value={loc}>
-                      {loc}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Block
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={32}
-                    value={singleBlock}
-                    onChange={(e) => setSingleBlock(e.target.value)}
-                    placeholder="e.g. A"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Unit No.
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={32}
-                    value={singleUnitNo}
-                    onChange={(e) => setSingleUnitNo(e.target.value)}
-                    placeholder="e.g. 04"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Bed Slot
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={32}
-                    value={singleBedSlot}
-                    onChange={(e) => setSingleBedSlot(e.target.value)}
-                    placeholder="e.g. B1"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Room ID (Auto-generated if left blank)
-                </label>
-                <input
-                  type="text"
-                  maxLength={64}
-                  value={singleCustomId}
-                  onChange={(e) => setSingleCustomId(e.target.value)}
-                  placeholder={generatedSingleId}
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Resulting ID: <span className="font-mono font-medium">{generatedSingleId}</span>
-                </p>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Monthly Rate (RM)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    max={10000}
-                    step="0.01"
-                    value={singleMonthlyRate}
-                    onChange={(e) => setSingleMonthlyRate(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Initial Status
+                    Hostel Location
                   </label>
                   <select
-                    value={singleStatus}
-                    onChange={(e) =>
-                      setSingleStatus(e.target.value as 'Vacant' | 'Maintenance')
-                    }
+                    value={singleLocation}
+                    onChange={(e) => setSingleLocation(e.target.value as HostelLocation)}
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   >
-                    <option value="Vacant">Vacant</option>
-                    <option value="Maintenance">Maintenance</option>
+                    {HOSTEL_LOCATIONS.map((loc) => (
+                      <option key={loc} value={loc}>
+                        {loc}
+                      </option>
+                    ))}
                   </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Block
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={32}
+                      value={singleBlock}
+                      onChange={(e) => setSingleBlock(e.target.value)}
+                      placeholder="e.g. A"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Unit No.
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={32}
+                      value={singleUnitNo}
+                      onChange={(e) => setSingleUnitNo(e.target.value)}
+                      placeholder="e.g. 04"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Bed Slot
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={32}
+                      value={singleBedSlot}
+                      onChange={(e) => setSingleBedSlot(e.target.value)}
+                      placeholder="e.g. B1"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Room ID (Auto-generated if left blank)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={64}
+                    value={singleCustomId}
+                    onChange={(e) => setSingleCustomId(e.target.value)}
+                    placeholder={generatedSingleId}
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Resulting ID: <span className="font-mono font-medium">{generatedSingleId}</span>
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Monthly Rate (RM)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={10000}
+                      step="0.01"
+                      value={singleMonthlyRate}
+                      onChange={(e) => setSingleMonthlyRate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Initial Status
+                    </label>
+                    <select
+                      value={singleStatus}
+                      onChange={(e) =>
+                        setSingleStatus(e.target.value as 'Vacant' | 'Maintenance')
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      <option value="Vacant">Vacant</option>
+                      <option value="Maintenance">Maintenance</option>
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
@@ -887,9 +892,9 @@ export function RoomInventoryTab({
 
       {/* Bulk Add Beds Modal */}
       {showBulkModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5 my-8">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   Bulk Add Beds ({bulkBedSlots[0]}–{bulkBedSlots[bulkBedSlots.length - 1]})
@@ -908,174 +913,179 @@ export function RoomInventoryTab({
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
+            <form
+              onSubmit={handleBulkCreate}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
+                  </div>
+                )}
 
-            <form onSubmit={handleBulkCreate} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Hostel Location
-                </label>
-                <select
-                  value={bulkLocation}
-                  onChange={(e) => setBulkLocation(e.target.value as HostelLocation)}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                >
-                  {HOSTEL_LOCATIONS.map((loc) => (
-                    <option key={loc} value={loc}>
-                      {loc}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Block
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={32}
-                    value={bulkBlock}
-                    onChange={(e) => setBulkBlock(e.target.value)}
-                    placeholder="e.g. A"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Unit No.
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={32}
-                    value={bulkUnitNo}
-                    onChange={(e) => setBulkUnitNo(e.target.value)}
-                    placeholder="e.g. 04"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Monthly Rate per Bed (RM)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    max={10000}
-                    step="0.01"
-                    value={bulkMonthlyRate}
-                    onChange={(e) => setBulkMonthlyRate(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Number of Beds (1–8)
+                    Hostel Location
                   </label>
                   <select
-                    value={bulkBedCount}
-                    onChange={(e) => setBulkBedCount(Number(e.target.value))}
+                    value={bulkLocation}
+                    onChange={(e) => setBulkLocation(e.target.value as HostelLocation)}
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   >
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
-                      <option key={n} value={n}>
-                        {n} {n === 1 ? 'Bed' : 'Beds'}
+                    {HOSTEL_LOCATIONS.map((loc) => (
+                      <option key={loc} value={loc}>
+                        {loc}
                       </option>
                     ))}
                   </select>
                 </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Block
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={32}
+                      value={bulkBlock}
+                      onChange={(e) => setBulkBlock(e.target.value)}
+                      placeholder="e.g. A"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Unit No.
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={32}
+                      value={bulkUnitNo}
+                      onChange={(e) => setBulkUnitNo(e.target.value)}
+                      placeholder="e.g. 04"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Monthly Rate per Bed (RM)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={10000}
+                      step="0.01"
+                      value={bulkMonthlyRate}
+                      onChange={(e) => setBulkMonthlyRate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Number of Beds (1–8)
+                    </label>
+                    <select
+                      value={bulkBedCount}
+                      onChange={(e) => setBulkBedCount(Number(e.target.value))}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                        <option key={n} value={n}>
+                          {n} {n === 1 ? 'Bed' : 'Beds'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Bed Prefix / Naming Pattern
+                    </label>
+                    <select
+                      value={bulkPrefixPattern}
+                      onChange={(e) => setBulkPrefixPattern(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      <option value="B">Standard (B1, B2 ... B8)</option>
+                      <option value="Bed-">Labeled (Bed-1, Bed-2 ...)</option>
+                      <option value="Upper-">Upper Bunk (Upper-1, Upper-2 ...)</option>
+                      <option value="Lower-">Lower Bunk (Lower-1, Lower-2 ...)</option>
+                      <option value="CUSTOM">Custom Prefix...</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Starting No.
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={1}
+                      max={99}
+                      value={bulkStartNumber}
+                      onChange={(e) =>
+                        setBulkStartNumber(Math.max(1, Number(e.target.value) || 1))
+                      }
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                {bulkPrefixPattern === 'CUSTOM' && (
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Custom Bed Prefix
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={20}
+                      value={bulkCustomPrefix}
+                      onChange={(e) => setBulkCustomPrefix(e.target.value)}
+                      placeholder="e.g. M- or Window-"
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                )}
+
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5">
+                  <p className="text-xs font-medium text-slate-700">
+                    Live Preview ({bulkPreviewIds.length} Room IDs ·{' '}
+                    {formatRM(Number(bulkMonthlyRate) || 0)}/mo each):
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {bulkPreviewIds.map((id) => {
+                      const exists = rooms.some((r) => r.roomId === id);
+                      return (
+                        <span
+                          key={id}
+                          className={`text-xs font-mono px-2 py-0.5 rounded border ${
+                            exists
+                              ? 'bg-amber-50 border-amber-200 text-amber-800'
+                              : 'bg-white border-slate-200 text-slate-700'
+                          }`}
+                          title={exists ? 'Already exists (will be skipped)' : 'New bed slot'}
+                        >
+                          {id}
+                          {exists ? ' (exists)' : ''}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Bed Prefix / Naming Pattern
-                  </label>
-                  <select
-                    value={bulkPrefixPattern}
-                    onChange={(e) => setBulkPrefixPattern(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    <option value="B">Standard (B1, B2 ... B8)</option>
-                    <option value="Bed-">Labeled (Bed-1, Bed-2 ...)</option>
-                    <option value="Upper-">Upper Bunk (Upper-1, Upper-2 ...)</option>
-                    <option value="Lower-">Lower Bunk (Lower-1, Lower-2 ...)</option>
-                    <option value="CUSTOM">Custom Prefix...</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Starting No.
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={1}
-                    max={99}
-                    value={bulkStartNumber}
-                    onChange={(e) =>
-                      setBulkStartNumber(Math.max(1, Number(e.target.value) || 1))
-                    }
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              </div>
-
-              {bulkPrefixPattern === 'CUSTOM' && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Custom Bed Prefix
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={20}
-                    value={bulkCustomPrefix}
-                    onChange={(e) => setBulkCustomPrefix(e.target.value)}
-                    placeholder="e.g. M- or Window-"
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              )}
-
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1.5">
-                <p className="text-xs font-medium text-slate-700">
-                  Live Preview ({bulkPreviewIds.length} Room IDs ·{' '}
-                  {formatRM(Number(bulkMonthlyRate) || 0)}/mo each):
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {bulkPreviewIds.map((id) => {
-                    const exists = rooms.some((r) => r.roomId === id);
-                    return (
-                      <span
-                        key={id}
-                        className={`text-xs font-mono px-2 py-0.5 rounded border ${
-                          exists
-                            ? 'bg-amber-50 border-amber-200 text-amber-800'
-                            : 'bg-white border-slate-200 text-slate-700'
-                        }`}
-                        title={exists ? 'Already exists (will be skipped)' : 'New bed slot'}
-                      >
-                        {id}
-                        {exists ? ' (exists)' : ''}
-                      </span>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setShowBulkModal(false)}
@@ -1100,9 +1110,9 @@ export function RoomInventoryTab({
 
       {/* Edit Room / Bed Modal */}
       {editingRoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5 my-8">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   Edit Room / Bed · {editingRoom.roomId}
@@ -1121,158 +1131,163 @@ export function RoomInventoryTab({
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
+            <form
+              onSubmit={handleSaveEdit}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
+                  </div>
+                )}
 
-            <form onSubmit={handleSaveEdit} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Hostel Location
-                </label>
-                <select
-                  value={editLocation}
-                  onChange={(e) => setEditLocation(e.target.value as HostelLocation)}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Hostel Location
+                  </label>
+                  <select
+                    value={editLocation}
+                    onChange={(e) => setEditLocation(e.target.value as HostelLocation)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    {HOSTEL_LOCATIONS.map((loc) => (
+                      <option key={loc} value={loc}>
+                        {loc}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Block
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={32}
+                      value={editBlock}
+                      onChange={(e) => setEditBlock(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Unit No.
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={32}
+                      value={editUnitNo}
+                      onChange={(e) => setEditUnitNo(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Bed Designation
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={32}
+                      value={editBedSlot}
+                      onChange={(e) => setEditBedSlot(e.target.value)}
+                      placeholder="e.g. B1-Window"
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                <div
+                  className={`p-3 rounded-lg border text-xs ${
+                    editHasDuplicateId
+                      ? 'bg-red-50 border-red-200 text-red-800'
+                      : 'bg-slate-50 border-slate-200 text-slate-600'
+                  }`}
                 >
-                  {HOSTEL_LOCATIONS.map((loc) => (
-                    <option key={loc} value={loc}>
-                      {loc}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span>Auto-formatted Room ID:</span>
+                    <span className="font-mono font-semibold text-slate-900">
+                      {editPreviewRoomId}
+                    </span>
+                  </div>
+                  {editHasDuplicateId && (
+                    <p className="mt-1 font-medium text-red-700">
+                      Duplicate Room ID detected — choose a unique Block, Unit, or Bed Designation.
+                    </p>
+                  )}
+                </div>
 
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Block
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={32}
-                    value={editBlock}
-                    onChange={(e) => setEditBlock(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Unit No.
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={32}
-                    value={editUnitNo}
-                    onChange={(e) => setEditUnitNo(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Bed Designation
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    maxLength={32}
-                    value={editBedSlot}
-                    onChange={(e) => setEditBedSlot(e.target.value)}
-                    placeholder="e.g. B1-Window"
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-              </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Monthly Rate (RM)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={10000}
+                      step="0.01"
+                      value={editRate}
+                      onChange={(e) => setEditRate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
 
-              <div
-                className={`p-3 rounded-lg border text-xs ${
-                  editHasDuplicateId
-                    ? 'bg-red-50 border-red-200 text-red-800'
-                    : 'bg-slate-50 border-slate-200 text-slate-600'
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span>Auto-formatted Room ID:</span>
-                  <span className="font-mono font-semibold text-slate-900">
-                    {editPreviewRoomId}
-                  </span>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Room Status
+                    </label>
+                    <select
+                      value={editStatus}
+                      onChange={(e) => setEditStatus(e.target.value as RoomStatus)}
+                      disabled={
+                        editingRoom.status === 'Occupied' ||
+                        editingRoom.status === 'Reserved / Blocked' ||
+                        Boolean(editingRoom.currentStudentId)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-600"
+                    >
+                      <option value="Vacant">Vacant</option>
+                      <option value="Occupied" disabled>
+                        Occupied
+                      </option>
+                      <option value="Reserved / Blocked" disabled>
+                        Reserved / Blocked
+                      </option>
+                      <option value="Maintenance">Maintenance</option>
+                    </select>
+                  </div>
                 </div>
-                {editHasDuplicateId && (
-                  <p className="mt-1 font-medium text-red-700">
-                    Duplicate Room ID detected — choose a unique Block, Unit, or Bed Designation.
-                  </p>
+
+                {(editingRoom.status === 'Occupied' ||
+                  Boolean(editingRoom.currentStudentId)) && (
+                  <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                    Assigned to{' '}
+                    <strong>
+                      {editingRoom.currentStudentName || editingRoom.currentStudentId}
+                    </strong>
+                    . Status cannot be switched to Vacant or Maintenance until the
+                    resident is checked out or transferred in the Students tab.
+                  </div>
+                )}
+
+                {editingRoom.status === 'Reserved / Blocked' && (
+                  <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                    <strong>{editingRoom.statusNote || 'Exclusive Unit Blocked'}</strong>.
+                    This bed is blocked for Whole Unit Exclusive occupancy and cannot
+                    be manually switched until that resident checks out or changes to
+                    Single Bed.
+                  </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Monthly Rate (RM)
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    min={0}
-                    max={10000}
-                    step="0.01"
-                    value={editRate}
-                    onChange={(e) => setEditRate(e.target.value)}
-                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Room Status
-                  </label>
-                  <select
-                    value={editStatus}
-                    onChange={(e) => setEditStatus(e.target.value as RoomStatus)}
-                    disabled={
-                      editingRoom.status === 'Occupied' ||
-                      editingRoom.status === 'Reserved / Blocked' ||
-                      Boolean(editingRoom.currentStudentId)
-                    }
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-600"
-                  >
-                    <option value="Vacant">Vacant</option>
-                    <option value="Occupied" disabled>
-                      Occupied
-                    </option>
-                    <option value="Reserved / Blocked" disabled>
-                      Reserved / Blocked
-                    </option>
-                    <option value="Maintenance">Maintenance</option>
-                  </select>
-                </div>
-              </div>
-
-              {(editingRoom.status === 'Occupied' ||
-                Boolean(editingRoom.currentStudentId)) && (
-                <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900">
-                  Assigned to{' '}
-                  <strong>
-                    {editingRoom.currentStudentName || editingRoom.currentStudentId}
-                  </strong>
-                  . Status cannot be switched to Vacant or Maintenance until the
-                  resident is checked out or transferred in the Students tab.
-                </div>
-              )}
-
-              {editingRoom.status === 'Reserved / Blocked' && (
-                <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
-                  <strong>{editingRoom.statusNote || 'Exclusive Unit Blocked'}</strong>.
-                  This bed is blocked for Whole Unit Exclusive occupancy and cannot
-                  be manually switched until that resident checks out or changes to
-                  Single Bed.
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setEditingRoom(null)}
@@ -1295,22 +1310,36 @@ export function RoomInventoryTab({
 
       {/* Delete Room Confirmation */}
       {deletingRoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
-            <h2 className="font-display text-lg font-semibold text-slate-900">
-              Delete Room {deletingRoom.roomId}?
-            </h2>
-            <p className="text-sm text-slate-600">
-              This will permanently remove bed slot{' '}
-              <span className="font-mono font-semibold">{deletingRoom.roomId}</span>{' '}
-              ({deletingRoom.location}) from inventory.
-            </p>
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
-            <div className="flex items-center justify-end gap-3 pt-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-center justify-between gap-4">
+              <h2 className="font-display text-lg font-semibold text-slate-900">
+                Delete Room {deletingRoom.roomId}?
+              </h2>
+              <button
+                type="button"
+                onClick={() => setDeletingRoom(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+              <p className="text-sm text-slate-600">
+                This will permanently remove bed slot{' '}
+                <span className="font-mono font-semibold">{deletingRoom.roomId}</span>{' '}
+                ({deletingRoom.location}) from inventory.
+              </p>
+              {formError && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                  {formError}
+                </div>
+              )}
+            </div>
+
+            <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
               <button
                 type="button"
                 onClick={() => setDeletingRoom(null)}
@@ -1332,9 +1361,9 @@ export function RoomInventoryTab({
       )}
 
       {historyRoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-2xl w-full p-6 space-y-4 my-8">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   Stay &amp; Transfer History · {historyRoom.roomId}
@@ -1354,68 +1383,70 @@ export function RoomInventoryTab({
               </button>
             </div>
 
-            {roomHistoryEntries.length === 0 ? (
-              <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
-                No stay or transfer segments recorded for bed slot{' '}
-                <span className="font-mono font-semibold text-slate-700">
-                  {historyRoom.roomId}
-                </span>{' '}
-                yet.
-              </div>
-            ) : (
-              <div className="border border-slate-200 rounded-lg overflow-hidden">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
-                      <th className="py-2.5 px-3">Resident</th>
-                      <th className="py-2.5 px-3">Date Range</th>
-                      <th className="py-2.5 px-3 text-right">Monthly Rate</th>
-                      <th className="py-2.5 px-3">Reason / Audit</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {roomHistoryEntries.map(({ student, segment }) => (
-                      <tr key={`${student.studentId}-${segment.id}`}>
-                        <td className="py-2.5 px-3">
-                          <p className="font-semibold text-slate-900">
-                            {student.fullName}
-                          </p>
-                          <p className="font-mono text-slate-500">
-                            {student.studentId} · {segment.occupancyMode}
-                          </p>
-                        </td>
-                        <td className="py-2.5 px-3 font-mono tabular-nums whitespace-nowrap text-slate-700">
-                          {segment.startDate} →{' '}
-                          {segment.endDate || (
-                            <span className="font-sans font-semibold text-emerald-700">
-                              Present
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-right font-mono tabular-nums whitespace-nowrap">
-                          <p className="font-semibold text-slate-900">
-                            {formatRM(segment.effectiveMonthlyFee)}/mo
-                          </p>
-                          {segment.monthlyRebate > 0 && (
-                            <p className="text-emerald-700">
-                              Rebate -{formatRM(segment.monthlyRebate)}
-                            </p>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-600">
-                          <p className="font-medium text-slate-800">{segment.reason}</p>
-                          <p className="text-slate-400 truncate max-w-[180px]">
-                            By {segment.recordedBy}
-                          </p>
-                        </td>
+            <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6">
+              {roomHistoryEntries.length === 0 ? (
+                <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
+                  No stay or transfer segments recorded for bed slot{' '}
+                  <span className="font-mono font-semibold text-slate-700">
+                    {historyRoom.roomId}
+                  </span>{' '}
+                  yet.
+                </div>
+              ) : (
+                <div className="border border-slate-200 rounded-lg overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
+                        <th className="py-2.5 px-3">Resident</th>
+                        <th className="py-2.5 px-3">Date Range</th>
+                        <th className="py-2.5 px-3 text-right">Monthly Rate</th>
+                        <th className="py-2.5 px-3">Reason / Audit</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {roomHistoryEntries.map(({ student, segment }) => (
+                        <tr key={`${student.studentId}-${segment.id}`}>
+                          <td className="py-2.5 px-3">
+                            <p className="font-semibold text-slate-900">
+                              {student.fullName}
+                            </p>
+                            <p className="font-mono text-slate-500">
+                              {student.studentId} · {segment.occupancyMode}
+                            </p>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono tabular-nums whitespace-nowrap text-slate-700">
+                            {segment.startDate} →{' '}
+                            {segment.endDate || (
+                              <span className="font-sans font-semibold text-emerald-700">
+                                Present
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right font-mono tabular-nums whitespace-nowrap">
+                            <p className="font-semibold text-slate-900">
+                              {formatRM(segment.effectiveMonthlyFee)}/mo
+                            </p>
+                            {segment.monthlyRebate > 0 && (
+                              <p className="text-emerald-700">
+                                Rebate -{formatRM(segment.monthlyRebate)}
+                              </p>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600">
+                            <p className="font-medium text-slate-800">{segment.reason}</p>
+                            <p className="text-slate-400 truncate max-w-[180px]">
+                              By {segment.recordedBy}
+                            </p>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
 
-            <div className="flex items-center justify-end pt-2 border-t border-slate-100">
+            <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end">
               <button
                 type="button"
                 onClick={() => setHistoryRoom(null)}
@@ -1430,9 +1461,9 @@ export function RoomInventoryTab({
 
       {/* Assign Resident to Vacant Bed Modal */}
       {assigningRoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-xl w-full p-6 space-y-5 my-8">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   Assign Resident · {assigningRoom.roomId}
@@ -1455,105 +1486,178 @@ export function RoomInventoryTab({
               </button>
             </div>
 
-            {/* Mode Switcher */}
-            <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
-              <button
-                type="button"
-                onClick={() => {
-                  setFormError(null);
-                  setAssignMode('existing');
-                }}
-                className={`flex-1 px-3 py-2 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-                  assignMode === 'existing'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Pick Unassigned Resident ({unassignedStudents.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setFormError(null);
-                  setAssignMode('new');
-                }}
-                className={`flex-1 px-3 py-2 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
-                  assignMode === 'new'
-                    ? 'bg-white text-slate-900 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Register New Resident Into Bed
-              </button>
-            </div>
+            <form
+              onSubmit={handleAssignResidentSubmit}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {/* Mode Switcher */}
+                <div className="flex items-center gap-1 p-1 bg-slate-100 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormError(null);
+                      setAssignMode('existing');
+                    }}
+                    className={`flex-1 px-3 py-2 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                      assignMode === 'existing'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Pick Unassigned Resident ({unassignedStudents.length})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFormError(null);
+                      setAssignMode('new');
+                    }}
+                    className={`flex-1 px-3 py-2 text-xs font-semibold rounded-md transition-colors cursor-pointer whitespace-nowrap ${
+                      assignMode === 'new'
+                        ? 'bg-white text-slate-900 shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Register New Resident Into Bed
+                  </button>
+                </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleAssignResidentSubmit} className="space-y-4">
-              {assignMode === 'existing' ? (
-                unassignedStudents.length === 0 ? (
-                  <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
-                    <p className="font-semibold">No Room-Unassigned Residents Found</p>
-                    <p>
-                      All current residents already have a bed assigned. Switch to{' '}
-                      <strong>Register New Resident Into Bed</strong> above to add someone new directly into{' '}
-                      <span className="font-mono">{assigningRoom.roomId}</span>.
-                    </p>
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
                   </div>
+                )}
+
+                {assignMode === 'existing' ? (
+                  unassignedStudents.length === 0 ? (
+                    <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
+                      <p className="font-semibold">No Room-Unassigned Residents Found</p>
+                      <p>
+                        All current residents already have a bed assigned. Switch to{' '}
+                        <strong>Register New Resident Into Bed</strong> above to add someone new directly into{' '}
+                        <span className="font-mono">{assigningRoom.roomId}</span>.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Select Room-Unassigned Resident
+                        </label>
+                        <select
+                          required
+                          value={assignStudentId}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            setAssignStudentId(id);
+                            const st = unassignedStudents.find((s) => s.studentId === id);
+                            if (st) {
+                              setAssignPlacementDate(st.checkInDate || getTodayISO());
+                              setAssignOccupancyMode(st.occupancyMode || 'Single Bed');
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        >
+                          {unassignedStudents.map((st) => (
+                            <option key={st.studentId} value={st.studentId}>
+                              {st.fullName} ({st.studentId}) · Check-In: {st.checkInDate} [{st.status}]
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">
+                            Placement / Start Date
+                          </label>
+                          <input
+                            type="date"
+                            required
+                            value={assignPlacementDate}
+                            onChange={(e) => setAssignPlacementDate(e.target.value)}
+                            className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">
+                            Occupancy Mode
+                          </label>
+                          <select
+                            value={assignOccupancyMode}
+                            onChange={(e) =>
+                              setAssignOccupancyMode(e.target.value as OccupancyMode)
+                            }
+                            className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          >
+                            {OCCUPANCY_MODES.map((om) => (
+                              <option key={om} value={om}>
+                                {om}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
+                        <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={assignUseRoomRate}
+                            onChange={(e) => setAssignUseRoomRate(e.target.checked)}
+                            className="w-4 h-4 rounded border-slate-300 text-blue-900"
+                          />
+                          <span>
+                            Use bed standard rate ({formatRM(assigningRoom.monthlyRate)}/mo)
+                          </span>
+                        </label>
+                        {!assignUseRoomRate && (
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                              Custom Standard Monthly Rate (RM)
+                            </label>
+                            <input
+                              type="number"
+                              required
+                              min={0}
+                              max={10000}
+                              step="0.01"
+                              value={assignCustomRate}
+                              onChange={(e) => setAssignCustomRate(e.target.value)}
+                              className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )
                 ) : (
                   <>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Select Room-Unassigned Resident
-                      </label>
-                      <select
-                        required
-                        value={assignStudentId}
-                        onChange={(e) => {
-                          const id = e.target.value;
-                          setAssignStudentId(id);
-                          const st = unassignedStudents.find((s) => s.studentId === id);
-                          if (st) {
-                            setAssignPlacementDate(st.checkInDate || getTodayISO());
-                            setAssignOccupancyMode(st.occupancyMode || 'Single Bed');
-                          }
-                        }}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      >
-                        {unassignedStudents.map((st) => (
-                          <option key={st.studentId} value={st.studentId}>
-                            {st.fullName} ({st.studentId}) · Check-In: {st.checkInDate} [{st.status}]
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Placement / Start Date
+                          Resident Type
                         </label>
-                        <input
-                          type="date"
-                          required
-                          value={assignPlacementDate}
-                          onChange={(e) => setAssignPlacementDate(e.target.value)}
-                          className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                        />
+                        <select
+                          value={newResType}
+                          onChange={(e) => setNewResType(e.target.value as ResidentType)}
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        >
+                          {RESIDENT_TYPES.map((rt) => (
+                            <option key={rt} value={rt}>
+                              {rt}
+                            </option>
+                          ))}
+                        </select>
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
                           Occupancy Mode
                         </label>
                         <select
-                          value={assignOccupancyMode}
-                          onChange={(e) =>
-                            setAssignOccupancyMode(e.target.value as OccupancyMode)
-                          }
+                          value={newResOccupancy}
+                          onChange={(e) => setNewResOccupancy(e.target.value as OccupancyMode)}
                           className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                         >
                           {OCCUPANCY_MODES.map((om) => (
@@ -1563,308 +1667,237 @@ export function RoomInventoryTab({
                           ))}
                         </select>
                       </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Program
+                        </label>
+                        <select
+                          value={newResProgram}
+                          onChange={(e) => setNewResProgram(e.target.value as ProgramType)}
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        >
+                          {PROGRAMS.map((p) => (
+                            <option key={p} value={p}>
+                              {p}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
-                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
-                      <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Resident ID (Matrix / IC)
+                        </label>
                         <input
-                          type="checkbox"
-                          checked={assignUseRoomRate}
-                          onChange={(e) => setAssignUseRoomRate(e.target.checked)}
-                          className="w-4 h-4 rounded border-slate-300 text-blue-900"
+                          type="text"
+                          required
+                          minLength={3}
+                          maxLength={64}
+                          value={newResId}
+                          onChange={(e) => setNewResId(e.target.value)}
+                          placeholder="e.g. GIS250401"
+                          className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                         />
-                        <span>
-                          Use bed standard rate ({formatRM(assigningRoom.monthlyRate)}/mo)
-                        </span>
-                      </label>
-                      {!assignUseRoomRate && (
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">
-                            Custom Standard Monthly Rate (RM)
-                          </label>
-                          <input
-                            type="number"
-                            required
-                            min={0}
-                            max={10000}
-                            step="0.01"
-                            value={assignCustomRate}
-                            onChange={(e) => setAssignCustomRate(e.target.value)}
-                            className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                          />
-                        </div>
-                      )}
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Full Name
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          minLength={2}
+                          maxLength={120}
+                          value={newResName}
+                          onChange={(e) => setNewResName(e.target.value)}
+                          placeholder="e.g. Nurul Huda binti Azman"
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Phone Number
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          minLength={6}
+                          maxLength={32}
+                          value={newResPhone}
+                          onChange={(e) => setNewResPhone(e.target.value)}
+                          placeholder="e.g. 012-345 6789"
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Emergency Contact
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          minLength={6}
+                          maxLength={120}
+                          value={newResEmergency}
+                          onChange={(e) => setNewResEmergency(e.target.value)}
+                          placeholder="e.g. Azman (Father) 019-111 2233"
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Check-In Date
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={newResCheckIn}
+                          onChange={(e) => {
+                            const d = e.target.value;
+                            setNewResCheckIn(d);
+                            const eff = Math.max(
+                              0,
+                              (Number(newResStdRate) || 0) - (Number(newResRebate) || 0)
+                            );
+                            const fm = calculateFirstMonthDefaults(d, eff);
+                            setNewResFirstCharge(String(fm.firstMonthCharge));
+                            setNewResFirstNote(fm.firstMonthNote);
+                          }}
+                          className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Standard Rate (RM)
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          max={10000}
+                          step="0.01"
+                          value={newResStdRate}
+                          onChange={(e) => {
+                            const r = e.target.value;
+                            setNewResStdRate(r);
+                            const eff = Math.max(
+                              0,
+                              (Number(r) || 0) - (Number(newResRebate) || 0)
+                            );
+                            const fm = calculateFirstMonthDefaults(newResCheckIn, eff);
+                            setNewResFirstCharge(String(fm.firstMonthCharge));
+                            setNewResFirstNote(fm.firstMonthNote);
+                          }}
+                          className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Deposit Paid (RM)
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          max={50000}
+                          step="0.01"
+                          value={newResDeposit}
+                          onChange={(e) => setNewResDeposit(e.target.value)}
+                          className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Monthly Rebate (RM)
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          max={10000}
+                          step="0.01"
+                          value={newResRebate}
+                          onChange={(e) => {
+                            const reb = e.target.value;
+                            setNewResRebate(reb);
+                            const eff = Math.max(
+                              0,
+                              (Number(newResStdRate) || 0) - (Number(reb) || 0)
+                            );
+                            const fm = calculateFirstMonthDefaults(newResCheckIn, eff);
+                            setNewResFirstCharge(String(fm.firstMonthCharge));
+                            setNewResFirstNote(fm.firstMonthNote);
+                          }}
+                          className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Rebate Reason
+                        </label>
+                        <select
+                          value={newResRebateReason}
+                          onChange={(e) => setNewResRebateReason(e.target.value)}
+                          className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        >
+                          {REBATE_REASONS.map((rr) => (
+                            <option key={rr} value={rr}>
+                              {rr}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          1st Month Charge (RM)
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          max={10000}
+                          step="0.01"
+                          value={newResFirstCharge}
+                          onChange={(e) => setNewResFirstCharge(e.target.value)}
+                          className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
                     </div>
                   </>
-                )
-              ) : (
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Resident Type
-                      </label>
-                      <select
-                        value={newResType}
-                        onChange={(e) => setNewResType(e.target.value as ResidentType)}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      >
-                        {RESIDENT_TYPES.map((rt) => (
-                          <option key={rt} value={rt}>
-                            {rt}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Occupancy Mode
-                      </label>
-                      <select
-                        value={newResOccupancy}
-                        onChange={(e) => setNewResOccupancy(e.target.value as OccupancyMode)}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      >
-                        {OCCUPANCY_MODES.map((om) => (
-                          <option key={om} value={om}>
-                            {om}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Program
-                      </label>
-                      <select
-                        value={newResProgram}
-                        onChange={(e) => setNewResProgram(e.target.value as ProgramType)}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      >
-                        {PROGRAMS.map((p) => (
-                          <option key={p} value={p}>
-                            {p}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                )}
+
+                {((assignMode === 'existing' && assignOccupancyMode === 'Whole Unit Exclusive') ||
+                  (assignMode === 'new' && newResOccupancy === 'Whole Unit Exclusive')) && (
+                  <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                    {assignSiblingVacantBeds.length > 0 ? (
+                      <p>
+                        <strong>Whole Unit Exclusive:</strong> Assigning{' '}
+                        <span className="font-mono">{assigningRoom.roomId}</span> will also
+                        block{' '}
+                        <strong className="font-mono">
+                          {assignSiblingVacantBeds.map((b) => b.roomId).join(', ')}
+                        </strong>{' '}
+                        as <strong>Reserved / Blocked</strong>.
+                      </p>
+                    ) : (
+                      <p>
+                        <strong>Whole Unit Exclusive:</strong> No other Vacant beds remain in
+                        Block {assigningRoom.block} Unit {assigningRoom.unitNo}.
+                      </p>
+                    )}
                   </div>
+                )}
+              </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Resident ID (Matrix / IC)
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        minLength={3}
-                        maxLength={64}
-                        value={newResId}
-                        onChange={(e) => setNewResId(e.target.value)}
-                        placeholder="e.g. GIS250401"
-                        className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Full Name
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        minLength={2}
-                        maxLength={120}
-                        value={newResName}
-                        onChange={(e) => setNewResName(e.target.value)}
-                        placeholder="e.g. Nurul Huda binti Azman"
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Phone Number
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        minLength={6}
-                        maxLength={32}
-                        value={newResPhone}
-                        onChange={(e) => setNewResPhone(e.target.value)}
-                        placeholder="e.g. 012-345 6789"
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Emergency Contact
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        minLength={6}
-                        maxLength={120}
-                        value={newResEmergency}
-                        onChange={(e) => setNewResEmergency(e.target.value)}
-                        placeholder="e.g. Azman (Father) 019-111 2233"
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Check-In Date
-                      </label>
-                      <input
-                        type="date"
-                        required
-                        value={newResCheckIn}
-                        onChange={(e) => {
-                          const d = e.target.value;
-                          setNewResCheckIn(d);
-                          const eff = Math.max(
-                            0,
-                            (Number(newResStdRate) || 0) - (Number(newResRebate) || 0)
-                          );
-                          const fm = calculateFirstMonthDefaults(d, eff);
-                          setNewResFirstCharge(String(fm.firstMonthCharge));
-                          setNewResFirstNote(fm.firstMonthNote);
-                        }}
-                        className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Standard Rate (RM)
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min={0}
-                        max={10000}
-                        step="0.01"
-                        value={newResStdRate}
-                        onChange={(e) => {
-                          const r = e.target.value;
-                          setNewResStdRate(r);
-                          const eff = Math.max(
-                            0,
-                            (Number(r) || 0) - (Number(newResRebate) || 0)
-                          );
-                          const fm = calculateFirstMonthDefaults(newResCheckIn, eff);
-                          setNewResFirstCharge(String(fm.firstMonthCharge));
-                          setNewResFirstNote(fm.firstMonthNote);
-                        }}
-                        className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Deposit Paid (RM)
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min={0}
-                        max={50000}
-                        step="0.01"
-                        value={newResDeposit}
-                        onChange={(e) => setNewResDeposit(e.target.value)}
-                        className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Monthly Rebate (RM)
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min={0}
-                        max={10000}
-                        step="0.01"
-                        value={newResRebate}
-                        onChange={(e) => {
-                          const reb = e.target.value;
-                          setNewResRebate(reb);
-                          const eff = Math.max(
-                            0,
-                            (Number(newResStdRate) || 0) - (Number(reb) || 0)
-                          );
-                          const fm = calculateFirstMonthDefaults(newResCheckIn, eff);
-                          setNewResFirstCharge(String(fm.firstMonthCharge));
-                          setNewResFirstNote(fm.firstMonthNote);
-                        }}
-                        className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Rebate Reason
-                      </label>
-                      <select
-                        value={newResRebateReason}
-                        onChange={(e) => setNewResRebateReason(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      >
-                        {REBATE_REASONS.map((rr) => (
-                          <option key={rr} value={rr}>
-                            {rr}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        1st Month Charge (RM)
-                      </label>
-                      <input
-                        type="number"
-                        required
-                        min={0}
-                        max={10000}
-                        step="0.01"
-                        value={newResFirstCharge}
-                        onChange={(e) => setNewResFirstCharge(e.target.value)}
-                        className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-
-              {((assignMode === 'existing' && assignOccupancyMode === 'Whole Unit Exclusive') ||
-                (assignMode === 'new' && newResOccupancy === 'Whole Unit Exclusive')) && (
-                <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
-                  {assignSiblingVacantBeds.length > 0 ? (
-                    <p>
-                      <strong>Whole Unit Exclusive:</strong> Assigning{' '}
-                      <span className="font-mono">{assigningRoom.roomId}</span> will also
-                      block{' '}
-                      <strong className="font-mono">
-                        {assignSiblingVacantBeds.map((b) => b.roomId).join(', ')}
-                      </strong>{' '}
-                      as <strong>Reserved / Blocked</strong>.
-                    </p>
-                  ) : (
-                    <p>
-                      <strong>Whole Unit Exclusive:</strong> No other Vacant beds remain in
-                      Block {assigningRoom.block} Unit {assigningRoom.unitNo}.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setAssigningRoom(null)}

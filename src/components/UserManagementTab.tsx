@@ -379,9 +379,9 @@ export function UserManagementTab({
 
       {/* Create Staff Account Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5 my-8">
-            <div className="flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   Create Staff Account
@@ -400,101 +400,106 @@ export function UserManagementTab({
               </button>
             </div>
 
-            {formError && (
-              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                {formError}
-              </div>
-            )}
+            <form
+              onSubmit={handleCreateUser}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
+                  </div>
+                )}
 
-            <form onSubmit={handleCreateUser} className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Staff Full Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  minLength={2}
-                  maxLength={120}
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. Puan Noraini binti Kassim"
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Username
+                    Staff Full Name
                   </label>
                   <input
                     type="text"
                     required
                     minLength={2}
-                    maxLength={64}
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="e.g. warden1"
-                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    maxLength={120}
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="e.g. Puan Noraini binti Kassim"
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Username
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={2}
+                      maxLength={64}
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder="e.g. warden1"
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Role
+                    </label>
+                    <select
+                      value={role}
+                      onChange={(e) => setRole(e.target.value as StaffRole)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {STAFF_ROLES.map((r) => (
+                        <option key={r} value={r}>
+                          {r}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Role
+                    Custom Email (Optional — leave blank to use @gis-hostel.local)
                   </label>
-                  <select
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as StaffRole)}
+                  <input
+                    type="email"
+                    maxLength={160}
+                    value={customEmail}
+                    onChange={(e) => setCustomEmail(e.target.value)}
+                    placeholder={previewEmail}
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Staff can sign in using username{' '}
+                    <span className="font-mono font-semibold">
+                      {username.trim().toLowerCase() || 'username'}
+                    </span>{' '}
+                    or email <span className="font-mono">{previewEmail}</span>.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Initial Password (minimum 6 characters)
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    maxLength={128}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter initial login password"
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                  >
-                    {STAFF_ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Custom Email (Optional — leave blank to use @gis-hostel.local)
-                </label>
-                <input
-                  type="email"
-                  maxLength={160}
-                  value={customEmail}
-                  onChange={(e) => setCustomEmail(e.target.value)}
-                  placeholder={previewEmail}
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Staff can sign in using username{' '}
-                  <span className="font-mono font-semibold">
-                    {username.trim().toLowerCase() || 'username'}
-                  </span>{' '}
-                  or email <span className="font-mono">{previewEmail}</span>.
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Initial Password (minimum 6 characters)
-                </label>
-                <input
-                  type="password"
-                  required
-                  minLength={6}
-                  maxLength={128}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Enter initial login password"
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
@@ -517,9 +522,9 @@ export function UserManagementTab({
 
       {/* Role Governance Confirmation Modal */}
       {pendingRoleChange && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 overflow-y-auto">
-          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-start justify-between gap-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-2 sm:p-4">
+          <div className="w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden rounded-xl bg-white shadow-xl border border-slate-200">
+            <div className="shrink-0 px-4 sm:px-6 py-4 border-b border-slate-100 flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   {pendingRoleChange.nextRole === 'Master Admin'
@@ -541,33 +546,35 @@ export function UserManagementTab({
               </button>
             </div>
 
-            {pendingRoleChange.nextRole === 'Master Admin' ? (
-              <div className="p-3.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-950 space-y-1.5">
-                <p className="font-semibold">
-                  Master Admin grants full governance access:
-                </p>
-                <ul className="list-disc pl-4 space-y-1">
-                  <li>Create, enable/disable, and assign roles in User Accounts</li>
-                  <li>Upload Bulk Tenancy History and edit/delete past stay segments</li>
-                </ul>
-                {!pendingRoleChange.target.active && (
-                  <p className="text-amber-800 font-medium pt-1">
-                    Note: This account is currently Disabled and must be re-enabled before signing in.
+            <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+              {pendingRoleChange.nextRole === 'Master Admin' ? (
+                <div className="p-3.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-950 space-y-1.5">
+                  <p className="font-semibold">
+                    Master Admin grants full governance access:
                   </p>
-                )}
-              </div>
-            ) : (
-              <div className="p-3.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
-                <p className="font-semibold">Self-Demotion Warning</p>
-                <p>
-                  Changing your own role to <strong>{pendingRoleChange.nextRole}</strong> will
-                  immediately remove your access to User Accounts and Bulk Tenancy History.
-                  Another active Master Admin remains in control.
-                </p>
-              </div>
-            )}
+                  <ul className="list-disc pl-4 space-y-1">
+                    <li>Create, enable/disable, and assign roles in User Accounts</li>
+                    <li>Upload Bulk Tenancy History and edit/delete past stay segments</li>
+                  </ul>
+                  {!pendingRoleChange.target.active && (
+                    <p className="text-amber-800 font-medium pt-1">
+                      Note: This account is currently Disabled and must be re-enabled before signing in.
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
+                  <p className="font-semibold">Self-Demotion Warning</p>
+                  <p>
+                    Changing your own role to <strong>{pendingRoleChange.nextRole}</strong> will
+                    immediately remove your access to User Accounts and Bulk Tenancy History.
+                    Another active Master Admin remains in control.
+                  </p>
+                </div>
+              )}
+            </div>
 
-            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+            <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
               <button
                 type="button"
                 disabled={busyUid === pendingRoleChange.target.uid}

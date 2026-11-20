@@ -430,38 +430,44 @@ export function enumerateMonthsISO(startYM: string, endYM: string): string[] {
 }
 
 export function getNormalizedStayHistory(student: Student): StayHistorySegment[] {
-  if (Array.isArray(student.stayHistory) && student.stayHistory.length > 0) {
+  if (Array.isArray(student.stayHistory)) {
     return [...student.stayHistory]
-      .map((seg, idx) => ({
-        ...seg,
-        id: seg.id || `SEG-${student.studentId}-${idx + 1}`,
-        roomId: seg.roomId || '',
-        hostelLocation: seg.hostelLocation || student.hostelLocation || 'Unassigned',
-        occupancyMode: seg.occupancyMode || student.occupancyMode || 'Single Bed',
-        startDate: seg.startDate || student.checkInDate,
-        endDate: seg.endDate ?? null,
-        standardRoomRate:
+      .map((seg, idx) => {
+        const segStartDate = seg.startDate || student.checkInDate;
+        const segStdRate =
           typeof seg.standardRoomRate === 'number'
             ? seg.standardRoomRate
-            : student.standardRoomRate ?? student.monthlyFee,
-        monthlyRebate:
+            : student.standardRoomRate ?? student.monthlyFee;
+        const segRebate =
           typeof seg.monthlyRebate === 'number'
             ? seg.monthlyRebate
-            : student.monthlyRebate ?? 0,
-        effectiveMonthlyFee:
+            : student.monthlyRebate ?? 0;
+        const segEffFee =
           typeof seg.effectiveMonthlyFee === 'number'
             ? seg.effectiveMonthlyFee
-            : Math.max(
-                0,
-                (typeof seg.standardRoomRate === 'number'
-                  ? seg.standardRoomRate
-                  : student.monthlyFee) -
-                  (typeof seg.monthlyRebate === 'number' ? seg.monthlyRebate : 0)
-              ),
-        reason: seg.reason || 'Initial Check-In',
-        recordedBy: seg.recordedBy || student.updatedBy || 'System',
-        recordedAt: seg.recordedAt || '',
-      }))
+            : Math.max(0, segStdRate - segRebate);
+        const segFirstMonth =
+          typeof seg.firstMonthCharge === 'number'
+            ? seg.firstMonthCharge
+            : calculateFirstMonthDefaults(segStartDate, segEffFee).firstMonthCharge;
+
+        return {
+          ...seg,
+          id: seg.id || `SEG-${student.studentId}-${idx + 1}`,
+          roomId: seg.roomId || '',
+          hostelLocation: seg.hostelLocation || student.hostelLocation || 'Unassigned',
+          occupancyMode: seg.occupancyMode || student.occupancyMode || 'Single Bed',
+          startDate: segStartDate,
+          endDate: seg.endDate ?? null,
+          standardRoomRate: segStdRate,
+          monthlyRebate: segRebate,
+          effectiveMonthlyFee: segEffFee,
+          firstMonthCharge: segFirstMonth,
+          reason: seg.reason || 'Initial Check-In',
+          recordedBy: seg.recordedBy || student.updatedBy || 'System',
+          recordedAt: seg.recordedAt || '',
+        };
+      })
       .sort((a, b) => a.startDate.localeCompare(b.startDate));
   }
 
@@ -519,15 +525,20 @@ export function calculateResidentBilling(
       : Math.max(0, standardRoomRate - monthlyRebate);
 
   const normalizedSegments = getNormalizedStayHistory(student);
+  const activeOpenSeg = normalizedSegments.find((s) => !s.endDate);
   const firstSeg = normalizedSegments[0];
-  const initialFee = firstSeg ? firstSeg.effectiveMonthlyFee : effectiveMonthlyFee;
-  const defaults = calculateFirstMonthDefaults(student.checkInDate, initialFee);
+  const defaults = calculateFirstMonthDefaults(
+    student.checkInDate,
+    effectiveMonthlyFee
+  );
   const firstMonthCharge =
     typeof student.firstMonthCharge === 'number'
       ? Math.max(0, Math.round(student.firstMonthCharge * 100) / 100)
-      : firstSeg && typeof firstSeg.firstMonthCharge === 'number'
-        ? Math.max(0, Math.round(firstSeg.firstMonthCharge * 100) / 100)
-        : defaults.firstMonthCharge;
+      : activeOpenSeg && typeof activeOpenSeg.firstMonthCharge === 'number'
+        ? Math.max(0, Math.round(activeOpenSeg.firstMonthCharge * 100) / 100)
+        : firstSeg && typeof firstSeg.firstMonthCharge === 'number'
+          ? Math.max(0, Math.round(firstSeg.firstMonthCharge * 100) / 100)
+          : defaults.firstMonthCharge;
   const firstMonthNote = student.firstMonthNote || defaults.firstMonthNote;
 
   const billingEndDate =
@@ -539,42 +550,40 @@ export function calculateResidentBilling(
   let totalExpectedRent = 0;
   const segmentBreakdowns: SegmentBillingBreakdown[] = [];
 
-  if (normalizedSegments.length <= 1) {
+  if (normalizedSegments.length === 0) {
+    monthsBilled = 0;
+    totalExpectedRent = 0;
+  } else if (normalizedSegments.length === 1) {
     const seg = normalizedSegments[0];
-    const segEnd = seg?.endDate || billingEndDate;
+    const segEnd = seg.endDate || billingEndDate;
     const effectiveEnd =
-      seg && DATE_REGEX.test(seg.startDate) && DATE_REGEX.test(segEnd) && segEnd < seg.startDate
+      DATE_REGEX.test(seg.startDate) && DATE_REGEX.test(segEnd) && segEnd < seg.startDate
         ? seg.startDate
         : segEnd;
-    monthsBilled = calculateMonthsBilled(
-      seg ? seg.startDate : student.checkInDate,
-      effectiveEnd
-    );
+    monthsBilled = calculateMonthsBilled(seg.startDate, effectiveEnd);
     const segFirstCharge =
-      seg && typeof seg.firstMonthCharge === 'number'
+      typeof seg.firstMonthCharge === 'number'
         ? Math.max(0, Math.round(seg.firstMonthCharge * 100) / 100)
-        : firstMonthCharge;
-    const segRate = seg ? seg.effectiveMonthlyFee : effectiveMonthlyFee;
+        : calculateFirstMonthDefaults(seg.startDate, seg.effectiveMonthlyFee)
+            .firstMonthCharge;
+    const segRate = seg.effectiveMonthlyFee;
     totalExpectedRent =
       monthsBilled === 1
         ? segFirstCharge
         : Math.round((segFirstCharge + (monthsBilled - 1) * segRate) * 100) / 100;
 
-    if (seg) {
-      const startYM = seg.startDate.slice(0, 7);
-      const endYM = effectiveEnd.slice(0, 7);
-      const billedMonths = enumerateMonthsISO(startYM, endYM).slice(0, monthsBilled);
-      segmentBreakdowns.push({
-        segment: seg,
-        monthsBilled,
-        billedMonths,
-        expectedRent: totalExpectedRent,
-      });
-    }
+    const startYM = seg.startDate.slice(0, 7);
+    const endYM = effectiveEnd.slice(0, 7);
+    const billedMonths = enumerateMonthsISO(startYM, endYM).slice(0, monthsBilled);
+    segmentBreakdowns.push({
+      segment: seg,
+      monthsBilled,
+      billedMonths,
+      expectedRent: totalExpectedRent,
+    });
   } else {
-    // Multi-segment billing: claim each calendar month (YYYY-MM) at most once so mid-month transfers never double-bill
+    // Multi-segment billing: each segment uses its own isolated snapshot rates & firstMonthCharge
     const claimedMonths = new Set<string>();
-    let firstMonthApplied = false;
 
     for (let i = 0; i < normalizedSegments.length; i++) {
       const seg = normalizedSegments[i];
@@ -600,18 +609,19 @@ export function calculateResidentBilling(
       const billedForSeg: string[] = [];
       let segExpected = 0;
 
+      const segFirstCharge =
+        typeof seg.firstMonthCharge === 'number'
+          ? Math.max(0, Math.round(seg.firstMonthCharge * 100) / 100)
+          : calculateFirstMonthDefaults(seg.startDate, seg.effectiveMonthlyFee)
+              .firstMonthCharge;
+
       for (const ym of segMonths) {
         if (claimedMonths.has(ym)) continue;
         claimedMonths.add(ym);
         billedForSeg.push(ym);
 
-        if (!firstMonthApplied) {
-          const segFirstCharge =
-            typeof seg.firstMonthCharge === 'number'
-              ? Math.max(0, Math.round(seg.firstMonthCharge * 100) / 100)
-              : firstMonthCharge;
+        if (ym === startYM) {
           segExpected += segFirstCharge;
-          firstMonthApplied = true;
         } else {
           segExpected += seg.effectiveMonthlyFee;
         }
@@ -689,27 +699,36 @@ export function calculateMonthInstallmentStatus(
   excludePaymentId?: string
 ): MonthInstallmentStatus {
   const summary = calculateResidentBilling(student, payments);
-  const isCheckInMonth =
-    MONTH_REGEX.test(billingMonth) &&
-    student.checkInDate.slice(0, 7) === billingMonth;
-
   let monthTargetCharge = summary.effectiveMonthlyFee;
-  if (isCheckInMonth) {
-    monthTargetCharge = summary.firstMonthCharge;
-  } else if (MONTH_REGEX.test(billingMonth) && summary.segments.length > 0) {
+  if (MONTH_REGEX.test(billingMonth) && summary.segments.length > 0) {
     const owner = summary.segments.find((sb) =>
       sb.billedMonths.includes(billingMonth)
     );
     if (owner) {
-      monthTargetCharge = owner.segment.effectiveMonthlyFee;
+      monthTargetCharge =
+        billingMonth === owner.segment.startDate.slice(0, 7) &&
+        typeof owner.segment.firstMonthCharge === 'number'
+          ? owner.segment.firstMonthCharge
+          : owner.segment.effectiveMonthlyFee;
     } else {
       const matchingRange = [...summary.segments]
         .reverse()
         .find((sb) => sb.segment.startDate.slice(0, 7) <= billingMonth);
       if (matchingRange) {
-        monthTargetCharge = matchingRange.segment.effectiveMonthlyFee;
+        monthTargetCharge =
+          billingMonth === matchingRange.segment.startDate.slice(0, 7) &&
+          typeof matchingRange.segment.firstMonthCharge === 'number'
+            ? matchingRange.segment.firstMonthCharge
+            : matchingRange.segment.effectiveMonthlyFee;
+      } else if (student.checkInDate.slice(0, 7) === billingMonth) {
+        monthTargetCharge = summary.firstMonthCharge;
       }
     }
+  } else if (
+    MONTH_REGEX.test(billingMonth) &&
+    student.checkInDate.slice(0, 7) === billingMonth
+  ) {
+    monthTargetCharge = summary.firstMonthCharge;
   }
 
   const settledForMonth = payments.filter(

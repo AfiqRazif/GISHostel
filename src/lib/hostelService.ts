@@ -128,6 +128,16 @@ export async function syncStaffUserRecord(user: User): Promise<StaffUser> {
       return existingSnap.data() as StaffUser;
     }
 
+    const isBootstrapOwner =
+      email.toLowerCase() === 'afiqjacksonmusic@gmail.com' &&
+      user.emailVerified;
+
+    if (!isBootstrapOwner) {
+      throw new Error(
+        'NOT_PROVISIONED: Your account has not been provisioned in GIS Nilai Staff Accounts. Please ask a Master Admin to create your staff login.'
+      );
+    }
+
     const firstCheckSnap = await getDocs(
       query(collection(db, 'staff_users'), limit(1))
     );
@@ -141,7 +151,8 @@ export async function syncStaffUserRecord(user: User): Promise<StaffUser> {
       .trim()
       .slice(0, FIELD_LIMITS.fullName.max);
     const username = extractUsernameFromEmail(email).slice(0, 64);
-    const role: StaffRole = isFirstUser ? 'Master Admin' : 'Staff';
+    const role: StaffRole =
+      isFirstUser || isBootstrapOwner ? 'Master Admin' : 'Staff';
 
     const newRecord = {
       uid: user.uid,
@@ -157,16 +168,27 @@ export async function syncStaffUserRecord(user: User): Promise<StaffUser> {
 
     await setDoc(ref, newRecord);
     const createdSnap = await getDoc(ref);
-    return (createdSnap.data() as StaffUser) || {
-      uid: user.uid,
-      username,
-      email,
-      fullName,
-      role,
-      active: true,
-      createdAt: null,
-    };
+    return (
+      (createdSnap.data() as StaffUser) || {
+        uid: user.uid,
+        username,
+        email,
+        fullName,
+        role,
+        active: true,
+        createdAt: null,
+      }
+    );
   } catch (error) {
+    if (error instanceof Error && error.message.startsWith('NOT_PROVISIONED:')) {
+      throw error;
+    }
+    const errCode = (error as { code?: string })?.code;
+    if (errCode === 'permission-denied') {
+      throw new Error(
+        'NOT_PROVISIONED: Access denied. Your account is not authorized in GIS Nilai Staff Accounts.'
+      );
+    }
     handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
@@ -238,6 +260,29 @@ export async function updateStaffUserAccount(
   const adminEmail = assertStaffEmail(masterAdminEmail);
   const path = `staff_users/${uid}`;
   try {
+    // Lockout Guardrail: ensure at least one active Master Admin always remains
+    const allSnap = await getDocs(collection(db, 'staff_users'));
+    const allStaff = allSnap.docs.map((d) => d.data() as StaffUser);
+    const target = allStaff.find((u) => u.uid === uid);
+
+    if (!target) {
+      throw new Error('Staff user account not found.');
+    }
+
+    const nextRole = updates.role ?? target.role;
+    const nextActive = updates.active ?? target.active;
+    const remainingActiveMasterAdmins = allStaff.filter((u) => {
+      const effectiveRole = u.uid === uid ? nextRole : u.role;
+      const effectiveActive = u.uid === uid ? nextActive : u.active;
+      return effectiveRole === 'Master Admin' && effectiveActive;
+    });
+
+    if (remainingActiveMasterAdmins.length === 0) {
+      throw new Error(
+        'Lockout Protection: At least one active Master Admin account must remain. Promote another active user to Master Admin before demoting or disabling this account.'
+      );
+    }
+
     const payload: Record<string, unknown> = {
       updatedBy: adminEmail,
       updatedAt: serverTimestamp(),
@@ -249,6 +294,13 @@ export async function updateStaffUserAccount(
     }
     await updateDoc(doc(db, 'staff_users', uid), payload);
   } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('Lockout Protection') ||
+        error.message.includes('not found'))
+    ) {
+      throw error;
+    }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
@@ -978,13 +1030,15 @@ export async function updateStudentRecord(
         standardRoomRate,
         monthlyRebate,
         effectiveMonthlyFee,
+        firstMonthCharge:
+          existingStayHistory.length === 0
+            ? firstMonthCharge
+            : calculateFirstMonthDefaults(restartDate, effectiveMonthlyFee)
+                .firstMonthCharge,
         reason: 'Re-Check-In',
         recordedBy: email,
         recordedAt: new Date().toISOString(),
       };
-      if (existingStayHistory.length === 0) {
-        recheckSegment.firstMonthCharge = firstMonthCharge;
-      }
 
       batch.update(studentRef, {
         fullName,
@@ -1063,24 +1117,31 @@ export async function updateStudentRecord(
         targetRoomId = input.newRoom.roomId;
         targetLocation = input.newRoom.location;
 
-        if (!currentStudent.assignedRoomId && existingStayHistory.length === 0) {
-          nextStayHistory = [
-            {
-              id: createStaySegmentId(),
-              roomId: input.newRoom.roomId,
-              hostelLocation: input.newRoom.location,
-              occupancyMode: input.occupancyMode,
-              startDate: input.checkInDate,
-              endDate: null,
-              standardRoomRate,
-              monthlyRebate,
-              effectiveMonthlyFee,
-              firstMonthCharge,
-              reason: 'Initial Room Assignment',
-              recordedBy: email,
-              recordedAt: new Date().toISOString(),
-            },
-          ];
+        if (!currentStudent.assignedRoomId && !existingStayHistory.some((s) => !s.endDate)) {
+          const placementDate = input.checkInDate;
+          const newFirstSeg: StayHistorySegment = {
+            id: createStaySegmentId(),
+            roomId: input.newRoom.roomId,
+            hostelLocation: input.newRoom.location,
+            occupancyMode: input.occupancyMode,
+            startDate: placementDate,
+            endDate: null,
+            standardRoomRate,
+            monthlyRebate,
+            effectiveMonthlyFee,
+            firstMonthCharge:
+              existingStayHistory.length === 0
+                ? firstMonthCharge
+                : calculateFirstMonthDefaults(placementDate, effectiveMonthlyFee)
+                    .firstMonthCharge,
+            reason:
+              existingStayHistory.length === 0
+                ? 'Initial Room Assignment'
+                : 'Room Assignment',
+            recordedBy: email,
+            recordedAt: new Date().toISOString(),
+          };
+          nextStayHistory = [...existingStayHistory, newFirstSeg];
         } else {
           const today = getTodayISO();
           const closedPrev = existingStayHistory.map((seg, idx) => {
@@ -1104,6 +1165,10 @@ export async function updateStudentRecord(
               standardRoomRate,
               monthlyRebate,
               effectiveMonthlyFee,
+              firstMonthCharge: calculateFirstMonthDefaults(
+                today,
+                effectiveMonthlyFee
+              ).firstMonthCharge,
               reason: 'Room Transfer (Profile Edit)',
               recordedBy: email,
               recordedAt: new Date().toISOString(),
@@ -1141,21 +1206,25 @@ export async function updateStudentRecord(
         }
 
         if (nextStayHistory.length > 0) {
-          const lastIdx = nextStayHistory.length - 1;
           nextStayHistory = nextStayHistory.map((seg, idx) => {
-            if (idx !== lastIdx || seg.endDate) return seg;
-            const updatedSeg: StayHistorySegment = {
+            if (seg.endDate !== null) return seg;
+            return {
               ...seg,
               occupancyMode: input.occupancyMode,
               standardRoomRate,
               monthlyRebate,
               effectiveMonthlyFee,
               startDate: idx === 0 ? input.checkInDate : seg.startDate,
+              firstMonthCharge:
+                idx === 0 || seg.startDate === input.checkInDate
+                  ? firstMonthCharge
+                  : typeof seg.firstMonthCharge === 'number'
+                    ? seg.firstMonthCharge
+                    : calculateFirstMonthDefaults(
+                        seg.startDate,
+                        effectiveMonthlyFee
+                      ).firstMonthCharge,
             };
-            if (idx === 0) {
-              updatedSeg.firstMonthCharge = firstMonthCharge;
-            }
-            return updatedSeg;
           });
         }
       }
@@ -1384,31 +1453,28 @@ export async function transferStudentRoom(
     });
 
     const isFirstAssignedSegment = closedHistory.length === 0;
+    const segStartDate = isFirstAssignedSegment
+      ? currentStudent.checkInDate || input.effectiveTransferDate
+      : input.effectiveTransferDate;
     const newSegment: StayHistorySegment = {
       id: createStaySegmentId(),
       roomId: input.newRoom.roomId,
       hostelLocation: input.newRoom.location,
       occupancyMode: input.newOccupancyMode,
-      startDate: isFirstAssignedSegment
-        ? currentStudent.checkInDate || input.effectiveTransferDate
-        : input.effectiveTransferDate,
+      startDate: segStartDate,
       endDate: null,
       standardRoomRate: newStandardRate,
       monthlyRebate: newMonthlyRebate,
       effectiveMonthlyFee: newEffectiveMonthlyFee,
+      firstMonthCharge:
+        isFirstAssignedSegment && typeof currentStudent.firstMonthCharge === 'number'
+          ? currentStudent.firstMonthCharge
+          : calculateFirstMonthDefaults(segStartDate, newEffectiveMonthlyFee)
+              .firstMonthCharge,
       reason: isFirstAssignedSegment ? 'Initial Room Assignment' : transferReason,
       recordedBy: email,
       recordedAt: new Date().toISOString(),
     };
-    if (isFirstAssignedSegment) {
-      newSegment.firstMonthCharge =
-        typeof currentStudent.firstMonthCharge === 'number'
-          ? currentStudent.firstMonthCharge
-          : calculateFirstMonthDefaults(
-              newSegment.startDate,
-              newEffectiveMonthlyFee
-            ).firstMonthCharge;
-    }
 
     batch.update(studentRef, {
       assignedRoomId: input.newRoom.roomId,
@@ -1442,6 +1508,468 @@ export async function transferStudentRoom(
   }
 }
 
+export interface AssignRoomToStudentInput {
+  room: Room;
+  occupancyMode: OccupancyMode;
+  placementDate: string;
+  standardRoomRate: number;
+  monthlyRebate: number;
+  rebateReason: string;
+}
+
+export async function assignRoomToStudent(
+  student: Student,
+  input: AssignRoomToStudentInput,
+  allRooms: Room[],
+  staffEmail: string
+): Promise<{ blockedSiblings: string[] }> {
+  const email = assertStaffEmail(staffEmail);
+
+  if (!DATE_REGEX.test(input.placementDate)) {
+    throw new Error('Placement Start Date must be in YYYY-MM-DD format.');
+  }
+  if (input.room.status !== 'Vacant') {
+    throw new Error(`Room "${input.room.roomId}" is not currently Vacant.`);
+  }
+
+  const standardRoomRate = clampNumber(
+    input.standardRoomRate,
+    FIELD_LIMITS.monthlyFee.min,
+    FIELD_LIMITS.monthlyFee.max
+  );
+  const monthlyRebate = clampNumber(
+    input.monthlyRebate,
+    FIELD_LIMITS.monthlyFee.min,
+    FIELD_LIMITS.monthlyFee.max
+  );
+  const effectiveMonthlyFee = Math.max(
+    0,
+    Math.round((standardRoomRate - monthlyRebate) * 100) / 100
+  );
+  const rebateReason = (input.rebateReason || 'None')
+    .trim()
+    .slice(0, FIELD_LIMITS.rebateReason.max);
+
+  const studentRef = doc(db, 'students', student.studentId);
+  const roomRef = doc(db, 'rooms', input.room.roomId);
+  const blockedSiblings: string[] = [];
+
+  try {
+    const freshRoom = await getDoc(roomRef);
+    if (!freshRoom.exists() || freshRoom.data()?.status !== 'Vacant') {
+      throw new Error(`Room "${input.room.roomId}" is no longer Vacant.`);
+    }
+
+    const batch = writeBatch(db);
+
+    // Release old bed if student somehow held one
+    if (student.assignedRoomId && student.assignedRoomId !== input.room.roomId) {
+      const oldRef = doc(db, 'rooms', student.assignedRoomId);
+      const oldSnap = await getDoc(oldRef);
+      if (oldSnap.exists() && oldSnap.data()?.currentStudentId === student.studentId) {
+        batch.update(oldRef, {
+          status: 'Vacant',
+          currentStudentId: null,
+          currentStudentName: null,
+          statusNote: null,
+          exclusiveResidentId: null,
+          updatedBy: email,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    batch.update(roomRef, {
+      status: 'Occupied',
+      currentStudentId: student.studentId,
+      currentStudentName: student.fullName,
+      statusNote: null,
+      exclusiveResidentId: null,
+      updatedBy: email,
+      updatedAt: serverTimestamp(),
+    });
+
+    if (input.occupancyMode === 'Whole Unit Exclusive') {
+      const exclusiveNote = `Exclusive Unit: ${student.fullName}`.slice(
+        0,
+        FIELD_LIMITS.statusNote.max
+      );
+      const siblings = allRooms.filter(
+        (r) =>
+          r.roomId !== input.room.roomId &&
+          r.location === input.room.location &&
+          r.block === input.room.block &&
+          r.unitNo === input.room.unitNo &&
+          r.status === 'Vacant'
+      );
+      for (const sib of siblings) {
+        const sibRef = doc(db, 'rooms', sib.roomId);
+        const sibSnap = await getDoc(sibRef);
+        if (sibSnap.exists() && sibSnap.data()?.status === 'Vacant') {
+          batch.update(sibRef, {
+            status: 'Reserved / Blocked',
+            currentStudentId: null,
+            currentStudentName: null,
+            statusNote: exclusiveNote,
+            exclusiveResidentId: student.studentId,
+            updatedBy: email,
+            updatedAt: serverTimestamp(),
+          });
+          blockedSiblings.push(sib.roomId);
+        }
+      }
+    }
+
+    const existingStayHistory: StayHistorySegment[] = Array.isArray(student.stayHistory)
+      ? student.stayHistory.map((seg) => ({ ...seg }))
+      : student.assignedRoomId
+        ? getNormalizedStayHistory(student)
+        : [];
+
+    const closedExisting = existingStayHistory.map((seg) =>
+      !seg.endDate
+        ? {
+            ...seg,
+            endDate: computeClosedEndDate(seg.startDate, input.placementDate),
+          }
+        : seg
+    );
+
+    const isFirstSegment = closedExisting.length === 0;
+    const defaults = calculateFirstMonthDefaults(input.placementDate, effectiveMonthlyFee);
+    const resolvedFirstMonthCharge =
+      isFirstSegment &&
+      typeof student.firstMonthCharge === 'number' &&
+      student.checkInDate === input.placementDate
+        ? student.firstMonthCharge
+        : defaults.firstMonthCharge;
+    const newSegment: StayHistorySegment = {
+      id: createStaySegmentId(),
+      roomId: input.room.roomId,
+      hostelLocation: input.room.location,
+      occupancyMode: input.occupancyMode,
+      startDate: input.placementDate,
+      endDate: null,
+      standardRoomRate,
+      monthlyRebate,
+      effectiveMonthlyFee,
+      firstMonthCharge: resolvedFirstMonthCharge,
+      reason: isFirstSegment ? 'Initial Room Assignment' : 'Room Assignment',
+      recordedBy: email,
+      recordedAt: new Date().toISOString(),
+    };
+
+    const nextStayHistory = [...closedExisting, newSegment].sort((a, b) =>
+      a.startDate.localeCompare(b.startDate)
+    );
+    const firstSeg = nextStayHistory[0];
+
+    const studentUpdate: Record<string, unknown> = {
+      assignedRoomId: input.room.roomId,
+      hostelLocation: input.room.location,
+      occupancyMode: input.occupancyMode,
+      status: 'Active',
+      checkOutDate: null,
+      checkInDate: firstSeg ? firstSeg.startDate : input.placementDate,
+      standardRoomRate,
+      monthlyRebate,
+      rebateReason,
+      effectiveMonthlyFee,
+      monthlyFee: effectiveMonthlyFee,
+      stayHistory: nextStayHistory,
+      updatedBy: email,
+      updatedAt: serverTimestamp(),
+    };
+    if (isFirstSegment && typeof newSegment.firstMonthCharge === 'number') {
+      studentUpdate.firstMonthCharge = newSegment.firstMonthCharge;
+      studentUpdate.firstMonthNote = defaults.firstMonthNote;
+    }
+
+    batch.update(studentRef, studentUpdate);
+    await batch.commit();
+    return { blockedSiblings };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('Vacant')) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.UPDATE, `students/${student.studentId}`);
+  }
+}
+
+function areStaySegmentsEquivalent(
+  a: StayHistorySegment,
+  b: StayHistorySegment
+): boolean {
+  return (
+    a.id === b.id &&
+    a.roomId === b.roomId &&
+    a.hostelLocation === b.hostelLocation &&
+    a.occupancyMode === b.occupancyMode &&
+    a.startDate === b.startDate &&
+    (a.endDate ?? null) === (b.endDate ?? null) &&
+    a.standardRoomRate === b.standardRoomRate &&
+    a.monthlyRebate === b.monthlyRebate &&
+    a.effectiveMonthlyFee === b.effectiveMonthlyFee &&
+    (a.firstMonthCharge ?? null) === (b.firstMonthCharge ?? null)
+  );
+}
+
+export async function saveStudentStayHistory(
+  currentStudent: Student,
+  rawSegments: StayHistorySegment[],
+  allRooms: Room[],
+  staffEmail: string
+): Promise<void> {
+  const email = assertStaffEmail(staffEmail);
+
+  const sanitizedSegments: StayHistorySegment[] = rawSegments.map((seg) => {
+    const cleanRoomId = (seg.roomId || '').trim().slice(0, FIELD_LIMITS.roomId.max);
+    if (!cleanRoomId) {
+      throw new Error('Every stay segment must specify a Room / Bed ID.');
+    }
+    if (!DATE_REGEX.test(seg.startDate)) {
+      throw new Error('Every stay segment must have a valid Start Date (YYYY-MM-DD).');
+    }
+    const cleanEnd = seg.endDate ? seg.endDate.trim() : null;
+    if (cleanEnd) {
+      if (!DATE_REGEX.test(cleanEnd)) {
+        throw new Error('End Date must be in YYYY-MM-DD format.');
+      }
+      if (cleanEnd < seg.startDate) {
+        throw new Error('Stay segment End Date cannot be earlier than Start Date.');
+      }
+    }
+
+    const stdRate = clampNumber(
+      Number(seg.standardRoomRate) || 0,
+      FIELD_LIMITS.monthlyFee.min,
+      FIELD_LIMITS.monthlyFee.max
+    );
+    const rebate = clampNumber(
+      Number(seg.monthlyRebate) || 0,
+      FIELD_LIMITS.monthlyFee.min,
+      FIELD_LIMITS.monthlyFee.max
+    );
+    const effFee = Math.max(0, Math.round((stdRate - rebate) * 100) / 100);
+    const segFirstMonth =
+      typeof seg.firstMonthCharge === 'number' && !Number.isNaN(seg.firstMonthCharge)
+        ? clampNumber(
+            seg.firstMonthCharge,
+            FIELD_LIMITS.monthlyFee.min,
+            FIELD_LIMITS.monthlyFee.max
+          )
+        : calculateFirstMonthDefaults(seg.startDate, effFee).firstMonthCharge;
+
+    return {
+      id: seg.id || createStaySegmentId(),
+      roomId: cleanRoomId,
+      hostelLocation: seg.hostelLocation || 'Unassigned',
+      occupancyMode: seg.occupancyMode || 'Single Bed',
+      startDate: seg.startDate,
+      endDate: cleanEnd,
+      standardRoomRate: stdRate,
+      monthlyRebate: rebate,
+      effectiveMonthlyFee: effFee,
+      firstMonthCharge: segFirstMonth,
+      reason: (seg.reason || 'Stay Record').trim().slice(0, 120),
+      recordedBy: seg.recordedBy || email,
+      recordedAt: seg.recordedAt || new Date().toISOString(),
+    };
+  });
+
+  const sortedSegments = sanitizedSegments.sort((a, b) =>
+    a.startDate.localeCompare(b.startDate)
+  );
+  const openSegments = sortedSegments.filter((s) => !s.endDate);
+  if (openSegments.length > 1) {
+    throw new Error(
+      'Only one stay segment can be open (Present / no End Date). Please enter an End Date on past stays.'
+    );
+  }
+
+  const prevNormalized = getNormalizedStayHistory(currentStudent);
+  const prevOpen = prevNormalized.find((s) => !s.endDate) || null;
+  const nextOpen = openSegments[0] || null;
+
+  if (
+    currentStudent.status !== 'Active' &&
+    nextOpen &&
+    (!prevOpen || !areStaySegmentsEquivalent(prevOpen, nextOpen))
+  ) {
+    throw new Error(
+      'Checked-Out residents cannot have an ongoing stay without an End Date.'
+    );
+  }
+
+  const studentRef = doc(db, 'students', currentStudent.studentId);
+  const batch = writeBatch(db);
+  const exclusiveNote = `Exclusive Unit: ${currentStudent.fullName}`.slice(
+    0,
+    FIELD_LIMITS.statusNote.max
+  );
+
+  const releaseOldRoomAndBlocks = async () => {
+    if (currentStudent.assignedRoomId) {
+      const oldRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
+      const oldSnap = await getDoc(oldRoomRef);
+      if (
+        oldSnap.exists() &&
+        oldSnap.data()?.currentStudentId === currentStudent.studentId
+      ) {
+        batch.update(oldRoomRef, {
+          status: 'Vacant',
+          currentStudentId: null,
+          currentStudentName: null,
+          statusNote: null,
+          exclusiveResidentId: null,
+          updatedBy: email,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    const oldRoomObj = currentStudent.assignedRoomId
+      ? allRooms.find((r) => r.roomId === currentStudent.assignedRoomId)
+      : undefined;
+    for (const r of allRooms) {
+      if (r.status !== 'Reserved / Blocked') continue;
+      const matchesResident = r.exclusiveResidentId === currentStudent.studentId;
+      const matchesUnit =
+        oldRoomObj &&
+        r.location === oldRoomObj.location &&
+        r.block === oldRoomObj.block &&
+        r.unitNo === oldRoomObj.unitNo;
+      if (matchesResident || matchesUnit) {
+        batch.update(doc(db, 'rooms', r.roomId), {
+          status: 'Vacant',
+          currentStudentId: null,
+          currentStudentName: null,
+          statusNote: null,
+          exclusiveResidentId: null,
+          updatedBy: email,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+  };
+
+  try {
+    const studentUpdate: Record<string, unknown> = {
+      stayHistory: sortedSegments,
+      updatedBy: email,
+      updatedAt: serverTimestamp(),
+    };
+
+    // Closed-Segment Protection Rule:
+    // Only sync top-level current rate and room fields when modifying the single active segment
+    // where endDate === null (and student.status === 'Active').
+    // Adding, editing, or deleting any closed segment (endDate !== null) leaves top-level
+    // assignedRoomId, standardRoomRate, monthlyRebate, and effectiveMonthlyFee untouched.
+    const activeOpenModified =
+      currentStudent.status === 'Active' &&
+      ((prevOpen === null && nextOpen !== null) ||
+        (prevOpen !== null && nextOpen === null) ||
+        (prevOpen !== null &&
+          nextOpen !== null &&
+          !areStaySegmentsEquivalent(prevOpen, nextOpen)));
+
+    if (activeOpenModified) {
+      if (nextOpen) {
+        studentUpdate.assignedRoomId = nextOpen.roomId;
+        studentUpdate.hostelLocation = nextOpen.hostelLocation;
+        studentUpdate.occupancyMode = nextOpen.occupancyMode;
+        studentUpdate.standardRoomRate = nextOpen.standardRoomRate;
+        studentUpdate.monthlyRebate = nextOpen.monthlyRebate;
+        studentUpdate.effectiveMonthlyFee = nextOpen.effectiveMonthlyFee;
+        studentUpdate.monthlyFee = nextOpen.effectiveMonthlyFee;
+
+        if (sortedSegments[0]?.id === nextOpen.id) {
+          studentUpdate.checkInDate = nextOpen.startDate;
+          if (typeof nextOpen.firstMonthCharge === 'number') {
+            studentUpdate.firstMonthCharge = nextOpen.firstMonthCharge;
+          }
+        }
+
+        if (nextOpen.roomId !== currentStudent.assignedRoomId) {
+          await releaseOldRoomAndBlocks();
+          const newRoomObj = allRooms.find((r) => r.roomId === nextOpen.roomId);
+          if (newRoomObj) {
+            const newRoomRef = doc(db, 'rooms', newRoomObj.roomId);
+            const freshSnap = await getDoc(newRoomRef);
+            const freshData = freshSnap.data();
+            if (
+              freshSnap.exists() &&
+              freshData?.status !== 'Vacant' &&
+              freshData?.currentStudentId !== currentStudent.studentId
+            ) {
+              throw new Error(
+                `Room "${newRoomObj.roomId}" is currently ${freshData?.status}. Set an End Date if recording a past stay, or pick a Vacant bed.`
+              );
+            }
+            if (freshSnap.exists()) {
+              batch.update(newRoomRef, {
+                status: 'Occupied',
+                currentStudentId: currentStudent.studentId,
+                currentStudentName: currentStudent.fullName,
+                statusNote: null,
+                exclusiveResidentId: null,
+                updatedBy: email,
+                updatedAt: serverTimestamp(),
+              });
+              if (nextOpen.occupancyMode === 'Whole Unit Exclusive') {
+                const siblings = allRooms.filter(
+                  (r) =>
+                    r.roomId !== newRoomObj.roomId &&
+                    r.location === newRoomObj.location &&
+                    r.block === newRoomObj.block &&
+                    r.unitNo === newRoomObj.unitNo &&
+                    r.status === 'Vacant'
+                );
+                for (const sib of siblings) {
+                  batch.update(doc(db, 'rooms', sib.roomId), {
+                    status: 'Reserved / Blocked',
+                    currentStudentId: null,
+                    currentStudentName: null,
+                    statusNote: exclusiveNote,
+                    exclusiveResidentId: currentStudent.studentId,
+                    updatedBy: email,
+                    updatedAt: serverTimestamp(),
+                  });
+                }
+              }
+            }
+          }
+        }
+      } else {
+        // The single active open segment (endDate === null) was closed or removed:
+        // release live bed occupancy without overwriting top-level rates from any historical segment.
+        if (currentStudent.assignedRoomId) {
+          await releaseOldRoomAndBlocks();
+        }
+        studentUpdate.assignedRoomId = '';
+        studentUpdate.hostelLocation = 'Unassigned';
+      }
+    }
+
+    batch.update(studentRef, studentUpdate);
+    await batch.commit();
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('currently') ||
+        error.message.includes('Date') ||
+        error.message.includes('Room'))
+    ) {
+      throw error;
+    }
+    handleFirestoreError(
+      error,
+      OperationType.UPDATE,
+      `students/${currentStudent.studentId}`
+    );
+  }
+}
+
 export interface CreatePaymentInput {
   student: Student;
   billingMonth: string;
@@ -1453,6 +1981,8 @@ export interface CreatePaymentInput {
   status: PaymentStatus;
   notes: string;
   proofImageData?: string | null;
+  physicalReceiptStatus?: PhysicalReceiptStatus;
+  physicalReceiptNo?: string;
 }
 
 export async function createPayment(
@@ -1476,6 +2006,9 @@ export async function createPayment(
   );
   const receiptNo = generateReceiptNumber(input.billingMonth, existingPayments);
   const bankRefNo = input.bankRefNo.trim().slice(0, FIELD_LIMITS.bankRefNo.max);
+  const physStatus: PhysicalReceiptStatus =
+    input.physicalReceiptStatus === 'Issued' ? 'Issued' : 'Pending Issuance';
+  const physNo = (input.physicalReceiptNo || '').trim().slice(0, 64);
 
   const path = `payments/${paymentId}`;
   try {
@@ -1496,10 +2029,10 @@ export async function createPayment(
       status: input.status,
       notes: input.notes.trim().slice(0, FIELD_LIMITS.notes.max),
       proofImageData: input.proofImageData || null,
-      physicalReceiptStatus: 'Pending Issuance' as PhysicalReceiptStatus,
-      physicalReceiptNo: '',
-      receiptIssuedBy: null,
-      receiptIssuedAt: null,
+      physicalReceiptStatus: physStatus,
+      physicalReceiptNo: physNo,
+      receiptIssuedBy: physStatus === 'Issued' ? email : null,
+      receiptIssuedAt: physStatus === 'Issued' ? serverTimestamp() : null,
       recordedBy: email,
       recordedAt: serverTimestamp(),
       updatedBy: email,
@@ -1521,6 +2054,8 @@ export interface UpdatePaymentInput {
   status: PaymentStatus;
   notes: string;
   proofImageData?: string | null;
+  physicalReceiptStatus?: PhysicalReceiptStatus;
+  physicalReceiptNo?: string;
 }
 
 export async function updatePayment(
@@ -1555,9 +2090,29 @@ export async function updatePayment(
     if (input.proofImageData !== undefined) {
       payload.proofImageData = input.proofImageData;
     }
+    if (input.physicalReceiptStatus !== undefined) {
+      payload.physicalReceiptStatus = input.physicalReceiptStatus;
+      payload.physicalReceiptNo = (input.physicalReceiptNo || '').trim().slice(0, 64);
+      if (input.physicalReceiptStatus === 'Issued') {
+        payload.receiptIssuedBy = email;
+        payload.receiptIssuedAt = serverTimestamp();
+      } else {
+        payload.receiptIssuedBy = null;
+        payload.receiptIssuedAt = null;
+      }
+    }
     await updateDoc(doc(db, 'payments', paymentId), payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function deletePayment(paymentId: string): Promise<void> {
+  const path = `payments/${paymentId}`;
+  try {
+    await deleteDoc(doc(db, 'payments', paymentId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 }
 
@@ -2392,7 +2947,7 @@ export async function bulkImportPayments(
       }
     }
 
-    if (opsInBatch > 0) {
+      if (opsInBatch > 0) {
       await batch.commit();
       onProgress?.(completed, items.length);
     }
@@ -2400,5 +2955,248 @@ export async function bulkImportPayments(
     return { importedCount: completed };
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, 'payments');
+  }
+}
+
+export type TenancyImportMode = 'append' | 'replace';
+
+export interface BulkImportTenancyHistoryItem {
+  studentId: string;
+  roomId: string;
+  hostelLocation: ResidentHostelLocation;
+  occupancyMode: OccupancyMode;
+  startDate: string;
+  endDate: string | null;
+  standardRoomRate: number;
+  monthlyRebate: number;
+  effectiveMonthlyFee: number;
+  firstMonthCharge: number;
+  reason: string;
+}
+
+export interface BulkImportTenancyResult {
+  updatedStudentsCount: number;
+  segmentsImportedCount: number;
+  totalRecalculatedRent: number;
+  totalRecalculatedOutstanding: number;
+}
+
+export async function bulkImportTenancyHistory(
+  items: BulkImportTenancyHistoryItem[],
+  mode: TenancyImportMode,
+  existingStudents: Student[],
+  allPayments: Payment[],
+  staffEmail: string,
+  onProgress?: (completed: number, total: number) => void
+): Promise<BulkImportTenancyResult> {
+  const email = assertStaffEmail(staffEmail);
+  if (items.length === 0) {
+    return {
+      updatedStudentsCount: 0,
+      segmentsImportedCount: 0,
+      totalRecalculatedRent: 0,
+      totalRecalculatedOutstanding: 0,
+    };
+  }
+
+  const studentById = new Map(existingStudents.map((s) => [s.studentId, s]));
+  const grouped = new Map<string, BulkImportTenancyHistoryItem[]>();
+  for (const item of items) {
+    const cleanSid = sanitizeIdSegment(item.studentId);
+    const list = grouped.get(cleanSid) ?? [];
+    list.push(item);
+    grouped.set(cleanSid, list);
+  }
+
+  let batch = writeBatch(db);
+  let opsInBatch = 0;
+  let completedSegments = 0;
+  let updatedStudentsCount = 0;
+  let totalRecalculatedRent = 0;
+  let totalRecalculatedOutstanding = 0;
+
+  try {
+    let segCounter = 0;
+    const entries = Array.from(grouped.entries());
+
+    for (const [studentId, studentItems] of entries) {
+      const existingStudent = studentById.get(studentId);
+      if (!existingStudent) {
+        throw new Error(`Resident ID "${studentId}" not found in students collection.`);
+      }
+
+      const importedSegments: StayHistorySegment[] = studentItems.map((item) => {
+        segCounter += 1;
+        const cleanRoomId = (item.roomId || '').trim().slice(0, FIELD_LIMITS.roomId.max);
+        if (!cleanRoomId) {
+          throw new Error(`Missing Room ID for ${studentId}.`);
+        }
+        if (!DATE_REGEX.test(item.startDate)) {
+          throw new Error(`Invalid startDate "${item.startDate}" for ${studentId}.`);
+        }
+        const cleanEnd = item.endDate ? item.endDate.trim() : null;
+        if (cleanEnd) {
+          if (!DATE_REGEX.test(cleanEnd)) {
+            throw new Error(`Invalid endDate "${cleanEnd}" for ${studentId}.`);
+          }
+          if (cleanEnd < item.startDate) {
+            throw new Error(
+              `endDate (${cleanEnd}) cannot be earlier than startDate (${item.startDate}) for ${studentId}.`
+            );
+          }
+        } else if (existingStudent.status !== 'Active') {
+          throw new Error(
+            `Resident ${studentId} has status ${existingStudent.status}; blank endDate is only allowed for Active residents.`
+          );
+        }
+
+        const clampedStdRate = clampNumber(
+          item.standardRoomRate,
+          FIELD_LIMITS.monthlyFee.min,
+          FIELD_LIMITS.monthlyFee.max
+        );
+        const clampedRebate = clampNumber(
+          item.monthlyRebate,
+          FIELD_LIMITS.monthlyFee.min,
+          FIELD_LIMITS.monthlyFee.max
+        );
+        const clampedEffFee = Math.max(
+          0,
+          Math.round((clampedStdRate - clampedRebate) * 100) / 100
+        );
+        const clampedFirstCharge = clampNumber(
+          item.firstMonthCharge,
+          FIELD_LIMITS.monthlyFee.min,
+          FIELD_LIMITS.monthlyFee.max
+        );
+
+        return {
+          id: `${createStaySegmentId()}-${segCounter}`,
+          roomId: cleanRoomId,
+          hostelLocation: item.hostelLocation || 'Unassigned',
+          occupancyMode: item.occupancyMode || 'Single Bed',
+          startDate: item.startDate,
+          endDate: cleanEnd,
+          standardRoomRate: clampedStdRate,
+          monthlyRebate: clampedRebate,
+          effectiveMonthlyFee: clampedEffFee,
+          firstMonthCharge: clampedFirstCharge,
+          reason: (
+            item.reason || (cleanEnd ? 'Historical Stay' : 'Active Placement')
+          )
+            .trim()
+            .slice(0, 120),
+          recordedBy: email,
+          recordedAt: new Date().toISOString(),
+        };
+      });
+
+      const baseSegments =
+        mode === 'append' ? getNormalizedStayHistory(existingStudent) : [];
+      const mergedSegments = [...baseSegments, ...importedSegments].sort((a, b) => {
+        const cmp = a.startDate.localeCompare(b.startDate);
+        if (cmp !== 0) return cmp;
+        // Closed segments before ongoing segment on identical startDate
+        if (a.endDate && !b.endDate) return -1;
+        if (!a.endDate && b.endDate) return 1;
+        return 0;
+      });
+
+      const openSegments = mergedSegments.filter((s) => !s.endDate);
+      if (openSegments.length > 1) {
+        throw new Error(
+          `Resident ${studentId} would have ${openSegments.length} ongoing stays without an End Date. Only one ongoing stay is allowed.`
+        );
+      }
+
+      const importedOpenSegment = importedSegments.find((s) => !s.endDate) || null;
+      const shouldSyncActiveFields =
+        existingStudent.status === 'Active' && importedOpenSegment !== null;
+
+      const updatePayload: Record<string, unknown> = {
+        stayHistory: mergedSegments,
+        updatedBy: email,
+        updatedAt: serverTimestamp(),
+      };
+
+      let simulatedStudent: Student = {
+        ...existingStudent,
+        stayHistory: mergedSegments,
+      };
+
+      // Strict Rate Isolation: only sync top-level current rate & room when importing an open active segment for an Active resident
+      if (shouldSyncActiveFields && importedOpenSegment) {
+        updatePayload.assignedRoomId = importedOpenSegment.roomId;
+        updatePayload.hostelLocation = importedOpenSegment.hostelLocation;
+        updatePayload.occupancyMode = importedOpenSegment.occupancyMode;
+        updatePayload.standardRoomRate = importedOpenSegment.standardRoomRate;
+        updatePayload.monthlyRebate = importedOpenSegment.monthlyRebate;
+        updatePayload.effectiveMonthlyFee = importedOpenSegment.effectiveMonthlyFee;
+        updatePayload.monthlyFee = importedOpenSegment.effectiveMonthlyFee;
+        if (mergedSegments.length === 1 && typeof importedOpenSegment.firstMonthCharge === 'number') {
+          updatePayload.firstMonthCharge = importedOpenSegment.firstMonthCharge;
+        }
+        simulatedStudent = {
+          ...simulatedStudent,
+          assignedRoomId: importedOpenSegment.roomId,
+          hostelLocation: importedOpenSegment.hostelLocation,
+          occupancyMode: importedOpenSegment.occupancyMode,
+          standardRoomRate: importedOpenSegment.standardRoomRate,
+          monthlyRebate: importedOpenSegment.monthlyRebate,
+          effectiveMonthlyFee: importedOpenSegment.effectiveMonthlyFee,
+          monthlyFee: importedOpenSegment.effectiveMonthlyFee,
+          firstMonthCharge:
+            mergedSegments.length === 1 &&
+            typeof importedOpenSegment.firstMonthCharge === 'number'
+              ? importedOpenSegment.firstMonthCharge
+              : existingStudent.firstMonthCharge,
+        };
+      }
+
+      const billing = calculateStudentBilling(simulatedStudent, allPayments);
+      totalRecalculatedRent =
+        Math.round((totalRecalculatedRent + billing.totalExpectedRent) * 100) / 100;
+      totalRecalculatedOutstanding =
+        Math.round(
+          (totalRecalculatedOutstanding + billing.outstandingBalance) * 100
+        ) / 100;
+
+      batch.update(doc(db, 'students', studentId), updatePayload);
+      opsInBatch += 1;
+      updatedStudentsCount += 1;
+      completedSegments += studentItems.length;
+
+      if (opsInBatch >= MAX_BATCH_OPERATIONS) {
+        await batch.commit();
+        onProgress?.(completedSegments, items.length);
+        batch = writeBatch(db);
+        opsInBatch = 0;
+      }
+    }
+
+    if (opsInBatch > 0) {
+      await batch.commit();
+      onProgress?.(completedSegments, items.length);
+    }
+
+    return {
+      updatedStudentsCount,
+      segmentsImportedCount: completedSegments,
+      totalRecalculatedRent,
+      totalRecalculatedOutstanding,
+    };
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('not found') ||
+        error.message.includes('ongoing stays') ||
+        error.message.includes('blank endDate') ||
+        error.message.includes('Invalid') ||
+        error.message.includes('Missing') ||
+        error.message.includes('cannot be earlier'))
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, 'students');
   }
 }

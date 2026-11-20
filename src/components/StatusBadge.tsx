@@ -20,6 +20,8 @@ const STATUS_STYLES: Record<string, string> = {
   Disabled: 'bg-red-50 text-red-800 border-red-200',
   'Checked-Out': 'bg-slate-100 text-slate-700 border-slate-200',
   Waived: 'bg-slate-100 text-slate-700 border-slate-200',
+  'Historical Rate (Locked to Period)':
+    'bg-slate-100 text-slate-700 border-slate-300',
 };
 
 export function StatusBadge({ status }: StatusBadgeProps) {

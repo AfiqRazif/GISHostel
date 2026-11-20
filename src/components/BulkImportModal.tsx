@@ -16,6 +16,7 @@ import {
   formatRM,
   getCurrentMonthISO,
   getTodayISO,
+  getNormalizedStayHistory,
   HOSTEL_LOCATIONS,
   HostelLocation,
   ID_REGEX,
@@ -37,22 +38,27 @@ import {
   ResidentType,
   Room,
   sanitizeIdSegment,
+  StaffRole,
   Student,
 } from '../types/hostel';
 import {
   BulkImportPaymentItem,
   BulkImportRoomItem,
   BulkImportStudentItem,
+  BulkImportTenancyHistoryItem,
   bulkImportPayments,
   bulkImportRooms,
   bulkImportStudents,
+  bulkImportTenancyHistory,
+  TenancyImportMode,
 } from '../lib/hostelService';
 
-export type BulkImportType = 'rooms' | 'students' | 'payments';
+export type BulkImportType = 'rooms' | 'students' | 'payments' | 'tenancyHistory';
 
 interface BulkImportModalProps {
   isOpen: boolean;
   importType: BulkImportType;
+  staffRole?: StaffRole;
   rooms: Room[];
   students: Student[];
   payments: Payment[];
@@ -351,6 +357,35 @@ function downloadTemplateWorkbook(type: BulkImportType) {
         status: 'Active',
       },
     ];
+  } else if (type === 'tenancyHistory') {
+    filename = 'gis-tenancy-history-import-template.xlsx';
+    sheetName = 'TenancyHistory';
+    sampleRows = [
+      {
+        studentId: 'GIS250101',
+        roomId: 'DJ2-A-01-B1',
+        hostelLocation: 'Apartment Desa Jati 2',
+        occupancyMode: 'Single Bed',
+        startDate: '2026-01-05',
+        endDate: '2026-06-30',
+        standardRoomRate: 250,
+        monthlyRebate: 0,
+        firstMonthCharge: '',
+        reason: 'Initial Check-In',
+      },
+      {
+        studentId: 'GIS250101',
+        roomId: 'NSQ-C-09-B1',
+        hostelLocation: 'Nilai Square',
+        occupancyMode: 'Single Bed',
+        startDate: '2026-07-01',
+        endDate: '',
+        standardRoomRate: 280,
+        monthlyRebate: 30,
+        firstMonthCharge: '',
+        reason: 'Maintenance / Unit Upgrade',
+      },
+    ];
   } else {
     filename = 'gis-payments-import-template.xlsx';
     sheetName = 'HistoricalPayments';
@@ -408,11 +443,18 @@ const MODAL_META: Record<
       'Import past rent, deposit, or fee waiver records tied to existing Resident IDs with physical receipt statuses.',
     noun: 'payments',
   },
+  tenancyHistory: {
+    title: 'Master Admin · Bulk Tenancy History Upload (.xlsx / .csv)',
+    subtitle:
+      'Import multi-segment room & rate histories per resident. Closed segments lock to their historical period rate without overwriting current active rates.',
+    noun: 'stay segments',
+  },
 };
 
 export function BulkImportModal({
   isOpen,
   importType,
+  staffRole = 'Staff',
   rooms,
   students,
   payments,
@@ -425,12 +467,17 @@ export function BulkImportModal({
   const [parseError, setParseError] = useState<string | null>(null);
   const [rawRows, setRawRows] = useState<Record<string, unknown>[]>([]);
   const [previewFilter, setPreviewFilter] = useState<'all' | 'valid' | 'errors'>('all');
+  const [tenancyImportMode, setTenancyImportMode] =
+    useState<TenancyImportMode>('append');
 
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number }>({
     done: 0,
     total: 0,
   });
+
+  const isTenancyRestricted =
+    importType === 'tenancyHistory' && staffRole !== 'Master Admin';
 
   const validatedRows = useMemo((): ParsedPreviewRow<unknown>[] => {
     if (rawRows.length === 0) return [];
@@ -795,6 +842,205 @@ export function BulkImportModal({
       });
     }
 
+    if (importType === 'tenancyHistory') {
+      if (isTenancyRestricted) return [];
+      const studentById = new Map(students.map((s) => [s.studentId, s]));
+      const roomById = new Map(rooms.map((r) => [r.roomId, r]));
+      const openSegmentSeenInFile = new Set<string>();
+
+      return rawRows.map(
+        (raw, idx): ParsedPreviewRow<BulkImportTenancyHistoryItem> => {
+          const rowNumber = idx + 2;
+          const errors: string[] = [];
+
+          const rawStudentId = trimCell(
+            getCell(raw, 'studentId', 'residentId', 'Student ID')
+          );
+          const studentId = sanitizeIdSegment(rawStudentId);
+          const roomId = trimCell(
+            getCell(raw, 'roomId', 'assignedRoomId', 'Room ID')
+          ).slice(0, FIELD_LIMITS.roomId.max);
+          const rawLocation = trimCell(
+            getCell(raw, 'hostelLocation', 'location', 'Hostel Location')
+          );
+          const rawOccupancyMode =
+            trimCell(getCell(raw, 'occupancyMode', 'Occupancy Mode')) ||
+            'Single Bed';
+          const startDate = normalizeExcelDate(
+            getCell(raw, 'startDate', 'checkInDate', 'Start Date')
+          );
+          const rawEndDateCell = getCell(raw, 'endDate', 'checkOutDate', 'End Date');
+          const hasEndDateInput = trimCell(rawEndDateCell) !== '';
+          const endDate = hasEndDateInput
+            ? normalizeExcelDate(rawEndDateCell)
+            : '';
+
+          const stdRateRaw = getCell(
+            raw,
+            'standardRoomRate',
+            'monthlyRate',
+            'Standard Room Rate'
+          );
+          const rebateRaw = getCell(raw, 'monthlyRebate', 'Monthly Rebate');
+          const firstMonthRaw = getCell(
+            raw,
+            'firstMonthCharge',
+            'First Month Charge'
+          );
+          const reason = trimCell(getCell(raw, 'reason', 'Reason')).slice(0, 120);
+
+          const student = studentId ? studentById.get(studentId) : undefined;
+          if (!studentId) {
+            errors.push('studentId is required');
+          } else if (!student) {
+            errors.push(`Student ID "${studentId}" not found`);
+          }
+
+          if (!roomId) {
+            errors.push('roomId is required (historical/custom Room IDs allowed)');
+          }
+
+          const occupancyMode = matchEnum(rawOccupancyMode, OCCUPANCY_MODES);
+          if (!occupancyMode) {
+            errors.push(`Invalid occupancyMode "${rawOccupancyMode}"`);
+          }
+
+          const matchedRoom = roomId
+            ? roomById.get(sanitizeIdSegment(roomId)) || roomById.get(roomId)
+            : undefined;
+          let hostelLocation: ResidentHostelLocation | null =
+            matchedRoom?.location || student?.hostelLocation || 'Unassigned';
+          if (rawLocation) {
+            const parsedResLoc = matchResidentLocation(rawLocation);
+            if (!parsedResLoc) {
+              errors.push(`Invalid hostelLocation "${rawLocation}"`);
+            } else {
+              hostelLocation = parsedResLoc;
+            }
+          }
+
+          if (!DATE_REGEX.test(startDate)) {
+            errors.push('startDate must be valid YYYY-MM-DD (or Excel date)');
+          }
+
+          if (hasEndDateInput) {
+            if (!DATE_REGEX.test(endDate)) {
+              errors.push('endDate must be valid YYYY-MM-DD (or blank if active)');
+            } else if (DATE_REGEX.test(startDate) && endDate < startDate) {
+              errors.push('endDate cannot be earlier than startDate');
+            }
+          } else if (student) {
+            if (student.status !== 'Active') {
+              errors.push(
+                `Resident ${student.studentId} is ${student.status}; blank endDate is only allowed for Active residents`
+              );
+            } else if (openSegmentSeenInFile.has(student.studentId)) {
+              errors.push(
+                `Duplicate blank endDate for ${student.studentId} in file (max 1 ongoing stay)`
+              );
+            } else if (
+              tenancyImportMode === 'append' &&
+              getNormalizedStayHistory(student).some((s) => !s.endDate)
+            ) {
+              errors.push(
+                `${student.studentId} already has an ongoing stay; provide endDate or switch to Replace mode`
+              );
+            }
+          }
+
+          // Strict snapshot rate isolation: never auto-pull from current rooms collection
+          const standardRoomRate =
+            trimCell(stdRateRaw) === '' ? 250 : parseNumberCell(stdRateRaw);
+          if (
+            standardRoomRate === null ||
+            standardRoomRate < 0 ||
+            standardRoomRate > FIELD_LIMITS.monthlyFee.max
+          ) {
+            errors.push('standardRoomRate must be 0–10,000');
+          }
+
+          const monthlyRebate =
+            trimCell(rebateRaw) === '' ? 0 : parseNumberCell(rebateRaw);
+          if (
+            monthlyRebate === null ||
+            monthlyRebate < 0 ||
+            monthlyRebate > FIELD_LIMITS.monthlyFee.max
+          ) {
+            errors.push('monthlyRebate must be 0–10,000');
+          }
+
+          const effectiveMonthlyFee =
+            standardRoomRate !== null && monthlyRebate !== null
+              ? Math.max(
+                  0,
+                  Math.round((standardRoomRate - monthlyRebate) * 100) / 100
+                )
+              : 0;
+
+          let firstMonthCharge = calculateFirstMonthDefaults(
+            startDate,
+            effectiveMonthlyFee
+          ).firstMonthCharge;
+          if (trimCell(firstMonthRaw) !== '') {
+            const parsedFirst = parseNumberCell(firstMonthRaw);
+            if (
+              parsedFirst === null ||
+              parsedFirst < 0 ||
+              parsedFirst > FIELD_LIMITS.monthlyFee.max
+            ) {
+              errors.push('firstMonthCharge must be blank or 0–10,000');
+            } else {
+              firstMonthCharge = Math.round(parsedFirst * 100) / 100;
+            }
+          }
+
+          const valid = errors.length === 0;
+          if (valid && student && !hasEndDateInput) {
+            openSegmentSeenInFile.add(student.studentId);
+          }
+
+          return {
+            rowNumber,
+            valid,
+            errors,
+            summaryLabel: student
+              ? `${student.studentId} · ${student.fullName}`
+              : studentId || rawStudentId || '(missing ID)',
+            detailLabel: `${roomId || '(missing room)'} · ${hostelLocation || 'Unassigned'} · ${
+              startDate || 'invalid'
+            } → ${hasEndDateInput ? endDate || 'invalid' : 'Present'} · 1st mo: ${formatRM(
+              firstMonthCharge
+            )}${reason ? ` · ${reason}` : ''}`,
+            amountOrRateLabel: `${formatRM(effectiveMonthlyFee)}/mo`,
+            statusLabel: hasEndDateInput ? 'Historical (Locked)' : 'Active Segment',
+            payload:
+              valid &&
+              student &&
+              hostelLocation &&
+              occupancyMode &&
+              standardRoomRate !== null &&
+              monthlyRebate !== null
+                ? {
+                    studentId: student.studentId,
+                    roomId,
+                    hostelLocation,
+                    occupancyMode,
+                    startDate,
+                    endDate: hasEndDateInput ? endDate : null,
+                    standardRoomRate,
+                    monthlyRebate,
+                    effectiveMonthlyFee,
+                    firstMonthCharge,
+                    reason:
+                      reason ||
+                      (hasEndDateInput ? 'Historical Stay' : 'Active Placement'),
+                  }
+                : null,
+          };
+        }
+      );
+    }
+
     // Historical Payments validation
     const studentById = new Map(students.map((s) => [s.studentId, s]));
 
@@ -932,7 +1178,14 @@ export function BulkImportModal({
             : null,
       };
     });
-  }, [rawRows, importType, rooms, students]);
+  }, [
+    rawRows,
+    importType,
+    rooms,
+    students,
+    tenancyImportMode,
+    isTenancyRestricted,
+  ]);
 
   if (!isOpen) return null;
 
@@ -991,7 +1244,7 @@ export function BulkImportModal({
   };
 
   const handleCommitImport = async () => {
-    if (validRows.length === 0) return;
+    if (isTenancyRestricted || validRows.length === 0) return;
     setImporting(true);
     setParseError(null);
     setProgress({ done: 0, total: validRows.length });
@@ -1026,6 +1279,27 @@ export function BulkImportModal({
           }${
             unassignedCount > 0 ? `, ${unassignedCount} Room Unassigned` : ''
           }).${invalidCount > 0 ? ` (${invalidCount} invalid row(s) skipped)` : ''}`
+        );
+      } else if (importType === 'tenancyHistory') {
+        const payloads = validRows.map(
+          (r) => r.payload as BulkImportTenancyHistoryItem
+        );
+        const res = await bulkImportTenancyHistory(
+          payloads,
+          tenancyImportMode,
+          students,
+          payments,
+          staffEmail,
+          (done, total) => {
+            setProgress({ done, total });
+          }
+        );
+        onImportComplete(
+          `Imported ${res.segmentsImportedCount} tenancy segment(s) across ${res.updatedStudentsCount} resident(s) (${
+            tenancyImportMode === 'replace' ? 'Replaced matched histories' : 'Appended to histories'
+          }). Recalculated Expected Rent: ${formatRM(res.totalRecalculatedRent)} · Outstanding: ${formatRM(
+            res.totalRecalculatedOutstanding
+          )}.${invalidCount > 0 ? ` (${invalidCount} invalid row(s) skipped)` : ''}`
         );
       } else {
         const payloads = validRows.map((r) => r.payload as BulkImportPaymentItem);
@@ -1084,7 +1358,10 @@ export function BulkImportModal({
           <button
             type="button"
             disabled={importing}
-            onClick={onClose}
+            onClick={() => {
+              handleResetFile();
+              onClose();
+            }}
             className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer disabled:opacity-50"
             aria-label="Close bulk import modal"
           >
@@ -1092,55 +1369,128 @@ export function BulkImportModal({
           </button>
         </div>
 
-        {/* Step 1: Template Download & Upload Bar */}
-        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="space-y-1">
-            <p className="text-xs font-semibold text-slate-800">
-              1. Download official template or upload your spreadsheet
-            </p>
-            <p className="text-xs text-slate-500">
-              Supports <span className="font-mono">.xlsx</span>,{' '}
-              <span className="font-mono">.xls</span>, and{' '}
-              <span className="font-mono">.csv</span>. Excel serial dates convert automatically to{' '}
-              <span className="font-mono">YYYY-MM-DD</span>.
+        {isTenancyRestricted ? (
+          <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 space-y-1">
+            <p className="font-semibold">Master Admin Access Required</p>
+            <p>
+              Bulk Tenancy History Upload is restricted strictly to Master Admin accounts.
+              Your current role ({staffRole}) cannot batch-modify historical tenancy segments.
             </p>
           </div>
+        ) : (
+          <>
+            {importType === 'tenancyHistory' && (
+              <div className="bg-blue-50/70 border border-blue-200 rounded-lg p-3.5 space-y-2">
+                <p className="text-xs font-semibold text-blue-950">
+                  Tenancy History Import Mode
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                  <label
+                    className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                      tenancyImportMode === 'append'
+                        ? 'bg-white border-blue-900 text-slate-900'
+                        : 'bg-white/60 border-slate-200 text-slate-600 hover:bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="tenancyImportMode"
+                      checked={tenancyImportMode === 'append'}
+                      disabled={importing}
+                      onChange={() => setTenancyImportMode('append')}
+                      className="mt-0.5 text-blue-900"
+                    />
+                    <div>
+                      <p className="font-semibold">Append to Existing History</p>
+                      <p className="text-slate-500 mt-0.5">
+                        Keeps existing stay segments and merges new rows chronologically by Start Date.
+                      </p>
+                    </div>
+                  </label>
 
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
-            <button
-              type="button"
-              disabled={importing}
-              onClick={() => downloadTemplateWorkbook(importType)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <Download className="w-3.5 h-3.5 text-slate-500" />
-              <span>Download Excel Template (.xlsx)</span>
-            </button>
+                  <label
+                    className={`flex items-start gap-2.5 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                      tenancyImportMode === 'replace'
+                        ? 'bg-white border-blue-900 text-slate-900'
+                        : 'bg-white/60 border-slate-200 text-slate-600 hover:bg-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="tenancyImportMode"
+                      checked={tenancyImportMode === 'replace'}
+                      disabled={importing}
+                      onChange={() => setTenancyImportMode('replace')}
+                      className="mt-0.5 text-blue-900"
+                    />
+                    <div>
+                      <p className="font-semibold">
+                        Replace Existing History for Matched Students
+                      </p>
+                      <p className="text-slate-500 mt-0.5">
+                        Replaces stayHistory strictly for matched Student IDs in this upload.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            )}
 
-            <button
-              type="button"
-              disabled={importing}
-              onClick={() => fileInputRef.current?.click()}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <Upload className="w-3.5 h-3.5" />
-              <span>{selectedFileName ? 'Choose Another File' : 'Upload Excel / CSV'}</span>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              className="sr-only"
-              onChange={(e) => void handleFileChange(e)}
-            />
-          </div>
-        </div>
+            {/* Step 1: Template Download & Upload Bar */}
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-slate-800">
+                  1. Download official template or upload your spreadsheet
+                </p>
+                <p className="text-xs text-slate-500">
+                  Supports <span className="font-mono">.xlsx</span>,{' '}
+                  <span className="font-mono">.xls</span>, and{' '}
+                  <span className="font-mono">.csv</span>. Excel serial dates convert automatically to{' '}
+                  <span className="font-mono">YYYY-MM-DD</span>.
+                </p>
+              </div>
 
-        {parseError && (
-          <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>{parseError}</span>
-          </div>
+              <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => downloadTemplateWorkbook(importType)}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Download className="w-3.5 h-3.5 text-slate-500" />
+                  <span>
+                    {importType === 'tenancyHistory'
+                      ? 'Download Tenancy History Template (.xlsx)'
+                      : 'Download Excel Template (.xlsx)'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={importing}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>{selectedFileName ? 'Choose Another File' : 'Upload Excel / CSV'}</span>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  className="sr-only"
+                  onChange={(e) => void handleFileChange(e)}
+                />
+              </div>
+            </div>
+
+            {parseError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{parseError}</span>
+              </div>
+            )}
+          </>
         )}
 
         {/* Step 2: Validation Summary & Preview Table */}

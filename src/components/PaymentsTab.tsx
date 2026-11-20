@@ -11,6 +11,7 @@ import {
   Printer,
   Search,
   Sparkles,
+  Trash2,
   Upload,
   X,
 } from 'lucide-react';
@@ -41,6 +42,7 @@ import {
 } from '../types/hostel';
 import {
   createPayment,
+  deletePayment,
   markPhysicalReceiptIssued,
   updatePayment,
 } from '../lib/hostelService';
@@ -135,6 +137,12 @@ export function PaymentsTab({
 
   // Edit Payment modal
   const [editingPayment, setEditingPayment] = useState<Payment | null>(null);
+  const [editPhysStatus, setEditPhysStatus] =
+    useState<PhysicalReceiptStatus>('Pending Issuance');
+  const [editPhysNo, setEditPhysNo] = useState('');
+
+  // Delete Payment modal
+  const [deletingPayment, setDeletingPayment] = useState<Payment | null>(null);
 
   // View Proof lightbox modal
   const [viewingProofPayment, setViewingProofPayment] = useState<Payment | null>(null);
@@ -450,6 +458,8 @@ export function PaymentsTab({
     setStatus(p.status);
     setNotes(p.notes);
     setProofImageData(p.proofImageData ?? null);
+    setEditPhysStatus(getPhysicalReceiptStatus(p));
+    setEditPhysNo(p.physicalReceiptNo || '');
   };
 
   const handleSaveEdit = async (e: React.FormEvent) => {
@@ -470,6 +480,8 @@ export function PaymentsTab({
           status,
           notes,
           proofImageData,
+          physicalReceiptStatus: editPhysStatus,
+          physicalReceiptNo: editPhysNo,
         },
         staffEmail
       );
@@ -480,6 +492,25 @@ export function PaymentsTab({
     } catch (err) {
       setFormError(
         err instanceof Error ? err.message : 'Failed to update payment.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleConfirmDeletePayment = async () => {
+    if (!deletingPayment) return;
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      await deletePayment(deletingPayment.paymentId);
+      setFeedbackBanner(
+        `Deleted payment ${getPaymentReceiptNo(deletingPayment)} (${deletingPayment.studentName} · ${formatRM(deletingPayment.amount)}).`
+      );
+      setDeletingPayment(null);
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : 'Failed to delete payment.'
       );
     } finally {
       setSubmitting(false);
@@ -858,6 +889,18 @@ export function PaymentsTab({
                             >
                               <Pencil className="w-3 h-3" />
                               <span>Edit</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormError(null);
+                                setDeletingPayment(p);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-md cursor-pointer"
+                              title="Delete payment entry"
+                              aria-label={`Delete ${receiptNo}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </td>
@@ -1328,6 +1371,37 @@ export function PaymentsTab({
                 />
               </div>
 
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Physical Receipt Status
+                  </label>
+                  <select
+                    value={editPhysStatus}
+                    onChange={(e) =>
+                      setEditPhysStatus(e.target.value as PhysicalReceiptStatus)
+                    }
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    <option value="Pending Issuance">Pending Issuance</option>
+                    <option value="Issued">Issued</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Physical Receipt Book No.
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={64}
+                    value={editPhysNo}
+                    onChange={(e) => setEditPhysNo(e.target.value)}
+                    placeholder="e.g. BK-DJ2-0148"
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+              </div>
+
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 flex items-center justify-between gap-3">
                 <span className="text-xs text-slate-600">
                   {proofImageData ? 'Payment proof image attached' : 'No payment proof attached'}
@@ -1372,6 +1446,48 @@ export function PaymentsTab({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Payment Confirmation Modal */}
+      {deletingPayment && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 print:hidden">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
+            <h2 className="font-display text-lg font-semibold text-slate-900">
+              Delete Payment {getPaymentReceiptNo(deletingPayment)}?
+            </h2>
+            <p className="text-sm text-slate-600">
+              This will permanently remove the{' '}
+              <span className="font-mono font-semibold text-slate-900">
+                {formatRM(deletingPayment.amount)}
+              </span>{' '}
+              ({deletingPayment.paymentType} · {deletingPayment.billingMonth}) entry for{' '}
+              <strong>{deletingPayment.studentName}</strong> and recalculate their ledger
+              balance.
+            </p>
+            {formError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {formError}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingPayment(null)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeletePayment}
+                disabled={submitting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-red-700 hover:bg-red-800 disabled:opacity-60 rounded-lg cursor-pointer"
+              >
+                {submitting ? 'Deleting...' : 'Delete Payment'}
+              </button>
+            </div>
           </div>
         </div>
       )}

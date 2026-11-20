@@ -37,6 +37,10 @@ export function UserManagementTab({
   const [busyUid, setBusyUid] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [feedbackBanner, setFeedbackBanner] = useState<string | null>(null);
+  const [pendingRoleChange, setPendingRoleChange] = useState<{
+    target: StaffUser;
+    nextRole: StaffRole;
+  } | null>(null);
 
   const sortedUsers = useMemo(() => {
     const rank: Record<StaffRole, number> = {
@@ -113,11 +117,7 @@ export function UserManagementTab({
     }
   };
 
-  const handleRoleChange = async (target: StaffUser, nextRole: StaffRole) => {
-    if (target.uid === currentUserUid && nextRole !== 'Master Admin') {
-      setFeedbackBanner('You cannot demote your own active Master Admin role.');
-      return;
-    }
+  const commitRoleChange = async (target: StaffUser, nextRole: StaffRole) => {
     setBusyUid(target.uid);
     try {
       await updateStaffUserAccount(target.uid, { role: nextRole }, staffEmail);
@@ -128,10 +128,42 @@ export function UserManagementTab({
       );
     } finally {
       setBusyUid(null);
+      setPendingRoleChange(null);
     }
   };
 
+  const handleRoleChange = (target: StaffUser, nextRole: StaffRole) => {
+    if (target.role === nextRole) return;
+    const isSoleActiveMasterAdmin =
+      target.role === 'Master Admin' && target.active && counts.masterAdmins <= 1;
+
+    if (isSoleActiveMasterAdmin && nextRole !== 'Master Admin') {
+      setFeedbackBanner(
+        'Lockout Protection: You cannot demote the sole remaining active Master Admin. Promote another active user to Master Admin first.'
+      );
+      return;
+    }
+
+    if (
+      nextRole === 'Master Admin' ||
+      (target.uid === currentUserUid && target.role === 'Master Admin')
+    ) {
+      setPendingRoleChange({ target, nextRole });
+      return;
+    }
+
+    void commitRoleChange(target, nextRole);
+  };
+
   const handleToggleActive = async (target: StaffUser) => {
+    const isSoleActiveMasterAdmin =
+      target.role === 'Master Admin' && target.active && counts.masterAdmins <= 1;
+    if (isSoleActiveMasterAdmin) {
+      setFeedbackBanner(
+        'Lockout Protection: You cannot disable the sole remaining active Master Admin account.'
+      );
+      return;
+    }
     if (target.uid === currentUserUid && target.active) {
       setFeedbackBanner('You cannot disable your own currently signed-in account.');
       return;
@@ -243,6 +275,8 @@ export function UserManagementTab({
               <tbody className="divide-y divide-slate-100 text-sm">
                 {sortedUsers.map((u) => {
                   const isSelf = u.uid === currentUserUid;
+                  const isSoleActiveMasterAdmin =
+                    u.role === 'Master Admin' && u.active && counts.masterAdmins <= 1;
                   return (
                     <tr key={u.uid} className="hover:bg-slate-50/70">
                       <td className="py-3 px-4">
@@ -265,21 +299,33 @@ export function UserManagementTab({
                         {u.email}
                       </td>
                       <td className="py-3 px-4 whitespace-nowrap">
-                        <select
-                          value={u.role}
-                          disabled={busyUid === u.uid || isSelf}
-                          onChange={(e) =>
-                            void handleRoleChange(u, e.target.value as StaffRole)
-                          }
-                          aria-label={`Role for ${u.fullName}`}
-                          className="px-2.5 py-1.5 text-xs font-medium bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-900 disabled:bg-slate-50 disabled:text-slate-600"
-                        >
-                          {STAFF_ROLES.map((r) => (
-                            <option key={r} value={r}>
-                              {r}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="space-y-1">
+                          <select
+                            value={u.role}
+                            disabled={busyUid === u.uid || isSoleActiveMasterAdmin}
+                            onChange={(e) =>
+                              handleRoleChange(u, e.target.value as StaffRole)
+                            }
+                            aria-label={`Role for ${u.fullName}`}
+                            title={
+                              isSoleActiveMasterAdmin
+                                ? 'Sole active Master Admin — promote another active user first'
+                                : undefined
+                            }
+                            className="px-2.5 py-1.5 text-xs font-medium bg-white border border-slate-200 rounded-md focus:outline-none focus:border-blue-900 disabled:bg-slate-50 disabled:text-slate-600"
+                          >
+                            {STAFF_ROLES.map((r) => (
+                              <option key={r} value={r}>
+                                {r}
+                              </option>
+                            ))}
+                          </select>
+                          {isSoleActiveMasterAdmin && (
+                            <p className="text-[11px] text-amber-700 font-medium">
+                              Protected (last Master Admin)
+                            </p>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4">
                         <StatusBadge status={u.active ? 'Active' : 'Disabled'} />
@@ -290,8 +336,19 @@ export function UserManagementTab({
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <button
                           type="button"
-                          disabled={busyUid === u.uid || (isSelf && u.active)}
+                          disabled={
+                            busyUid === u.uid ||
+                            isSoleActiveMasterAdmin ||
+                            (isSelf && u.active)
+                          }
                           onClick={() => void handleToggleActive(u)}
+                          title={
+                            isSoleActiveMasterAdmin
+                              ? 'Cannot disable the only active Master Admin'
+                              : isSelf && u.active
+                                ? 'Cannot disable your own active session'
+                                : undefined
+                          }
                           className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md border cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ${
                             u.active
                               ? 'text-red-700 bg-red-50 border-red-200 hover:bg-red-100'
@@ -454,6 +511,87 @@ export function UserManagementTab({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Role Governance Confirmation Modal */}
+      {pendingRoleChange && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 overflow-y-auto">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  {pendingRoleChange.nextRole === 'Master Admin'
+                    ? 'Grant Master Admin Privileges?'
+                    : 'Confirm Master Admin Role Change'}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {pendingRoleChange.target.fullName} ({pendingRoleChange.target.email})
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={busyUid === pendingRoleChange.target.uid}
+                onClick={() => setPendingRoleChange(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close confirmation modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {pendingRoleChange.nextRole === 'Master Admin' ? (
+              <div className="p-3.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-950 space-y-1.5">
+                <p className="font-semibold">
+                  Master Admin grants full governance access:
+                </p>
+                <ul className="list-disc pl-4 space-y-1">
+                  <li>Create, enable/disable, and assign roles in User Accounts</li>
+                  <li>Upload Bulk Tenancy History and edit/delete past stay segments</li>
+                </ul>
+                {!pendingRoleChange.target.active && (
+                  <p className="text-amber-800 font-medium pt-1">
+                    Note: This account is currently Disabled and must be re-enabled before signing in.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="p-3.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
+                <p className="font-semibold">Self-Demotion Warning</p>
+                <p>
+                  Changing your own role to <strong>{pendingRoleChange.nextRole}</strong> will
+                  immediately remove your access to User Accounts and Bulk Tenancy History.
+                  Another active Master Admin remains in control.
+                </p>
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                disabled={busyUid === pendingRoleChange.target.uid}
+                onClick={() => setPendingRoleChange(null)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={busyUid === pendingRoleChange.target.uid}
+                onClick={() =>
+                  void commitRoleChange(
+                    pendingRoleChange.target,
+                    pendingRoleChange.nextRole
+                  )
+                }
+                className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
+              >
+                {busyUid === pendingRoleChange.target.uid
+                  ? 'Updating...'
+                  : `Confirm ${pendingRoleChange.nextRole}`}
+              </button>
+            </div>
           </div>
         </div>
       )}

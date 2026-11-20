@@ -12,31 +12,90 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isActiveStaff() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/staff_users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/staff_users/$(request.auth.uid)).data.active == true;
+    }
+
+    function isMasterAdmin() {
+      return isActiveStaff()
+        && get(/databases/$(database)/documents/staff_users/$(request.auth.uid)).data.role == 'Master Admin';
+    }
+
+    function isBootstrappedOwner() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'afiqjacksonmusic@gmail.com';
+    }
+
+    function isValidStaffUserShape(data, uid) {
+      return data.keys().hasAll(['uid', 'username', 'email', 'fullName', 'role', 'active', 'createdAt'])
+        && data.keys().hasOnly(['uid', 'username', 'email', 'fullName', 'role', 'active', 'createdAt', 'updatedBy', 'updatedAt'])
+        && data.uid is string && data.uid == uid && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.username is string && data.username.size() >= 2 && data.username.size() <= 64
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 160
+        && data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 120
+        && data.role in ['Master Admin', 'Admin', 'Staff']
+        && data.active is bool;
+    }
+
     // ---------------------------------------------------------
-    // Development Rules: Authenticated Staff Access
+    // Operational Hostel Collections: Active Staff Only
     // ---------------------------------------------------------
     match /rooms/{roomId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isActiveStaff();
     }
 
     match /students/{studentId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isActiveStaff();
     }
 
     match /payments/{paymentId} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isActiveStaff();
     }
 
-    match /users/{userId} {
-      allow read, write: if isSignedIn();
-    }
-
+    // ---------------------------------------------------------
+    // Staff Profiles & RBAC Governance
+    // ---------------------------------------------------------
     match /staff/{uid} {
-      allow read, write: if isSignedIn();
+      allow read, write: if isSignedIn() && isValidId(uid) && (request.auth.uid == uid || isMasterAdmin());
     }
 
     match /staff_users/{uid} {
-      allow read, write: if isSignedIn();
+      allow get: if isSignedIn() && isValidId(uid) && (request.auth.uid == uid || isActiveStaff());
+      allow list: if isActiveStaff() || isBootstrappedOwner();
+      allow create: if isSignedIn()
+        && isValidId(uid)
+        && isValidStaffUserShape(request.resource.data, uid)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && (
+          isMasterAdmin()
+          || (
+            isBootstrappedOwner()
+            && request.auth.uid == uid
+            && !exists(/databases/$(database)/documents/staff_users/$(request.auth.uid))
+            && request.resource.data.role == 'Master Admin'
+            && request.resource.data.active == true
+          )
+        );
+      allow update: if isMasterAdmin()
+        && isValidId(uid)
+        && isValidStaffUserShape(request.resource.data, uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role', 'active', 'fullName', 'updatedBy', 'updatedAt'])
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isMasterAdmin();
     }
 
     match /test/connection {

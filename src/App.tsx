@@ -104,6 +104,15 @@ function HostelPortal() {
         } catch (err) {
           if (cancelled) return;
           setCheckingAccount(false);
+          if (
+            err instanceof Error &&
+            err.message.startsWith('NOT_PROVISIONED:')
+          ) {
+            setAuthNotice(err.message.replace(/^NOT_PROVISIONED:\s*/, ''));
+            setCurrentStaffUser(null);
+            await signOutStaff();
+            return;
+          }
           setFatalError(
             err instanceof Error ? err : new Error('Failed to verify staff account.')
           );
@@ -319,6 +328,7 @@ function HostelPortal() {
               rooms={rooms}
               payments={payments}
               staffEmail={staffEmail}
+              staffRole={currentStaffUser.role}
               loading={dataLoading}
             />
           )}

@@ -1,31 +1,44 @@
 import React, { useMemo, useState } from 'react';
 import {
   ArrowLeftRight,
+  BedDouble,
   Building2,
   FileSpreadsheet,
   FileText,
   LogOut,
   Pencil,
+  Plus,
   Printer,
   RotateCcw,
   Search,
+  Trash2,
   UserPlus,
   X,
 } from 'lucide-react';
 import {
   calculateFirstMonthDefaults,
+  calculateMonthInstallmentStatus,
   calculateStudentBilling,
   formatRM,
   formatTimestamp,
+  getCurrentMonthISO,
+  getNormalizedStayHistory,
   getPaymentBankRef,
   getPaymentReceiptNo,
   getPhysicalReceiptStatus,
   getTodayISO,
   HOSTEL_LOCATIONS,
-  HostelLocation,
+  isRentCreditType,
   OCCUPANCY_MODES,
   OccupancyMode,
   Payment,
+  PAYMENT_METHODS,
+  PAYMENT_STATUSES,
+  PAYMENT_TYPES,
+  PaymentMethod,
+  PaymentStatus,
+  PaymentType,
+  PhysicalReceiptStatus,
   PROGRAMS,
   ProgramType,
   REBATE_REASONS,
@@ -33,13 +46,20 @@ import {
   ResidentHostelLocation,
   ResidentType,
   Room,
+  StaffRole,
+  StayHistorySegment,
   STUDENT_STATUSES,
   Student,
   StudentStatus,
 } from '../types/hostel';
 import {
+  assignRoomToStudent,
+  createPayment,
+  deletePayment,
   registerStudent,
+  saveStudentStayHistory,
   transferStudentRoom,
+  updatePayment,
   updateStudentRecord,
 } from '../lib/hostelService';
 import { BulkImportModal } from './BulkImportModal';
@@ -57,6 +77,7 @@ interface StudentsTabProps {
   rooms: Room[];
   payments: Payment[];
   staffEmail: string;
+  staffRole: StaffRole;
   loading: boolean;
 }
 
@@ -65,8 +86,10 @@ export function StudentsTab({
   rooms,
   payments,
   staffEmail,
+  staffRole,
   loading,
 }: StudentsTabProps) {
+  const isMasterAdmin = staffRole === 'Master Admin';
   const [searchQuery, setSearchQuery] = useState('');
   const [locationFilter, setLocationFilter] = useState<'All' | ResidentHostelLocation>('All');
   const [residentTypeFilter, setResidentTypeFilter] = useState<'All' | ResidentType>('All');
@@ -75,6 +98,7 @@ export function StudentsTab({
   // Register modal state
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
+  const [importModalType, setImportModalType] = useState<'students' | 'tenancyHistory'>('students');
   const [regStudentId, setRegStudentId] = useState('');
   const [regFullName, setRegFullName] = useState('');
   const [regResidentType, setRegResidentType] = useState<ResidentType>('Student');
@@ -129,6 +153,60 @@ export function StudentsTab({
 
   // View Statement modal state
   const [statementStudent, setStatementStudent] = useState<Student | null>(null);
+
+  // Direct Assign Room modal state (for unassigned students)
+  const [assigningStudent, setAssigningStudent] = useState<Student | null>(null);
+  const [assignRoomId, setAssignRoomId] = useState('');
+  const [assignPlacementDate, setAssignPlacementDate] = useState(getTodayISO());
+  const [assignOccupancyMode, setAssignOccupancyMode] =
+    useState<OccupancyMode>('Single Bed');
+  const [assignStdRate, setAssignStdRate] = useState('250');
+  const [assignRebate, setAssignRebate] = useState('0');
+  const [assignRebateReason, setAssignRebateReason] = useState('None');
+
+  // Statement: Add / Edit / Delete Stay History Segment state
+  const [stayModalOpen, setStayModalOpen] = useState(false);
+  const [editingStaySegment, setEditingStaySegment] =
+    useState<StayHistorySegment | null>(null);
+  const [stayRoomInputMode, setStayRoomInputMode] = useState<'select' | 'custom'>(
+    'select'
+  );
+  const [stayRoomId, setStayRoomId] = useState('');
+  const [stayLocation, setStayLocation] =
+    useState<ResidentHostelLocation>('Apartment Desa Jati 2');
+  const [stayOccupancyMode, setStayOccupancyMode] =
+    useState<OccupancyMode>('Single Bed');
+  const [stayStartDate, setStayStartDate] = useState(getTodayISO());
+  const [stayIsOngoing, setStayIsOngoing] = useState(false);
+  const [stayEndDate, setStayEndDate] = useState(getTodayISO());
+  const [stayStdRate, setStayStdRate] = useState('250');
+  const [stayRebate, setStayRebate] = useState('0');
+  const [stayFirstMonthCharge, setStayFirstMonthCharge] = useState('250');
+  const [stayFirstMonthManual, setStayFirstMonthManual] = useState(false);
+  const [stayReason, setStayReason] = useState('Historical Stay');
+  const [deletingStaySegment, setDeletingStaySegment] =
+    useState<StayHistorySegment | null>(null);
+
+  // Statement: Record / Backdate / Edit / Delete Payment state
+  const [stmtPaymentModalOpen, setStmtPaymentModalOpen] = useState(false);
+  const [stmtEditingPayment, setStmtEditingPayment] = useState<Payment | null>(
+    null
+  );
+  const [stmtDeletingPayment, setStmtDeletingPayment] = useState<Payment | null>(
+    null
+  );
+  const [stmtBillingMonth, setStmtBillingMonth] = useState(getCurrentMonthISO());
+  const [stmtPaymentType, setStmtPaymentType] =
+    useState<PaymentType>('Monthly Rent');
+  const [stmtAmount, setStmtAmount] = useState('250');
+  const [stmtMethod, setStmtMethod] = useState<PaymentMethod>('Online Transfer');
+  const [stmtBankRefNo, setStmtBankRefNo] = useState('');
+  const [stmtPaymentDate, setStmtPaymentDate] = useState(getTodayISO());
+  const [stmtStatus, setStmtStatus] = useState<PaymentStatus>('Paid');
+  const [stmtPhysStatus, setStmtPhysStatus] =
+    useState<PhysicalReceiptStatus>('Issued');
+  const [stmtPhysNo, setStmtPhysNo] = useState('');
+  const [stmtNotes, setStmtNotes] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -686,6 +764,393 @@ export function StudentsTab({
     }
   };
 
+  const selectedAssignRoom = useMemo(() => {
+    return vacantRooms.find((r) => r.roomId === assignRoomId) || null;
+  }, [vacantRooms, assignRoomId]);
+
+  const assignSiblingBeds = useMemo(() => {
+    if (!selectedAssignRoom || assignOccupancyMode !== 'Whole Unit Exclusive') {
+      return [];
+    }
+    return rooms
+      .filter(
+        (r) =>
+          r.roomId !== selectedAssignRoom.roomId &&
+          r.location === selectedAssignRoom.location &&
+          r.block === selectedAssignRoom.block &&
+          r.unitNo === selectedAssignRoom.unitNo &&
+          r.status === 'Vacant'
+      )
+      .sort((a, b) => a.roomId.localeCompare(b.roomId));
+  }, [rooms, selectedAssignRoom, assignOccupancyMode]);
+
+  const stmtInstallmentPreview = useMemo(() => {
+    if (!liveStatementStudent || !isRentCreditType(stmtPaymentType)) return null;
+    return calculateMonthInstallmentStatus(
+      liveStatementStudent,
+      payments,
+      stmtBillingMonth,
+      Number(stmtAmount) || 0,
+      stmtEditingPayment?.paymentId
+    );
+  }, [
+    liveStatementStudent,
+    stmtPaymentType,
+    payments,
+    stmtBillingMonth,
+    stmtAmount,
+    stmtEditingPayment,
+  ]);
+
+  const openAssignRoomModal = (student: Student) => {
+    setFormError(null);
+    const firstVacant = vacantRooms[0] || null;
+    setAssigningStudent(student);
+    setAssignRoomId(firstVacant ? firstVacant.roomId : '');
+    setAssignPlacementDate(student.checkInDate || getTodayISO());
+    setAssignOccupancyMode(student.occupancyMode || 'Single Bed');
+    setAssignStdRate(
+      firstVacant
+        ? String(firstVacant.monthlyRate)
+        : String(student.standardRoomRate ?? student.monthlyFee ?? 250)
+    );
+    setAssignRebate(String(student.monthlyRebate ?? 0));
+    setAssignRebateReason(student.rebateReason || 'None');
+  };
+
+  const handleAssignRoomSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assigningStudent) return;
+    if (!selectedAssignRoom) {
+      setFormError('Please select an available Vacant room.');
+      return;
+    }
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      const res = await assignRoomToStudent(
+        assigningStudent,
+        {
+          room: selectedAssignRoom,
+          occupancyMode: assignOccupancyMode,
+          placementDate: assignPlacementDate,
+          standardRoomRate: Number(assignStdRate),
+          monthlyRebate: Number(assignRebate),
+          rebateReason: assignRebateReason,
+        },
+        rooms,
+        staffEmail
+      );
+      setAssigningStudent(null);
+      setFeedbackBanner(
+        res.blockedSiblings.length > 0
+          ? `Assigned ${assigningStudent.fullName} to ${selectedAssignRoom.roomId} (Whole Unit Exclusive) and blocked ${res.blockedSiblings.join(', ')}.`
+          : `Assigned ${assigningStudent.fullName} to room ${selectedAssignRoom.roomId} and marked bed as Occupied.`
+      );
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : 'Failed to assign room.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const syncStayFirstMonth = (
+    nextDate: string,
+    nextStd: string,
+    nextReb: string,
+    forceReset = false
+  ) => {
+    if (stayFirstMonthManual && !forceReset) return;
+    const eff = Math.max(
+      0,
+      Math.round(((Number(nextStd) || 0) - (Number(nextReb) || 0)) * 100) / 100
+    );
+    const defaults = calculateFirstMonthDefaults(nextDate, eff);
+    setStayFirstMonthCharge(String(defaults.firstMonthCharge));
+    if (forceReset) setStayFirstMonthManual(false);
+  };
+
+  const openAddStaySegmentModal = () => {
+    if (!isMasterAdmin || !liveStatementStudent) return;
+    setFormError(null);
+    setEditingStaySegment(null);
+    const defaultStart = liveStatementStudent.checkInDate || getTodayISO();
+    const defaultLocation: ResidentHostelLocation =
+      liveStatementStudent.hostelLocation &&
+      liveStatementStudent.hostelLocation !== 'Unassigned'
+        ? liveStatementStudent.hostelLocation
+        : 'Apartment Desa Jati 2';
+    setStayRoomInputMode(allRoomsSorted.length > 0 ? 'select' : 'custom');
+    setStayRoomId('');
+    setStayLocation(defaultLocation);
+    setStayOccupancyMode('Single Bed');
+    setStayStartDate(defaultStart);
+    setStayIsOngoing(false);
+    setStayEndDate(getTodayISO());
+    // Snapshot isolation: never derive a historical segment's rate from the current rooms collection
+    setStayStdRate('250');
+    setStayRebate('0');
+    setStayFirstMonthCharge(
+      String(calculateFirstMonthDefaults(defaultStart, 250).firstMonthCharge)
+    );
+    setStayFirstMonthManual(false);
+    setStayReason('Historical Stay');
+    setStayModalOpen(true);
+  };
+
+  const openEditStaySegmentModal = (seg: StayHistorySegment) => {
+    if (!isMasterAdmin) return;
+    setFormError(null);
+    setEditingStaySegment(seg);
+    const existsInRooms = allRoomsSorted.some((r) => r.roomId === seg.roomId);
+    setStayRoomInputMode(existsInRooms ? 'select' : 'custom');
+    setStayRoomId(seg.roomId);
+    setStayLocation(seg.hostelLocation || 'Apartment Desa Jati 2');
+    setStayOccupancyMode(seg.occupancyMode || 'Single Bed');
+    setStayStartDate(seg.startDate);
+    setStayIsOngoing(!seg.endDate);
+    setStayEndDate(seg.endDate || getTodayISO());
+    setStayStdRate(String(seg.standardRoomRate));
+    setStayRebate(String(seg.monthlyRebate));
+    const autoFirst = calculateFirstMonthDefaults(
+      seg.startDate,
+      seg.effectiveMonthlyFee
+    ).firstMonthCharge;
+    const resolvedFirst =
+      typeof seg.firstMonthCharge === 'number' ? seg.firstMonthCharge : autoFirst;
+    setStayFirstMonthCharge(String(resolvedFirst));
+    setStayFirstMonthManual(Math.abs(resolvedFirst - autoFirst) > 0.01);
+    setStayReason(seg.reason || 'Stay Record');
+    setStayModalOpen(true);
+  };
+
+  const handleSaveStaySegment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isMasterAdmin || !liveStatementStudent) return;
+    const trimmedRoom = stayRoomId.trim();
+    if (!trimmedRoom) {
+      setFormError('Please enter or select a Room / Bed ID.');
+      return;
+    }
+    if (!stayIsOngoing && !stayEndDate) {
+      setFormError('Please enter an End Date for past stays, or check "Currently Ongoing".');
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      const currentList = getNormalizedStayHistory(liveStatementStudent);
+      const stdNum = Number(stayStdRate) || 0;
+      const rebNum = Number(stayRebate) || 0;
+      const effNum = Math.max(0, Math.round((stdNum - rebNum) * 100) / 100);
+      const parsedFirst =
+        stayFirstMonthCharge.trim() !== '' && !Number.isNaN(Number(stayFirstMonthCharge))
+          ? Number(stayFirstMonthCharge)
+          : calculateFirstMonthDefaults(stayStartDate, effNum).firstMonthCharge;
+
+      const updatedSeg: StayHistorySegment = {
+        id:
+          editingStaySegment?.id ||
+          `SEG-${Date.now().toString(36).toUpperCase()}`,
+        roomId: trimmedRoom,
+        hostelLocation: stayLocation,
+        occupancyMode: stayOccupancyMode,
+        startDate: stayStartDate,
+        endDate: stayIsOngoing ? null : stayEndDate,
+        standardRoomRate: stdNum,
+        monthlyRebate: rebNum,
+        effectiveMonthlyFee: effNum,
+        firstMonthCharge: parsedFirst,
+        reason: stayReason.trim() || 'Historical Stay',
+        recordedBy: staffEmail,
+        recordedAt: new Date().toISOString(),
+      };
+
+      const nextList = editingStaySegment
+        ? currentList.map((s) => (s.id === editingStaySegment.id ? updatedSeg : s))
+        : [...currentList, updatedSeg];
+
+      await saveStudentStayHistory(
+        liveStatementStudent,
+        nextList,
+        rooms,
+        staffEmail
+      );
+      setStayModalOpen(false);
+      setEditingStaySegment(null);
+      setFeedbackBanner(
+        updatedSeg.endDate !== null
+          ? `${editingStaySegment ? 'Updated' : 'Added'} historical stay (${updatedSeg.roomId}) at ${formatRM(effNum)}/mo. Current active rate & room remain unchanged.`
+          : `Updated active stay segment (${updatedSeg.roomId}) at ${formatRM(effNum)}/mo.`
+      );
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : 'Failed to save stay segment.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleConfirmDeleteStaySegment = async () => {
+    if (!isMasterAdmin || !liveStatementStudent || !deletingStaySegment) return;
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      const currentList = getNormalizedStayHistory(liveStatementStudent);
+      const nextList = currentList.filter((s) => s.id !== deletingStaySegment.id);
+      await saveStudentStayHistory(
+        liveStatementStudent,
+        nextList,
+        rooms,
+        staffEmail
+      );
+      setFeedbackBanner(
+        `Removed stay segment (${deletingStaySegment.roomId || 'Unassigned'}) from ${liveStatementStudent.fullName}.`
+      );
+      setDeletingStaySegment(null);
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : 'Failed to delete stay segment.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const openStmtRecordPaymentModal = () => {
+    if (!liveStatementStudent || !statementBilling) return;
+    setFormError(null);
+    setStmtEditingPayment(null);
+    const defaultMonth = getCurrentMonthISO();
+    setStmtBillingMonth(defaultMonth);
+    setStmtPaymentType('Monthly Rent');
+    const monthStatus = calculateMonthInstallmentStatus(
+      liveStatementStudent,
+      payments,
+      defaultMonth,
+      0
+    );
+    const suggestedAmt =
+      monthStatus.remainingBeforeEntry > 0
+        ? monthStatus.remainingBeforeEntry
+        : statementBilling.effectiveMonthlyFee;
+    setStmtAmount(suggestedAmt.toFixed(2));
+    setStmtMethod('Online Transfer');
+    setStmtBankRefNo('');
+    setStmtPaymentDate(getTodayISO());
+    setStmtStatus('Paid');
+    setStmtPhysStatus('Issued');
+    setStmtPhysNo('');
+    setStmtNotes('');
+    setStmtPaymentModalOpen(true);
+  };
+
+  const openStmtEditPaymentModal = (p: Payment) => {
+    setFormError(null);
+    setStmtEditingPayment(p);
+    setStmtBillingMonth(p.billingMonth);
+    setStmtPaymentType(
+      (PAYMENT_TYPES.includes(p.paymentType as PaymentType)
+        ? p.paymentType
+        : 'Monthly Rent') as PaymentType
+    );
+    setStmtAmount(String(p.amount));
+    setStmtMethod(
+      (PAYMENT_METHODS.includes(p.paymentMethod as PaymentMethod)
+        ? p.paymentMethod
+        : 'Online Transfer') as PaymentMethod
+    );
+    setStmtBankRefNo(getPaymentBankRef(p));
+    setStmtPaymentDate(p.paymentDate);
+    setStmtStatus(p.status);
+    setStmtPhysStatus(getPhysicalReceiptStatus(p));
+    setStmtPhysNo(p.physicalReceiptNo || '');
+    setStmtNotes(p.notes || '');
+    setStmtPaymentModalOpen(true);
+  };
+
+  const handleSaveStmtPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!liveStatementStudent) return;
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      if (stmtEditingPayment) {
+        await updatePayment(
+          stmtEditingPayment.paymentId,
+          {
+            billingMonth: stmtBillingMonth,
+            paymentType: stmtPaymentType,
+            amount: Number(stmtAmount),
+            paymentMethod: stmtMethod,
+            bankRefNo: stmtBankRefNo,
+            paymentDate: stmtPaymentDate,
+            status: stmtStatus,
+            notes: stmtNotes,
+            physicalReceiptStatus: stmtPhysStatus,
+            physicalReceiptNo: stmtPhysNo,
+          },
+          staffEmail
+        );
+        setFeedbackBanner(
+          `Updated payment ${getPaymentReceiptNo(stmtEditingPayment)} for ${liveStatementStudent.fullName}.`
+        );
+      } else {
+        const res = await createPayment(
+          {
+            student: liveStatementStudent,
+            billingMonth: stmtBillingMonth,
+            paymentType: stmtPaymentType,
+            amount: Number(stmtAmount),
+            paymentMethod: stmtMethod,
+            bankRefNo: stmtBankRefNo,
+            paymentDate: stmtPaymentDate,
+            status: stmtStatus,
+            notes: stmtNotes,
+            physicalReceiptStatus: stmtPhysStatus,
+            physicalReceiptNo: stmtPhysNo,
+          },
+          payments,
+          staffEmail
+        );
+        setFeedbackBanner(
+          `Recorded ${res.receiptNo} (${formatRM(Number(stmtAmount))} for ${stmtBillingMonth}) on ${liveStatementStudent.fullName}'s ledger.`
+        );
+      }
+      setStmtPaymentModalOpen(false);
+      setStmtEditingPayment(null);
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : 'Failed to save payment.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleConfirmDeleteStmtPayment = async () => {
+    if (!stmtDeletingPayment) return;
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      await deletePayment(stmtDeletingPayment.paymentId);
+      setFeedbackBanner(
+        `Deleted payment ${getPaymentReceiptNo(stmtDeletingPayment)} (${formatRM(stmtDeletingPayment.amount)}).`
+      );
+      setStmtDeletingPayment(null);
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : 'Failed to delete payment.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div className={statementStudent ? 'print:hidden space-y-5' : 'space-y-5'}>
@@ -771,9 +1236,25 @@ export function StudentsTab({
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5 shrink-0 self-start xl:self-auto">
+          {isMasterAdmin && (
+            <button
+              type="button"
+              onClick={() => {
+                setImportModalType('tenancyHistory');
+                setShowImportModal(true);
+              }}
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-900" />
+              <span>Bulk Tenancy History</span>
+            </button>
+          )}
           <button
             type="button"
-            onClick={() => setShowImportModal(true)}
+            onClick={() => {
+              setImportModalType('students');
+              setShowImportModal(true);
+            }}
             className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
@@ -955,26 +1436,38 @@ export function StudentsTab({
                       </td>
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1.5">
+                          {!(st.assignedRoomId || '').trim() && (
+                            <button
+                              type="button"
+                              onClick={() => openAssignRoomModal(st)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-md cursor-pointer"
+                              title="Assign a Vacant room directly to this resident"
+                            >
+                              <BedDouble className="w-3 h-3" />
+                              <span>Assign Room</span>
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => setStatementStudent(st)}
                             className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
-                            title="View room history & account statement"
+                            title="View & edit stay history, statement, and past payments"
                           >
                             <FileText className="w-3 h-3" />
                             <span>View Statement</span>
                           </button>
-                          {st.status === 'Active' && (
-                            <button
-                              type="button"
-                              onClick={() => openTransferModal(st)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-md cursor-pointer"
-                              title="Transfer resident to another bed/room"
-                            >
-                              <ArrowLeftRight className="w-3 h-3" />
-                              <span>Transfer Room</span>
-                            </button>
-                          )}
+                          {st.status === 'Active' &&
+                            Boolean((st.assignedRoomId || '').trim()) && (
+                              <button
+                                type="button"
+                                onClick={() => openTransferModal(st)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-md cursor-pointer"
+                                title="Transfer resident to another bed/room"
+                              >
+                                <ArrowLeftRight className="w-3 h-3" />
+                                <span>Transfer Room</span>
+                              </button>
+                            )}
                           <button
                             type="button"
                             onClick={() => openEditModal(st, false)}
@@ -1584,12 +2077,18 @@ export function StudentsTab({
               )}
 
               {editStatus !== 'Checked-Out' && (
-                <div>
-                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                <div
+                  className={
+                    !(editingStudent.assignedRoomId || '').trim()
+                      ? 'p-3.5 rounded-lg bg-amber-50/70 border border-amber-200'
+                      : ''
+                  }
+                >
+                  <label className="block text-xs font-semibold text-slate-800 mb-1">
                     {editingStudent.status === 'Checked-Out'
                       ? 'Assign Vacant Room for Re-Check-In'
-                      : !editingStudent.assignedRoomId
-                        ? 'Assign Vacant Room / Bed'
+                      : !(editingStudent.assignedRoomId || '').trim()
+                        ? 'Assign Vacant Room / Bed (Currently Unassigned)'
                         : 'Transfer Room (Optional — Vacant Beds Only)'}
                   </label>
                   <select
@@ -1604,7 +2103,7 @@ export function StudentsTab({
                       }
                     }}
                     required={editingStudent.status === 'Checked-Out'}
-                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   >
                     {editingStudent.status !== 'Checked-Out' && (
                       <option value="">
@@ -1882,7 +2381,8 @@ export function StudentsTab({
 
       <BulkImportModal
         isOpen={showImportModal}
-        importType="students"
+        importType={importModalType}
+        staffRole={staffRole}
         rooms={rooms}
         students={students}
         payments={payments}
@@ -2220,7 +2720,204 @@ export function StudentsTab({
         </div>
       )}
 
-      {/* View Statement Modal (Room & Rate History Timeline + Ledger) */}
+      {/* Direct Assign Room Modal (for Room Unassigned students) */}
+      {assigningStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/45 overflow-y-auto print:hidden">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-5 my-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  Assign Room · {assigningStudent.fullName}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5 font-mono">
+                  {assigningStudent.studentId} · Check-In: {assigningStudent.checkInDate}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAssigningStudent(null)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close assign room modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {formError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {formError}
+              </div>
+            )}
+
+            {vacantRooms.length === 0 ? (
+              <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-2">
+                <p className="font-semibold">No Vacant Beds Available</p>
+                <p>
+                  There are currently no Vacant beds in Room Inventory. Add or free a bed
+                  first.
+                </p>
+                <div className="flex justify-end pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setAssigningStudent(null)}
+                    className="px-3.5 py-1.5 bg-white border border-amber-300 rounded-md font-medium cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={handleAssignRoomSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Select Vacant Room / Bed
+                  </label>
+                  <select
+                    required
+                    value={assignRoomId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setAssignRoomId(nextId);
+                      const rm = vacantRooms.find((r) => r.roomId === nextId);
+                      if (rm) {
+                        setAssignStdRate(String(rm.monthlyRate));
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    {vacantRooms.map((r) => (
+                      <option key={r.roomId} value={r.roomId}>
+                        {r.roomId} — {r.location} (Blk {r.block}, Unit {r.unitNo},{' '}
+                        {r.bedSlot}) · {formatRM(r.monthlyRate)}/mo
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Placement / Start Date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={assignPlacementDate}
+                      onChange={(e) => setAssignPlacementDate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Occupancy Mode
+                    </label>
+                    <select
+                      value={assignOccupancyMode}
+                      onChange={(e) =>
+                        setAssignOccupancyMode(e.target.value as OccupancyMode)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {OCCUPANCY_MODES.map((om) => (
+                        <option key={om} value={om}>
+                          {om}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {assignOccupancyMode === 'Whole Unit Exclusive' && selectedAssignRoom && (
+                  <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                    {assignSiblingBeds.length > 0 ? (
+                      <p>
+                        <strong>Whole Unit Exclusive:</strong> Will also mark{' '}
+                        <strong className="font-mono">
+                          {assignSiblingBeds.map((b) => b.roomId).join(', ')}
+                        </strong>{' '}
+                        as <strong>Reserved / Blocked</strong>.
+                      </p>
+                    ) : (
+                      <p>
+                        <strong>Whole Unit Exclusive:</strong> No other Vacant beds remain in
+                        Block {selectedAssignRoom.block} Unit {selectedAssignRoom.unitNo}.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Standard Rate (RM)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={10000}
+                      step="0.01"
+                      value={assignStdRate}
+                      onChange={(e) => setAssignStdRate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Monthly Rebate (RM)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={10000}
+                      step="0.01"
+                      value={assignRebate}
+                      onChange={(e) => setAssignRebate(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Rebate Reason
+                    </label>
+                    <select
+                      value={assignRebateReason}
+                      onChange={(e) => setAssignRebateReason(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {REBATE_REASONS.map((rr) => (
+                        <option key={rr} value={rr}>
+                          {rr}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setAssigningStudent(null)}
+                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap"
+                  >
+                    {submitting ? 'Assigning...' : 'Assign Room & Occupy Bed'}
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* View Statement / Profile Modal (Editable Room & Tenancy History + Inline Payment Ledger) */}
       {liveStatementStudent && statementBilling && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 overflow-y-auto print:static print:bg-white print:p-0">
           <div className="bg-white border border-slate-200 rounded-xl max-w-4xl w-full p-6 sm:p-8 space-y-6 my-8 print:my-0 print:border-0 print:max-w-none print:p-4">
@@ -2274,6 +2971,20 @@ export function StudentsTab({
               </div>
             </div>
 
+            {feedbackBanner && (
+              <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded-lg px-3.5 py-2 text-xs font-medium flex items-center justify-between gap-3 print:hidden">
+                <span>{feedbackBanner}</span>
+                <button
+                  type="button"
+                  onClick={() => setFeedbackBanner(null)}
+                  className="text-blue-900 hover:text-blue-700 cursor-pointer"
+                  aria-label="Dismiss message"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Financial KPI Strip */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
@@ -2321,103 +3032,171 @@ export function StudentsTab({
               </div>
             </div>
 
-            {/* Room & Rate History Timeline */}
+            {/* Editable Room & Tenancy History */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <h3 className="font-display text-sm font-semibold text-slate-900">
-                  Room &amp; Rate History Timeline
-                </h3>
-                <span className="text-xs text-slate-500">
-                  Chronological stay segments (multi-rate billing, no mid-month double charge)
-                </span>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <h3 className="font-display text-sm font-semibold text-slate-900">
+                    Room &amp; Tenancy History
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {isMasterAdmin
+                      ? 'Chronological stay segments (Master Admin can add historical stays or edit rates without changing live bed occupancy)'
+                      : 'Chronological stay segments (historical stay editing is restricted to Master Admin)'}
+                  </p>
+                </div>
+                {isMasterAdmin && (
+                  <button
+                    type="button"
+                    onClick={openAddStaySegmentModal}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap print:hidden"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Past Stay Record</span>
+                  </button>
+                )}
               </div>
 
-              <div className="border border-slate-200 rounded-lg divide-y divide-slate-200 overflow-hidden">
-                {statementBilling.segments.map((sb, idx) => {
-                  const seg = sb.segment;
-                  const isCurrentOpen =
-                    !seg.endDate && liveStatementStudent.status === 'Active';
-                  return (
-                    <div
-                      key={seg.id}
-                      className={`p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs ${
-                        isCurrentOpen ? 'bg-blue-50/40' : 'bg-white'
-                      }`}
-                    >
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-xs font-semibold text-slate-500">
-                            #{idx + 1}
-                          </span>
-                          <span className="font-mono font-bold text-slate-900">
-                            {seg.roomId || 'Room Unassigned'}
-                          </span>
-                          <span className="text-slate-500">
-                            · {seg.hostelLocation || 'Unassigned'} · {seg.occupancyMode}
-                          </span>
-                          {isCurrentOpen && <StatusBadge status="Active" />}
-                        </div>
-                        <p className="text-slate-700 font-mono tabular-nums">
-                          {seg.startDate} →{' '}
-                          {seg.endDate ||
-                            (liveStatementStudent.status === 'Checked-Out'
-                              ? liveStatementStudent.checkOutDate || 'Checked-Out'
-                              : 'Present')}
-                          {sb.billedMonths.length > 0 && (
-                            <span className="font-sans text-slate-500 ml-2">
-                              (Billed months: {sb.billedMonths.join(', ')})
+              {statementBilling.segments.length === 0 ? (
+                <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500 space-y-2">
+                  <p>No room stay segments recorded yet.</p>
+                  <p>
+                    {isMasterAdmin
+                      ? 'Click “Add Past Stay Record” above for historical stays or assign a live Vacant room from the resident’s row.'
+                      : 'Assign a live Vacant room from the resident’s row, or ask a Master Admin to import historical stays.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="border border-slate-200 rounded-lg divide-y divide-slate-200 overflow-hidden">
+                  {statementBilling.segments.map((sb, idx) => {
+                    const seg = sb.segment;
+                    const isClosedSegment = seg.endDate !== null;
+                    const isCurrentOpen =
+                      !isClosedSegment && liveStatementStudent.status === 'Active';
+                    return (
+                      <div
+                        key={seg.id}
+                        className={`p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs ${
+                          isCurrentOpen ? 'bg-blue-50/40' : 'bg-white'
+                        }`}
+                      >
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-xs font-semibold text-slate-500">
+                              #{idx + 1}
                             </span>
-                          )}
-                        </p>
-                        <p className="text-slate-500">
-                          Reason: <span className="text-slate-700 font-medium">{seg.reason}</span> ·
-                          Recorded by <span className="font-mono">{seg.recordedBy}</span>
-                          {seg.recordedAt
-                            ? ` on ${new Date(seg.recordedAt).toLocaleDateString('en-MY')}`
-                            : ''}
-                        </p>
-                      </div>
-
-                      <div className="md:text-right font-mono tabular-nums shrink-0 space-y-0.5">
-                        <p className="font-semibold text-slate-900">
-                          {formatRM(seg.effectiveMonthlyFee)}/mo
-                          <span className="font-sans font-normal text-slate-500 ml-1.5">
-                            × {sb.monthsBilled} {sb.monthsBilled === 1 ? 'mo' : 'mos'}
-                          </span>
-                        </p>
-                        {seg.monthlyRebate > 0 && (
-                          <p className="text-emerald-700">
-                            Std {formatRM(seg.standardRoomRate)} · Rebate -
-                            {formatRM(seg.monthlyRebate)}
+                            <span className="font-mono font-bold text-slate-900">
+                              {seg.roomId || 'Room Unassigned'}
+                            </span>
+                            <span className="text-slate-500">
+                              · {seg.hostelLocation || 'Unassigned'} · {seg.occupancyMode}
+                            </span>
+                            {isClosedSegment ? (
+                              <StatusBadge status="Historical Rate (Locked to Period)" />
+                            ) : isCurrentOpen ? (
+                              <StatusBadge status="Active" />
+                            ) : null}
+                          </div>
+                          <p className="text-slate-700 font-mono tabular-nums">
+                            {seg.startDate} →{' '}
+                            {seg.endDate ||
+                              (liveStatementStudent.status === 'Checked-Out'
+                                ? liveStatementStudent.checkOutDate || 'Checked-Out'
+                                : 'Present')}
+                            {sb.billedMonths.length > 0 && (
+                              <span className="font-sans text-slate-500 ml-2">
+                                (Billed months: {sb.billedMonths.join(', ')})
+                              </span>
+                            )}
                           </p>
-                        )}
-                        {idx === 0 &&
-                          typeof seg.firstMonthCharge === 'number' &&
-                          Math.abs(seg.firstMonthCharge - seg.effectiveMonthlyFee) > 0.01 && (
-                            <p className="text-blue-900">
-                              1st month prorated: {formatRM(seg.firstMonthCharge)}
+                          <p className="text-slate-500">
+                            Reason:{' '}
+                            <span className="text-slate-700 font-medium">{seg.reason}</span> ·
+                            Recorded by <span className="font-mono">{seg.recordedBy}</span>
+                            {seg.recordedAt
+                              ? ` on ${new Date(seg.recordedAt).toLocaleDateString('en-MY')}`
+                              : ''}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-col md:items-end gap-2 shrink-0">
+                          <div className="md:text-right font-mono tabular-nums space-y-0.5">
+                            <p className="font-semibold text-slate-900">
+                              {formatRM(seg.effectiveMonthlyFee)}/mo
+                              <span className="font-sans font-normal text-slate-500 ml-1.5">
+                                × {sb.monthsBilled} {sb.monthsBilled === 1 ? 'mo' : 'mos'}
+                              </span>
                             </p>
+                            {seg.monthlyRebate > 0 && (
+                              <p className="text-emerald-700">
+                                Std {formatRM(seg.standardRoomRate)} · Rebate -
+                                {formatRM(seg.monthlyRebate)}
+                              </p>
+                            )}
+                            {sb.billedMonths[0] === seg.startDate.slice(0, 7) &&
+                              typeof seg.firstMonthCharge === 'number' &&
+                              Math.abs(seg.firstMonthCharge - seg.effectiveMonthlyFee) >
+                                0.01 && (
+                                <p className="text-blue-900">
+                                  1st month prorated: {formatRM(seg.firstMonthCharge)}
+                                </p>
+                              )}
+                            <p className="text-slate-800 font-bold">
+                              Segment Subtotal: {formatRM(sb.expectedRent)}
+                            </p>
+                          </div>
+
+                          {isMasterAdmin && (
+                            <div className="inline-flex items-center gap-1.5 print:hidden">
+                              <button
+                                type="button"
+                                onClick={() => openEditStaySegmentModal(seg)}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded cursor-pointer"
+                              >
+                                <Pencil className="w-3 h-3" />
+                                <span>Edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setFormError(null);
+                                  setDeletingStaySegment(seg);
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-700 bg-white border border-red-200 hover:bg-red-50 rounded cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                <span>Delete</span>
+                              </button>
+                            </div>
                           )}
-                        <p className="text-slate-800 font-bold">
-                          Segment Subtotal: {formatRM(sb.expectedRent)}
-                        </p>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
-            {/* Payment Ledger */}
+            {/* Payment Ledger with Inline Record / Backdate / Edit / Delete */}
             <div className="space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="font-display text-sm font-semibold text-slate-900">
-                  Payment &amp; Fee Waiver Ledger
-                </h3>
-                <span className="text-xs text-slate-500 tabular-nums">
-                  {statementPayments.length}{' '}
-                  {statementPayments.length === 1 ? 'entry' : 'entries'}
-                </span>
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div>
+                  <h3 className="font-display text-sm font-semibold text-slate-900">
+                    Payment &amp; Fee Waiver Ledger
+                  </h3>
+                  <p className="text-xs text-slate-500 tabular-nums">
+                    {statementPayments.length}{' '}
+                    {statementPayments.length === 1 ? 'entry' : 'entries'} recorded
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={openStmtRecordPaymentModal}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap print:hidden"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Record / Backdate Payment</span>
+                </button>
               </div>
 
               {statementPayments.length === 0 ? (
@@ -2436,6 +3215,7 @@ export function StudentsTab({
                         <th className="py-2.5 px-3 text-right">Amount</th>
                         <th className="py-2.5 px-3">Physical Receipt</th>
                         <th className="py-2.5 px-3">Status</th>
+                        <th className="py-2.5 px-3 text-right print:hidden">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -2477,6 +3257,31 @@ export function StudentsTab({
                             <td className="py-2.5 px-3 whitespace-nowrap">
                               <StatusBadge status={p.status} />
                             </td>
+                            <td className="py-2.5 px-3 text-right whitespace-nowrap print:hidden">
+                              <div className="inline-flex items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => openStmtEditPaymentModal(p)}
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded cursor-pointer"
+                                  title="Edit payment entry"
+                                >
+                                  <Pencil className="w-3 h-3" />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setFormError(null);
+                                    setStmtDeletingPayment(p);
+                                  }}
+                                  className="p-1 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded cursor-pointer"
+                                  title="Delete payment entry"
+                                  aria-label={`Delete ${getPaymentReceiptNo(p)}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
                           </tr>
                         );
                       })}
@@ -2494,6 +3299,677 @@ export function StudentsTab({
                 className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer print:hidden"
               >
                 Close Statement
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Add / Edit Stay Segment Sub-Modal (Master Admin Only) */}
+      {isMasterAdmin && liveStatementStudent && stayModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 overflow-y-auto print:hidden">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-4 my-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  {editingStaySegment ? 'Edit Stay Segment' : 'Add Past Stay Record'}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {liveStatementStudent.fullName} ({liveStatementStudent.studentId})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setStayModalOpen(false);
+                  setEditingStaySegment(null);
+                }}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close stay segment modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {formError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {formError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveStaySegment} className="space-y-4">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-medium text-slate-700">
+                    Room / Bed ID
+                  </label>
+                  {allRoomsSorted.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setStayRoomInputMode(
+                          stayRoomInputMode === 'select' ? 'custom' : 'select'
+                        )
+                      }
+                      className="text-xs font-medium text-blue-900 hover:underline cursor-pointer"
+                    >
+                      {stayRoomInputMode === 'select'
+                        ? 'Enter custom Room ID text'
+                        : 'Pick from Room Inventory'}
+                    </button>
+                  )}
+                </div>
+
+                {stayRoomInputMode === 'select' && allRoomsSorted.length > 0 ? (
+                  <select
+                    value={stayRoomId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setStayRoomId(nextId);
+                      const rm = allRoomsSorted.find((r) => r.roomId === nextId);
+                      if (rm) {
+                        setStayLocation(rm.location);
+                      }
+                    }}
+                    required
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    <option value="">Select Room / Bed...</option>
+                    {allRoomsSorted.map((r) => (
+                      <option key={r.roomId} value={r.roomId}>
+                        {r.roomId} — {r.location} [{r.status}]
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    required
+                    maxLength={64}
+                    value={stayRoomId}
+                    onChange={(e) => setStayRoomId(e.target.value)}
+                    placeholder="e.g. DJ2-A-02-B1"
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Hostel Location
+                  </label>
+                  <select
+                    value={stayLocation}
+                    onChange={(e) =>
+                      setStayLocation(e.target.value as ResidentHostelLocation)
+                    }
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    {HOSTEL_LOCATIONS.map((loc) => (
+                      <option key={loc} value={loc}>
+                        {loc}
+                      </option>
+                    ))}
+                    <option value="Unassigned">Unassigned</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Occupancy Mode
+                  </label>
+                  <select
+                    value={stayOccupancyMode}
+                    onChange={(e) =>
+                      setStayOccupancyMode(e.target.value as OccupancyMode)
+                    }
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    {OCCUPANCY_MODES.map((om) => (
+                      <option key={om} value={om}>
+                        {om}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Start Date
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={stayStartDate}
+                    onChange={(e) => {
+                      setStayStartDate(e.target.value);
+                      syncStayFirstMonth(e.target.value, stayStdRate, stayRebate);
+                    }}
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-medium text-slate-700">
+                      End Date
+                    </label>
+                    <label
+                      className={`inline-flex items-center gap-1.5 text-xs ${
+                        liveStatementStudent.status !== 'Active'
+                          ? 'text-slate-400 cursor-not-allowed'
+                          : 'text-slate-600 cursor-pointer'
+                      }`}
+                      title={
+                        liveStatementStudent.status !== 'Active'
+                          ? 'Checked-Out residents must specify a past End Date'
+                          : undefined
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        checked={stayIsOngoing}
+                        disabled={liveStatementStudent.status !== 'Active'}
+                        onChange={(e) => setStayIsOngoing(e.target.checked)}
+                        className="w-3.5 h-3.5 rounded border-slate-300 text-blue-900"
+                      />
+                      <span>Present (Ongoing)</span>
+                    </label>
+                  </div>
+                  <input
+                    type="date"
+                    required={!stayIsOngoing}
+                    disabled={stayIsOngoing}
+                    value={stayIsOngoing ? '' : stayEndDate}
+                    onChange={(e) => setStayEndDate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-400"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Standard Rate (RM)
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={0}
+                    max={10000}
+                    step="0.01"
+                    value={stayStdRate}
+                    onChange={(e) => {
+                      setStayStdRate(e.target.value);
+                      syncStayFirstMonth(stayStartDate, e.target.value, stayRebate);
+                    }}
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Monthly Rebate (RM)
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={0}
+                    max={10000}
+                    step="0.01"
+                    value={stayRebate}
+                    onChange={(e) => {
+                      setStayRebate(e.target.value);
+                      syncStayFirstMonth(stayStartDate, stayStdRate, e.target.value);
+                    }}
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <label className="text-xs font-medium text-slate-700">
+                      1st Month Charge (RM)
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        syncStayFirstMonth(stayStartDate, stayStdRate, stayRebate, true)
+                      }
+                      className="text-[11px] font-medium text-blue-900 hover:underline cursor-pointer"
+                    >
+                      Auto
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    required
+                    min={0}
+                    max={10000}
+                    step="0.01"
+                    value={stayFirstMonthCharge}
+                    onChange={(e) => {
+                      setStayFirstMonthCharge(e.target.value);
+                      setStayFirstMonthManual(true);
+                    }}
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Reason / Segment Note
+                </label>
+                <input
+                  type="text"
+                  required
+                  maxLength={120}
+                  value={stayReason}
+                  onChange={(e) => setStayReason(e.target.value)}
+                  placeholder="e.g. Historical Stay, Initial Check-In, Room Transfer"
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                />
+              </div>
+
+              {!stayIsOngoing ? (
+                <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1">
+                  <p className="font-semibold text-slate-900">
+                    Historical Rate (Locked to Period)
+                  </p>
+                  <p>
+                    This period stores its own independent rate snapshot and will{' '}
+                    <strong>not</strong> overwrite the resident&apos;s current room, active
+                    monthly fee, or live Room Inventory occupancy.
+                  </p>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900">
+                  <strong>Active Open Segment:</strong> Because End Date is Present
+                  (ongoing), saving will sync this resident&apos;s current room and active
+                  monthly billing rate.
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStayModalOpen(false);
+                    setEditingStaySegment(null);
+                  }}
+                  className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
+                >
+                  {submitting ? 'Saving...' : 'Save Stay Record'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Stay Segment Confirmation Sub-Modal (Master Admin Only) */}
+      {isMasterAdmin && liveStatementStudent && deletingStaySegment && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 print:hidden">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
+            <h2 className="font-display text-lg font-semibold text-slate-900">
+              Delete Stay Segment ({deletingStaySegment.roomId || 'Unassigned'})?
+            </h2>
+            <p className="text-sm text-slate-600">
+              This will remove the{' '}
+              <span className="font-mono font-semibold text-slate-900">
+                {deletingStaySegment.startDate} →{' '}
+                {deletingStaySegment.endDate || 'Present'}
+              </span>{' '}
+              segment at{' '}
+              <span className="font-mono">
+                {formatRM(deletingStaySegment.effectiveMonthlyFee)}/mo
+              </span>{' '}
+              and automatically recalculate {liveStatementStudent.fullName}&apos;s expected
+              rent and outstanding balance.
+            </p>
+            {deletingStaySegment.endDate !== null && (
+              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-700">
+                <strong>Historical Rate (Locked to Period):</strong> Removing this past
+                stay leaves the resident&apos;s current assigned room and active monthly rate
+                untouched.
+              </div>
+            )}
+            {formError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {formError}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingStaySegment(null)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteStaySegment}
+                disabled={submitting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-red-700 hover:bg-red-800 disabled:opacity-60 rounded-lg cursor-pointer"
+              >
+                {submitting ? 'Deleting...' : 'Delete Stay Segment'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Record / Backdate / Edit Payment Sub-Modal inside Statement */}
+      {liveStatementStudent && stmtPaymentModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 overflow-y-auto print:hidden">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-lg w-full p-6 space-y-4 my-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  {stmtEditingPayment
+                    ? `Edit Payment · ${getPaymentReceiptNo(stmtEditingPayment)}`
+                    : 'Record / Backdate Payment'}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {liveStatementStudent.fullName} (
+                  <span className="font-mono">{liveStatementStudent.studentId}</span>)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setStmtPaymentModalOpen(false);
+                  setStmtEditingPayment(null);
+                }}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close payment modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {formError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {formError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveStmtPayment} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Billing Month
+                  </label>
+                  <input
+                    type="month"
+                    required
+                    value={stmtBillingMonth}
+                    onChange={(e) => {
+                      const m = e.target.value;
+                      setStmtBillingMonth(m);
+                      if (!stmtEditingPayment && stmtPaymentType === 'Monthly Rent') {
+                        const info = calculateMonthInstallmentStatus(
+                          liveStatementStudent,
+                          payments,
+                          m,
+                          0
+                        );
+                        setStmtAmount(
+                          (info.remainingBeforeEntry > 0
+                            ? info.remainingBeforeEntry
+                            : info.monthTargetCharge
+                          ).toFixed(2)
+                        );
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Payment Type
+                  </label>
+                  <select
+                    value={stmtPaymentType}
+                    onChange={(e) => {
+                      const next = e.target.value as PaymentType;
+                      setStmtPaymentType(next);
+                      if (next === 'Rebate / Fee Waiver') {
+                        setStmtMethod('Internal Adjustment');
+                        setStmtStatus('Waived');
+                      } else if (stmtStatus === 'Waived') {
+                        setStmtStatus('Paid');
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    {PAYMENT_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Amount (RM)
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={0}
+                    max={50000}
+                    step="0.01"
+                    value={stmtAmount}
+                    onChange={(e) => setStmtAmount(e.target.value)}
+                    className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Payment Status
+                  </label>
+                  <select
+                    value={stmtStatus}
+                    onChange={(e) => setStmtStatus(e.target.value as PaymentStatus)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    {PAYMENT_STATUSES.map((st) => (
+                      <option key={st} value={st}>
+                        {st}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {stmtInstallmentPreview && (
+                <div
+                  className={`p-3 rounded-lg border text-xs space-y-1 ${
+                    stmtInstallmentPreview.isFullSettlement
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                      : 'bg-amber-50 border-amber-200 text-amber-900'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2 font-semibold">
+                    <span>
+                      {stmtInstallmentPreview.remainingBeforeEntry <= 0.009
+                        ? `${stmtBillingMonth} Already Settled`
+                        : stmtInstallmentPreview.isFullSettlement
+                          ? `Full Settlement for ${stmtBillingMonth}`
+                          : `Partial Payment (${formatRM(stmtInstallmentPreview.remainingAfterEntry)} remaining)`}
+                    </span>
+                    <span className="font-mono tabular-nums">
+                      Target: {formatRM(stmtInstallmentPreview.monthTargetCharge)}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Payment Method
+                  </label>
+                  <select
+                    value={stmtMethod}
+                    onChange={(e) => setStmtMethod(e.target.value as PaymentMethod)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    {PAYMENT_METHODS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Transaction Date
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={stmtPaymentDate}
+                    onChange={(e) => setStmtPaymentDate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Bank Reference No.
+                </label>
+                <input
+                  type="text"
+                  maxLength={64}
+                  value={stmtBankRefNo}
+                  onChange={(e) => setStmtBankRefNo(e.target.value)}
+                  placeholder="e.g. DUITNOW-20260915-01"
+                  className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Physical Receipt Status
+                  </label>
+                  <select
+                    value={stmtPhysStatus}
+                    onChange={(e) =>
+                      setStmtPhysStatus(e.target.value as PhysicalReceiptStatus)
+                    }
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    <option value="Issued">Issued</option>
+                    <option value="Pending Issuance">Pending Issuance</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Physical Receipt Book No.
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={64}
+                    value={stmtPhysNo}
+                    onChange={(e) => setStmtPhysNo(e.target.value)}
+                    placeholder="e.g. BK-DJ2-0042"
+                    className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Remarks / Notes
+                </label>
+                <input
+                  type="text"
+                  maxLength={240}
+                  value={stmtNotes}
+                  onChange={(e) => setStmtNotes(e.target.value)}
+                  placeholder="Optional backdated payment note"
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStmtPaymentModalOpen(false);
+                    setStmtEditingPayment(null);
+                  }}
+                  className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
+                >
+                  {submitting
+                    ? 'Saving...'
+                    : stmtEditingPayment
+                      ? 'Update Payment'
+                      : 'Save Payment Entry'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Payment Confirmation Sub-Modal inside Statement */}
+      {liveStatementStudent && stmtDeletingPayment && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 print:hidden">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
+            <h2 className="font-display text-lg font-semibold text-slate-900">
+              Delete Payment {getPaymentReceiptNo(stmtDeletingPayment)}?
+            </h2>
+            <p className="text-sm text-slate-600">
+              This will permanently remove the{' '}
+              <span className="font-mono font-semibold text-slate-900">
+                {formatRM(stmtDeletingPayment.amount)}
+              </span>{' '}
+              ({stmtDeletingPayment.paymentType} · {stmtDeletingPayment.billingMonth})
+              entry from {liveStatementStudent.fullName}&apos;s ledger.
+            </p>
+            {formError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {formError}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setStmtDeletingPayment(null)}
+                className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteStmtPayment}
+                disabled={submitting}
+                className="px-4 py-2 text-xs font-semibold text-white bg-red-700 hover:bg-red-800 disabled:opacity-60 rounded-lg cursor-pointer"
+              >
+                {submitting ? 'Deleting...' : 'Delete Payment'}
               </button>
             </div>
           </div>

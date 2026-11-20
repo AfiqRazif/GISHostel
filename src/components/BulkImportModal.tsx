@@ -438,7 +438,7 @@ const MODAL_META: Record<
     noun: 'residents',
   },
   payments: {
-    title: 'Bulk Import Historical Payments (.xlsx / .csv)',
+    title: 'Master Admin · Bulk Import Historical Payments (.xlsx / .csv)',
     subtitle:
       'Import past rent, deposit, or fee waiver records tied to existing Resident IDs with physical receipt statuses.',
     noun: 'payments',
@@ -476,11 +476,12 @@ export function BulkImportModal({
     total: 0,
   });
 
-  const isTenancyRestricted =
-    importType === 'tenancyHistory' && staffRole !== 'Master Admin';
+  const isMasterAdminRestricted =
+    (importType === 'tenancyHistory' || importType === 'payments') &&
+    staffRole !== 'Master Admin';
 
   const validatedRows = useMemo((): ParsedPreviewRow<unknown>[] => {
-    if (rawRows.length === 0) return [];
+    if (rawRows.length === 0 || isMasterAdminRestricted) return [];
 
     if (importType === 'rooms') {
       const existingRoomIds = new Set(rooms.map((r) => r.roomId));
@@ -843,7 +844,6 @@ export function BulkImportModal({
     }
 
     if (importType === 'tenancyHistory') {
-      if (isTenancyRestricted) return [];
       const studentById = new Map(students.map((s) => [s.studentId, s]));
       const roomById = new Map(rooms.map((r) => [r.roomId, r]));
       const openSegmentSeenInFile = new Set<string>();
@@ -1184,7 +1184,7 @@ export function BulkImportModal({
     rooms,
     students,
     tenancyImportMode,
-    isTenancyRestricted,
+    isMasterAdminRestricted,
   ]);
 
   if (!isOpen) return null;
@@ -1244,7 +1244,7 @@ export function BulkImportModal({
   };
 
   const handleCommitImport = async () => {
-    if (isTenancyRestricted || validRows.length === 0) return;
+    if (isMasterAdminRestricted || validRows.length === 0) return;
     setImporting(true);
     setParseError(null);
     setProgress({ done: 0, total: validRows.length });
@@ -1369,12 +1369,14 @@ export function BulkImportModal({
           </button>
         </div>
 
-        {isTenancyRestricted ? (
+        {isMasterAdminRestricted ? (
           <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 space-y-1">
             <p className="font-semibold">Master Admin Access Required</p>
             <p>
-              Bulk Tenancy History Upload is restricted strictly to Master Admin accounts.
-              Your current role ({staffRole}) cannot batch-modify historical tenancy segments.
+              {importType === 'payments'
+                ? 'Bulk Historical Payments Import is restricted strictly to Master Admin accounts. Staff and Admin users should use the standard Record Payment form (with AI Receipt Scanner).'
+                : 'Bulk Tenancy History Upload is restricted strictly to Master Admin accounts.'}{' '}
+              Your current role ({staffRole}) cannot access this batch import tool.
             </p>
           </div>
         ) : (

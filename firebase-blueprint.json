@@ -311,7 +311,8 @@
             "Online Transfer",
             "Cash",
             "PTPTN/Sponsor",
-            "Internal Adjustment"
+            "Internal Adjustment",
+            "Historical Migration"
           ],
           "maxLength": 48,
           "description": "Payment channel used"

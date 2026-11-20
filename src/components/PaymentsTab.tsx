@@ -38,6 +38,7 @@ import {
   PaymentStatus,
   PaymentType,
   PhysicalReceiptStatus,
+  StaffRole,
   Student,
 } from '../types/hostel';
 import {
@@ -97,6 +98,7 @@ interface PaymentsTabProps {
   payments: Payment[];
   students: Student[];
   staffEmail: string;
+  staffRole: StaffRole;
   loading: boolean;
   prefillRequest?: PaymentPrefillRequest | null;
 }
@@ -105,9 +107,11 @@ export function PaymentsTab({
   payments,
   students,
   staffEmail,
+  staffRole,
   loading,
   prefillRequest,
 }: PaymentsTabProps) {
+  const isMasterAdmin = staffRole === 'Master Admin';
   const [searchQuery, setSearchQuery] = useState('');
   const [locationFilter, setLocationFilter] = useState<'All' | HostelLocation>('All');
   const [statusFilter, setStatusFilter] = useState<'All' | PaymentStatus>('All');
@@ -710,14 +714,16 @@ export function PaymentsTab({
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5 shrink-0 self-start xl:self-auto">
-            <button
-              type="button"
-              onClick={() => setShowImportModal(true)}
-              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Import Excel / CSV</span>
-            </button>
+            {isMasterAdmin && (
+              <button
+                type="button"
+                onClick={() => setShowImportModal(true)}
+                className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Import Excel / CSV</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={handleOpenAddModal}
@@ -1807,6 +1813,7 @@ export function PaymentsTab({
       <BulkImportModal
         isOpen={showImportModal}
         importType="payments"
+        staffRole={staffRole}
         rooms={[]}
         students={students}
         payments={payments}

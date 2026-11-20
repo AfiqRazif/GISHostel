@@ -28,7 +28,8 @@ export type PaymentMethod =
   | 'Online Transfer'
   | 'Cash'
   | 'PTPTN/Sponsor'
-  | 'Internal Adjustment';
+  | 'Internal Adjustment'
+  | 'Historical Migration';
 export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Waived';
 export type PhysicalReceiptStatus = 'Pending Issuance' | 'Issued';
 export type StaffRole = 'Master Admin' | 'Admin' | 'Staff';
@@ -86,6 +87,14 @@ export const PAYMENT_METHODS: PaymentMethod[] = [
   'Cash',
   'PTPTN/Sponsor',
   'Internal Adjustment',
+  'Historical Migration',
+];
+export const BATCH_PAST_PAYMENT_METHODS: PaymentMethod[] = [
+  'Cash',
+  'Online Transfer',
+  'DuitNow QR',
+  'PTPTN/Sponsor',
+  'Historical Migration',
 ];
 export const PAYMENT_STATUSES: PaymentStatus[] = [
   'Paid',

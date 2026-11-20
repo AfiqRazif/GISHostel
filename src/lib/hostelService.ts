@@ -3200,3 +3200,159 @@ export async function bulkImportTenancyHistory(
     handleFirestoreError(error, OperationType.WRITE, 'students');
   }
 }
+
+export interface BatchPastPaymentEntry {
+  billingMonth: string;
+  amount: number;
+  roomId?: string;
+  hostelLocation?: ResidentHostelLocation;
+}
+
+export interface BatchPastPaymentConfig {
+  paymentMethod: PaymentMethod;
+  bankRefNo: string;
+  physicalReceiptStatus: PhysicalReceiptStatus;
+  physicalReceiptNo?: string;
+  notes: string;
+  paymentType?: PaymentType;
+}
+
+export interface BatchPastPaymentResult {
+  createdCount: number;
+  receiptNumbers: string[];
+  totalAmount: number;
+}
+
+export async function batchCreatePastPayments(
+  student: Student,
+  entries: BatchPastPaymentEntry[],
+  config: BatchPastPaymentConfig,
+  existingPayments: Payment[],
+  masterAdminEmail: string
+): Promise<BatchPastPaymentResult> {
+  const email = assertStaffEmail(masterAdminEmail);
+  if (entries.length === 0) {
+    throw new Error('Select at least one month to record.');
+  }
+
+  const maxSeqByMonth = new Map<string, number>();
+  for (const p of existingPayments) {
+    const r = p.receiptNo || p.paymentId;
+    const prefix = `GIS-${p.billingMonth.replace('-', '')}-`;
+    if (r.startsWith(prefix)) {
+      const seq = Number.parseInt(r.slice(prefix.length), 10);
+      if (!Number.isNaN(seq)) {
+        maxSeqByMonth.set(
+          p.billingMonth,
+          Math.max(maxSeqByMonth.get(p.billingMonth) ?? 0, seq)
+        );
+      }
+    }
+  }
+
+  const bankRefNo = config.bankRefNo.trim().slice(0, FIELD_LIMITS.bankRefNo.max);
+  const physStatus: PhysicalReceiptStatus =
+    config.physicalReceiptStatus === 'Issued' ? 'Issued' : 'Pending Issuance';
+  const physNo = (config.physicalReceiptNo || '').trim().slice(0, 64);
+  const notes = config.notes.trim().slice(0, FIELD_LIMITS.notes.max);
+  const paymentType: PaymentType = config.paymentType || 'Monthly Rent';
+  const currentMonth = getCurrentMonthISO();
+  const todayISO = getTodayISO();
+
+  let batch = writeBatch(db);
+  let opsInBatch = 0;
+  const receiptNumbers: string[] = [];
+  let totalAmount = 0;
+
+  try {
+    for (let idx = 0; idx < entries.length; idx++) {
+      const entry = entries[idx];
+      if (!MONTH_REGEX.test(entry.billingMonth)) {
+        throw new Error(`Invalid billing month "${entry.billingMonth}".`);
+      }
+      const cleanAmt = clampNumber(
+        entry.amount,
+        FIELD_LIMITS.amount.min,
+        FIELD_LIMITS.amount.max
+      );
+      if (cleanAmt <= 0) {
+        throw new Error(
+          `Payment amount for ${entry.billingMonth} must be greater than RM 0.00.`
+        );
+      }
+
+      const ym = entry.billingMonth.replace('-', '');
+      const nextSeq = (maxSeqByMonth.get(entry.billingMonth) ?? 0) + 1;
+      maxSeqByMonth.set(entry.billingMonth, nextSeq);
+      const receiptNo = `GIS-${ym}-${String(nextSeq).padStart(4, '0')}`;
+      receiptNumbers.push(receiptNo);
+
+      const stamp = Date.now().toString(36).toUpperCase();
+      const rand = Math.random().toString(36).substring(2, 5).toUpperCase();
+      const paymentId = `PAY-${ym}-${stamp}${idx}${rand}`.slice(
+        0,
+        FIELD_LIMITS.paymentId.max
+      );
+      const paymentDate =
+        entry.billingMonth === currentMonth ? todayISO : `${entry.billingMonth}-01`;
+
+      batch.set(doc(db, 'payments', paymentId), {
+        paymentId,
+        receiptNo,
+        studentId: student.studentId,
+        studentName: student.fullName.slice(0, FIELD_LIMITS.fullName.max),
+        roomId: (entry.roomId ?? student.assignedRoomId) || '',
+        hostelLocation:
+          entry.hostelLocation ?? student.hostelLocation ?? 'Unassigned',
+        billingMonth: entry.billingMonth,
+        paymentType,
+        amount: cleanAmt,
+        paymentMethod: config.paymentMethod,
+        bankRefNo,
+        referenceNo: bankRefNo,
+        paymentDate,
+        status: 'Paid' as PaymentStatus,
+        notes,
+        proofImageData: null,
+        physicalReceiptStatus: physStatus,
+        physicalReceiptNo: physNo,
+        receiptIssuedBy: physStatus === 'Issued' ? email : null,
+        receiptIssuedAt: physStatus === 'Issued' ? serverTimestamp() : null,
+        recordedBy: email,
+        recordedAt: serverTimestamp(),
+        updatedBy: email,
+        updatedAt: serverTimestamp(),
+      });
+
+      totalAmount = Math.round((totalAmount + cleanAmt) * 100) / 100;
+      opsInBatch += 1;
+
+      if (opsInBatch >= MAX_BATCH_OPERATIONS) {
+        await batch.commit();
+        batch = writeBatch(db);
+        opsInBatch = 0;
+      }
+    }
+
+    if (opsInBatch > 0) {
+      await batch.commit();
+    }
+
+    return {
+      createdCount: entries.length,
+      receiptNumbers,
+      totalAmount,
+    };
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('Invalid billing month') ||
+        error.message.includes('greater than RM 0.00') ||
+        error.message.includes('Select at least one'))
+    ) {
+      throw error;
+    }
+    handleFirestoreError(error, OperationType.WRITE, 'payments');
+  }
+}
+

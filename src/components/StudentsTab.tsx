@@ -3,6 +3,8 @@ import {
   ArrowLeftRight,
   BedDouble,
   Building2,
+  CalendarCheck2,
+  CheckCircle2,
   FileSpreadsheet,
   FileText,
   LogOut,
@@ -16,9 +18,11 @@ import {
   X,
 } from 'lucide-react';
 import {
+  BATCH_PAST_PAYMENT_METHODS,
   calculateFirstMonthDefaults,
   calculateMonthInstallmentStatus,
   calculateStudentBilling,
+  enumerateMonthsISO,
   formatRM,
   formatTimestamp,
   getCurrentMonthISO,
@@ -54,6 +58,7 @@ import {
 } from '../types/hostel';
 import {
   assignRoomToStudent,
+  batchCreatePastPayments,
   createPayment,
   deletePayment,
   registerStudent,
@@ -207,6 +212,25 @@ export function StudentsTab({
     useState<PhysicalReceiptStatus>('Issued');
   const [stmtPhysNo, setStmtPhysNo] = useState('');
   const [stmtNotes, setStmtNotes] = useState('');
+
+  // Statement: Master-Admin Batch Add Past Payments & Settle Balance state
+  const [batchModalOpen, setBatchModalOpen] = useState(false);
+  const [batchSelectedMonths, setBatchSelectedMonths] = useState<
+    Record<string, boolean>
+  >({});
+  const [batchAmounts, setBatchAmounts] = useState<Record<string, string>>({});
+  const [batchPaymentMethod, setBatchPaymentMethod] = useState<PaymentMethod>(
+    'Historical Migration'
+  );
+  const [batchBankRefNo, setBatchBankRefNo] = useState('HIST-MIGRATION');
+  const [batchPhysStatus, setBatchPhysStatus] =
+    useState<PhysicalReceiptStatus>('Issued');
+  const [batchPhysNo, setBatchPhysNo] = useState('');
+  const [batchNotes, setBatchNotes] = useState(
+    'Historical monthly payment migration'
+  );
+  const [settleBalanceConfirmOpen, setSettleBalanceConfirmOpen] =
+    useState(false);
 
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -1145,6 +1169,222 @@ export function StudentsTab({
     } catch (err) {
       setFormError(
         err instanceof Error ? err.message : 'Failed to delete payment.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const batchMonthRows = useMemo(() => {
+    if (!liveStatementStudent || !statementBilling) return [];
+    const segStarts = statementBilling.segments
+      .map((sb) => sb.segment.startDate.slice(0, 7))
+      .filter((ym) => /^\d{4}-\d{2}$/.test(ym));
+    const checkInYM = liveStatementStudent.checkInDate.slice(0, 7);
+    const startYM =
+      segStarts.length > 0 && segStarts[0] < checkInYM
+        ? segStarts[0]
+        : checkInYM;
+
+    const rawEnd =
+      liveStatementStudent.status === 'Checked-Out' &&
+      liveStatementStudent.checkOutDate
+        ? liveStatementStudent.checkOutDate
+        : getTodayISO();
+    const endYM = rawEnd.slice(0, 7);
+    const months = enumerateMonthsISO(startYM, endYM);
+
+    return months.map((ym) => {
+      const info = calculateMonthInstallmentStatus(
+        liveStatementStudent,
+        payments,
+        ym,
+        0
+      );
+      const ownerSeg =
+        statementBilling.segments.find((sb) => sb.billedMonths.includes(ym))
+          ?.segment ||
+        [...statementBilling.segments]
+          .reverse()
+          .find((sb) => sb.segment.startDate.slice(0, 7) <= ym)?.segment;
+
+      const expectedRate = info.monthTargetCharge;
+      const alreadyPaid = info.alreadyCreditedForMonth;
+      const remaining = info.remainingBeforeEntry;
+      const monthStatus: 'Paid' | 'Partial' | 'Unpaid' =
+        remaining <= 0.009 ? 'Paid' : alreadyPaid > 0 ? 'Partial' : 'Unpaid';
+
+      return {
+        billingMonth: ym,
+        expectedRate,
+        alreadyPaid,
+        remaining,
+        monthStatus,
+        roomId: ownerSeg?.roomId || liveStatementStudent.assignedRoomId || '',
+        hostelLocation:
+          ownerSeg?.hostelLocation ||
+          liveStatementStudent.hostelLocation ||
+          'Unassigned',
+      };
+    });
+  }, [liveStatementStudent, statementBilling, payments]);
+
+  const batchSelectedTotals = useMemo(() => {
+    let count = 0;
+    let total = 0;
+    for (const row of batchMonthRows) {
+      if (!batchSelectedMonths[row.billingMonth]) continue;
+      count += 1;
+      const amt = Math.max(0, Number(batchAmounts[row.billingMonth]) || 0);
+      total = Math.round((total + amt) * 100) / 100;
+    }
+    return { count, total };
+  }, [batchMonthRows, batchSelectedMonths, batchAmounts]);
+
+  const openBatchPastPaymentsModal = () => {
+    if (!isMasterAdmin || !liveStatementStudent) return;
+    setFormError(null);
+    const initialSelected: Record<string, boolean> = {};
+    const initialAmounts: Record<string, string> = {};
+    for (const row of batchMonthRows) {
+      const isUnpaidOrPartial = row.remaining > 0.009;
+      initialSelected[row.billingMonth] = isUnpaidOrPartial;
+      initialAmounts[row.billingMonth] = (
+        isUnpaidOrPartial ? row.remaining : row.expectedRate
+      ).toFixed(2);
+    }
+    setBatchSelectedMonths(initialSelected);
+    setBatchAmounts(initialAmounts);
+    setBatchPaymentMethod('Historical Migration');
+    setBatchBankRefNo('HIST-MIGRATION');
+    setBatchPhysStatus('Issued');
+    setBatchPhysNo('');
+    setBatchNotes('Historical monthly payment migration');
+    setBatchModalOpen(true);
+  };
+
+  const handleSelectAllUnpaidMonths = () => {
+    const nextSelected: Record<string, boolean> = {};
+    const nextAmounts = { ...batchAmounts };
+    for (const row of batchMonthRows) {
+      if (row.remaining > 0.009) {
+        nextSelected[row.billingMonth] = true;
+        nextAmounts[row.billingMonth] = row.remaining.toFixed(2);
+      } else {
+        nextSelected[row.billingMonth] = false;
+      }
+    }
+    setBatchSelectedMonths(nextSelected);
+    setBatchAmounts(nextAmounts);
+  };
+
+  const handleSaveBatchPastPayments = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isMasterAdmin || !liveStatementStudent) return;
+
+    const entries = batchMonthRows
+      .filter((row) => batchSelectedMonths[row.billingMonth])
+      .map((row) => ({
+        billingMonth: row.billingMonth,
+        amount: Number(batchAmounts[row.billingMonth]) || 0,
+        roomId: row.roomId,
+        hostelLocation: row.hostelLocation,
+      }));
+
+    if (entries.length === 0) {
+      setFormError('Please check at least one month to save.');
+      return;
+    }
+
+    const invalidAmt = entries.find((entry) => entry.amount <= 0);
+    if (invalidAmt) {
+      setFormError(
+        `Amount for ${invalidAmt.billingMonth} must be greater than RM 0.00.`
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      const res = await batchCreatePastPayments(
+        liveStatementStudent,
+        entries,
+        {
+          paymentMethod: batchPaymentMethod,
+          bankRefNo: batchBankRefNo,
+          physicalReceiptStatus: batchPhysStatus,
+          physicalReceiptNo: batchPhysNo,
+          notes: batchNotes,
+          paymentType: 'Monthly Rent',
+        },
+        payments,
+        staffEmail
+      );
+      setBatchModalOpen(false);
+      setFeedbackBanner(
+        `Batch saved ${res.createdCount} past payment${
+          res.createdCount === 1 ? '' : 's'
+        } (${formatRM(res.totalAmount)}) for ${liveStatementStudent.fullName}. Receipts: ${res.receiptNumbers[0]}${
+          res.receiptNumbers.length > 1
+            ? ` … ${res.receiptNumbers[res.receiptNumbers.length - 1]}`
+            : ''
+        }.`
+      );
+    } catch (err) {
+      setFormError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to save batch past payments.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleConfirmSettleHistoricalBalance = async () => {
+    if (
+      !isMasterAdmin ||
+      !liveStatementStudent ||
+      !statementBilling ||
+      liveStatementStudent.status !== 'Checked-Out' ||
+      statementBilling.outstandingBalance <= 0.009
+    ) {
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      const settleDate = liveStatementStudent.checkOutDate || getTodayISO();
+      const settleMonth = settleDate.slice(0, 7);
+      const exactBalance = statementBilling.outstandingBalance;
+      const res = await createPayment(
+        {
+          student: liveStatementStudent,
+          billingMonth: settleMonth,
+          paymentType: 'Monthly Rent',
+          amount: exactBalance,
+          paymentMethod: 'Historical Migration',
+          bankRefNo: 'HIST-MIGRATION',
+          paymentDate: settleDate,
+          status: 'Paid',
+          physicalReceiptStatus: 'Issued',
+          physicalReceiptNo: '',
+          notes: 'Historical ledger balance settled during system migration',
+        },
+        payments,
+        staffEmail
+      );
+      setSettleBalanceConfirmOpen(false);
+      setFeedbackBanner(
+        `Settled full historical balance (${formatRM(exactBalance)}) for ${liveStatementStudent.fullName} via receipt ${res.receiptNo}. Outstanding balance is now RM 0.00.`
+      );
+    } catch (err) {
+      setFormError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to settle full historical balance.'
       );
     } finally {
       setSubmitting(false);
@@ -3189,14 +3429,41 @@ export function StudentsTab({
                     {statementPayments.length === 1 ? 'entry' : 'entries'} recorded
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={openStmtRecordPaymentModal}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap print:hidden"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Record / Backdate Payment</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2 print:hidden">
+                  {isMasterAdmin &&
+                    liveStatementStudent.status === 'Checked-Out' &&
+                    statementBilling.outstandingBalance > 0.009 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormError(null);
+                          setSettleBalanceConfirmOpen(true);
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-lg cursor-pointer whitespace-nowrap"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Settle Full Historical Balance</span>
+                      </button>
+                    )}
+                  {isMasterAdmin && (
+                    <button
+                      type="button"
+                      onClick={openBatchPastPaymentsModal}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
+                    >
+                      <CalendarCheck2 className="w-3.5 h-3.5" />
+                      <span>Batch Add Past Payments</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={openStmtRecordPaymentModal}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Record / Backdate Payment</span>
+                  </button>
+                </div>
               </div>
 
               {statementPayments.length === 0 ? (
@@ -3975,6 +4242,373 @@ export function StudentsTab({
           </div>
         </div>
       )}
+
+      {/* Multi-Month Batch Past Payments Modal (Master Admin Only) */}
+      {isMasterAdmin && liveStatementStudent && batchModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 overflow-y-auto print:hidden">
+          <div className="bg-white border border-slate-200 rounded-xl max-w-3xl w-full p-6 space-y-5 my-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="font-display text-lg font-semibold text-slate-900">
+                  Batch Add Past Payments · {liveStatementStudent.fullName}
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5 font-mono">
+                  {liveStatementStudent.studentId} · Check-In: {liveStatementStudent.checkInDate}
+                  {liveStatementStudent.checkOutDate
+                    ? ` · Check-Out: ${liveStatementStudent.checkOutDate}`
+                    : ' · Active'}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={submitting}
+                onClick={() => setBatchModalOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                aria-label="Close batch past payments modal"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {formError && (
+              <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                {formError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveBatchPastPayments} className="space-y-4">
+              {/* Shared Payment Settings */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+                <p className="text-xs font-semibold text-slate-800">
+                  Shared Payment Settings (Applied to All Checked Months)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Payment Method
+                    </label>
+                    <select
+                      value={batchPaymentMethod}
+                      onChange={(e) =>
+                        setBatchPaymentMethod(e.target.value as PaymentMethod)
+                      }
+                      className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {BATCH_PAST_PAYMENT_METHODS.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Bank / Migration Ref No.
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={64}
+                      value={batchBankRefNo}
+                      onChange={(e) => setBatchBankRefNo(e.target.value)}
+                      placeholder="HIST-MIGRATION"
+                      className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Physical Receipt Status
+                    </label>
+                    <select
+                      value={batchPhysStatus}
+                      onChange={(e) =>
+                        setBatchPhysStatus(e.target.value as PhysicalReceiptStatus)
+                      }
+                      className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      <option value="Issued">Issued</option>
+                      <option value="Pending Issuance">Pending Issuance</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Physical Receipt Book No. (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={64}
+                      value={batchPhysNo}
+                      onChange={(e) => setBatchPhysNo(e.target.value)}
+                      placeholder="e.g. BK-HIST-2026"
+                      className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Notes / Remarks
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={240}
+                      value={batchNotes}
+                      onChange={(e) => setBatchNotes(e.target.value)}
+                      placeholder="Historical monthly payment migration"
+                      className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Monthly Checklist Header */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-slate-600">
+                  Showing <strong className="text-slate-900">{batchMonthRows.length}</strong>{' '}
+                  calendar {batchMonthRows.length === 1 ? 'month' : 'months'} (rates sourced from stay history).
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleSelectAllUnpaidMonths}
+                    className="px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
+                  >
+                    Select All Unpaid Months
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBatchSelectedMonths({})}
+                    className="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer whitespace-nowrap"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+
+              {/* Monthly Checklist Table */}
+              {batchMonthRows.length === 0 ? (
+                <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
+                  No calendar months fall between this resident&apos;s Check-In Date and end date.
+                </div>
+              ) : (
+                <div className="max-h-72 overflow-y-auto border border-slate-200 rounded-lg">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold z-10">
+                      <tr>
+                        <th className="py-2.5 px-3 w-10">Select</th>
+                        <th className="py-2.5 px-3">Month &amp; Room</th>
+                        <th className="py-2.5 px-3 text-right">Expected Rate</th>
+                        <th className="py-2.5 px-3 text-right">Credited</th>
+                        <th className="py-2.5 px-3">Status</th>
+                        <th className="py-2.5 px-3 text-right">Payment Amount (RM)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {batchMonthRows.map((row) => {
+                        const checked = !!batchSelectedMonths[row.billingMonth];
+                        return (
+                          <tr
+                            key={row.billingMonth}
+                            className={
+                              checked
+                                ? 'bg-blue-50/50'
+                                : row.monthStatus === 'Paid'
+                                  ? 'bg-emerald-50/30'
+                                  : 'bg-white hover:bg-slate-50'
+                            }
+                          >
+                            <td className="py-2 px-3">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                aria-label={`Select ${row.billingMonth}`}
+                                onChange={(e) => {
+                                  const nextChecked = e.target.checked;
+                                  setBatchSelectedMonths((prev) => ({
+                                    ...prev,
+                                    [row.billingMonth]: nextChecked,
+                                  }));
+                                  if (nextChecked && !batchAmounts[row.billingMonth]) {
+                                    setBatchAmounts((prev) => ({
+                                      ...prev,
+                                      [row.billingMonth]: (
+                                        row.remaining > 0.009
+                                          ? row.remaining
+                                          : row.expectedRate
+                                      ).toFixed(2),
+                                    }));
+                                  }
+                                }}
+                                className="w-4 h-4 rounded border-slate-300 text-blue-900 cursor-pointer"
+                              />
+                            </td>
+                            <td className="py-2 px-3 whitespace-nowrap">
+                              <p className="font-mono font-semibold text-slate-900">
+                                {row.billingMonth}
+                              </p>
+                              <p className="font-mono text-slate-500">
+                                {row.roomId || 'Unassigned'}
+                              </p>
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-800 whitespace-nowrap">
+                              {formatRM(row.expectedRate)}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono tabular-nums text-slate-600 whitespace-nowrap">
+                              {formatRM(row.alreadyPaid)}
+                            </td>
+                            <td className="py-2 px-3 whitespace-nowrap">
+                              <StatusBadge
+                                status={
+                                  row.monthStatus === 'Paid'
+                                    ? 'Paid'
+                                    : row.monthStatus === 'Partial'
+                                      ? 'Pending'
+                                      : 'Overdue'
+                                }
+                              />
+                              {row.monthStatus === 'Partial' && (
+                                <p className="text-[11px] font-mono text-amber-800 mt-0.5">
+                                  Rem {formatRM(row.remaining)}
+                                </p>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 text-right whitespace-nowrap">
+                              <input
+                                type="number"
+                                step="0.01"
+                                min={0}
+                                max={50000}
+                                disabled={!checked}
+                                value={batchAmounts[row.billingMonth] ?? ''}
+                                aria-label={`Payment amount for ${row.billingMonth}`}
+                                onChange={(e) =>
+                                  setBatchAmounts((prev) => ({
+                                    ...prev,
+                                    [row.billingMonth]: e.target.value,
+                                  }))
+                                }
+                                className="w-28 px-2.5 py-1 text-right text-xs font-mono tabular-nums bg-white border border-slate-200 rounded focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-400"
+                              />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                <p className="text-xs text-slate-600 tabular-nums">
+                  Selected:{' '}
+                  <strong className="text-slate-900">
+                    {batchSelectedTotals.count}{' '}
+                    {batchSelectedTotals.count === 1 ? 'month' : 'months'}
+                  </strong>{' '}
+                  · Total:{' '}
+                  <strong className="font-mono text-blue-900">
+                    {formatRM(batchSelectedTotals.total)}
+                  </strong>
+                </p>
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={() => setBatchModalOpen(false)}
+                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting || batchSelectedTotals.count === 0}
+                    className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg cursor-pointer whitespace-nowrap"
+                  >
+                    {submitting
+                      ? 'Saving Batch...'
+                      : `Save Selected Payments (${batchSelectedTotals.count})`}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Settle Full Historical Balance Confirmation Modal (Master Admin Only) */}
+      {isMasterAdmin &&
+        liveStatementStudent &&
+        statementBilling &&
+        settleBalanceConfirmOpen && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/55 print:hidden">
+            <div className="bg-white border border-slate-200 rounded-xl max-w-md w-full p-6 space-y-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-display text-lg font-semibold text-slate-900">
+                    Settle Full Historical Balance?
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {liveStatementStudent.fullName} ({liveStatementStudent.studentId})
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => setSettleBalanceConfirmOpen(false)}
+                  className="p-1 text-slate-400 hover:text-slate-700 cursor-pointer"
+                  aria-label="Close settle balance modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-3.5 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-1.5">
+                <p>
+                  This will record a single{' '}
+                  <strong>Monthly Rent</strong> ledger entry of{' '}
+                  <strong className="font-mono">
+                    {formatRM(statementBilling.outstandingBalance)}
+                  </strong>{' '}
+                  for this Checked-Out resident, bringing their outstanding balance to{' '}
+                  <strong className="font-mono">RM 0.00</strong>.
+                </p>
+                <p className="text-emerald-800 font-mono">
+                  Method: Historical Migration · Receipt: Issued · Ref: HIST-MIGRATION
+                </p>
+                <p className="text-emerald-800">
+                  Notes: Historical ledger balance settled during system migration
+                </p>
+              </div>
+
+              {formError && (
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                  {formError}
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => setSettleBalanceConfirmOpen(false)}
+                  className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => void handleConfirmSettleHistoricalBalance()}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap"
+                >
+                  {submitting
+                    ? 'Settling Balance...'
+                    : `Confirm Settlement (${formatRM(statementBilling.outstandingBalance)})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
     </div>
   );
 }

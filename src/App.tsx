@@ -338,6 +338,7 @@ function HostelPortal() {
               payments={payments}
               students={students}
               staffEmail={staffEmail}
+              staffRole={currentStaffUser.role}
               loading={dataLoading}
               prefillRequest={paymentPrefill}
             />

@@ -1,6 +1,14 @@
 import type { User } from 'firebase/auth';
-import { Database, LogOut, Menu } from 'lucide-react';
+import {
+  Database,
+  LogOut,
+  Menu,
+  PanelLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
+} from 'lucide-react';
 import type { StaffUser, TabKey } from '../types/hostel';
+import type { SidebarMode } from './Sidebar';
 
 interface TopBarProps {
   activeTab: TabKey;
@@ -11,6 +19,8 @@ interface TopBarProps {
   onLoadSampleData: () => void;
   onSignOut: () => void;
   onOpenMobileMenu: () => void;
+  sidebarMode: SidebarMode;
+  onCycleDesktopSidebar: () => void;
 }
 
 const TAB_TITLES: Record<TabKey, string> = {
@@ -30,6 +40,8 @@ export function TopBar({
   onLoadSampleData,
   onSignOut,
   onOpenMobileMenu,
+  sidebarMode,
+  onCycleDesktopSidebar,
 }: TopBarProps) {
   const displayName =
     staffUser?.fullName ||
@@ -39,6 +51,20 @@ export function TopBar({
   const email = staffUser?.email || user.email || '';
   const roleLabel = staffUser?.role || 'Staff';
 
+  const desktopToggleTitle =
+    sidebarMode === 'expanded'
+      ? 'Collapse sidebar to icon rail'
+      : sidebarMode === 'collapsed'
+        ? 'Hide sidebar'
+        : 'Show expanded sidebar';
+
+  const DesktopToggleIcon =
+    sidebarMode === 'expanded'
+      ? PanelLeftClose
+      : sidebarMode === 'collapsed'
+        ? PanelLeft
+        : PanelLeftOpen;
+
   return (
     <header className="h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between gap-4 shrink-0 print:hidden">
       <div className="flex items-center gap-3 min-w-0">
@@ -46,9 +72,18 @@ export function TopBar({
           type="button"
           onClick={onOpenMobileMenu}
           aria-label="Open navigation menu"
-          className="lg:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 shrink-0"
+          className="lg:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 shrink-0 cursor-pointer"
         >
           <Menu className="w-5 h-5" />
+        </button>
+        <button
+          type="button"
+          onClick={onCycleDesktopSidebar}
+          title={desktopToggleTitle}
+          aria-label={desktopToggleTitle}
+          className="hidden lg:inline-flex p-2 rounded-lg text-slate-600 hover:bg-slate-100 hover:text-slate-900 shrink-0 cursor-pointer transition-colors"
+        >
+          <DesktopToggleIcon className="w-5 h-5" />
         </button>
         <div className="flex items-center gap-2 text-sm min-w-0">
           <span className="hidden sm:inline text-slate-500 whitespace-nowrap">

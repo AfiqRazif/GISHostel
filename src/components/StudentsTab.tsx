@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeftRight,
   BedDouble,
@@ -407,6 +407,73 @@ export function StudentsTab({
       return sum + (b?.outstandingBalance ?? 0);
     }, 0);
   }, [filteredStudents, billingByStudentId]);
+
+  const topScrollRef = useRef<HTMLDivElement | null>(null);
+  const tableScrollRef = useRef<HTMLDivElement | null>(null);
+  const tableElRef = useRef<HTMLTableElement | null>(null);
+  const syncingScrollRef = useRef<'top' | 'table' | null>(null);
+  const [tableScrollWidth, setTableScrollWidth] = useState(0);
+  const [hasHorizontalOverflow, setHasHorizontalOverflow] = useState(false);
+
+  useEffect(() => {
+    const scrollEl = tableScrollRef.current;
+    const tableEl = tableElRef.current;
+    if (!scrollEl || !tableEl) {
+      setTableScrollWidth(0);
+      setHasHorizontalOverflow(false);
+      return;
+    }
+
+    const measure = () => {
+      const sw = scrollEl.scrollWidth;
+      const cw = scrollEl.clientWidth;
+      setTableScrollWidth(sw);
+      setHasHorizontalOverflow(sw > cw + 1);
+      if (topScrollRef.current) {
+        topScrollRef.current.scrollLeft = scrollEl.scrollLeft;
+      }
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(scrollEl);
+    observer.observe(tableEl);
+    return () => observer.disconnect();
+  }, [filteredStudents.length, loading]);
+
+  const handleTopScroll = () => {
+    if (syncingScrollRef.current === 'table') {
+      syncingScrollRef.current = null;
+      return;
+    }
+    const topEl = topScrollRef.current;
+    const tableEl = tableScrollRef.current;
+    if (!topEl || !tableEl) return;
+    syncingScrollRef.current = 'top';
+    tableEl.scrollLeft = topEl.scrollLeft;
+    requestAnimationFrame(() => {
+      if (syncingScrollRef.current === 'top') {
+        syncingScrollRef.current = null;
+      }
+    });
+  };
+
+  const handleTableScroll = () => {
+    if (syncingScrollRef.current === 'top') {
+      syncingScrollRef.current = null;
+      return;
+    }
+    const topEl = topScrollRef.current;
+    const tableEl = tableScrollRef.current;
+    if (!topEl || !tableEl) return;
+    syncingScrollRef.current = 'table';
+    topEl.scrollLeft = tableEl.scrollLeft;
+    requestAnimationFrame(() => {
+      if (syncingScrollRef.current === 'table') {
+        syncingScrollRef.current = null;
+      }
+    });
+  };
 
   const syncRegFirstMonth = (
     nextDate: string,
@@ -1549,7 +1616,7 @@ export function StudentsTab({
       </div>
 
       {/* Residents Table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
         {loading ? (
           <div className="p-8 text-center text-sm text-slate-500">
             Loading resident records...
@@ -1564,176 +1631,215 @@ export function StudentsTab({
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
-                  <th className="py-3 px-4">Resident ID</th>
-                  <th className="py-3 px-4">Full Name &amp; Type</th>
-                  <th className="py-3 px-4">Room / Hostel</th>
-                  <th className="py-3 px-4">Tenancy Period</th>
-                  <th className="py-3 px-4 text-right">Effective Rate</th>
-                  <th className="py-3 px-4 text-right">Ledger Balance</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Updated By</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-sm">
-                {filteredStudents.map((st) => {
-                  const billing = billingByStudentId.get(st.studentId)!;
-                  return (
-                    <tr key={st.studentId} className="hover:bg-slate-50/70">
-                      <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
-                        {st.studentId}
-                      </td>
-                      <td className="py-3 px-4">
-                        <p className="font-medium text-slate-900">{st.fullName}</p>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          {billing.residentType} · {billing.occupancyMode} · {st.program}
-                        </p>
-                        {(st.phone || st.emergencyContact) && (
-                          <p className="text-xs text-slate-400">
-                            {[
-                              st.phone,
-                              st.emergencyContact ? `ICE: ${st.emergencyContact}` : '',
-                            ]
-                              .filter(Boolean)
-                              .join(' · ')}
+          <>
+            {/* Synchronized Top Horizontal Scrollbar */}
+            <div
+              ref={topScrollRef}
+              onScroll={handleTopScroll}
+              aria-label="Horizontal table scroll bar"
+              className={`overflow-x-auto overflow-y-hidden border-b border-slate-200 bg-slate-50/80 ${
+                hasHorizontalOverflow ? 'block' : 'hidden'
+              }`}
+            >
+              <div className="h-3.5" style={{ width: `${tableScrollWidth}px` }} />
+            </div>
+
+            <div
+              ref={tableScrollRef}
+              onScroll={handleTableScroll}
+              className="max-h-[72vh] overflow-auto"
+            >
+              <table ref={tableElRef} className="w-full text-left border-collapse">
+                <thead className="sticky top-0 z-20 bg-slate-50 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">
+                  <tr className="bg-slate-50 text-xs font-semibold text-slate-600">
+                    <th className="py-3 px-4 sticky left-0 top-0 z-30 bg-slate-50 min-w-[220px] shadow-[4px_0_8px_-4px_rgba(15,23,42,0.08)] border-r border-slate-200">
+                      Student Name &amp; ID
+                    </th>
+                    <th className="py-3 px-4 min-w-[150px] whitespace-nowrap">
+                      Room / Hostel
+                    </th>
+                    <th className="py-3 px-4 min-w-[140px] whitespace-nowrap">
+                      Tenancy Period
+                    </th>
+                    <th className="py-3 px-4 text-right min-w-[155px] whitespace-nowrap">
+                      Effective Rate
+                    </th>
+                    <th className="py-3 px-4 text-right min-w-[155px] whitespace-nowrap">
+                      Ledger Balance
+                    </th>
+                    <th className="py-3 px-4 min-w-[110px] whitespace-nowrap">
+                      Status
+                    </th>
+                    <th className="py-3 px-4 min-w-[140px] whitespace-nowrap">
+                      Updated By
+                    </th>
+                    <th className="py-3 px-4 text-right sticky right-0 top-0 z-30 bg-slate-50 shadow-[-4px_0_8px_-4px_rgba(15,23,42,0.08)] border-l border-slate-200 whitespace-nowrap">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {filteredStudents.map((st) => {
+                    const billing = billingByStudentId.get(st.studentId)!;
+                    return (
+                      <tr key={st.studentId} className="group hover:bg-slate-50">
+                        <td className="py-3 px-4 sticky left-0 z-10 bg-white group-hover:bg-slate-50 min-w-[220px] shadow-[4px_0_8px_-4px_rgba(15,23,42,0.08)] border-r border-slate-100">
+                          <p className="font-medium text-slate-900">{st.fullName}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            <span className="font-mono font-semibold text-blue-900">
+                              {st.studentId}
+                            </span>{' '}
+                            · {billing.residentType} · {billing.occupancyMode} ·{' '}
+                            {st.program}
                           </p>
-                        )}
-                      </td>
-                      <td className="py-3 px-4">
-                        {(st.assignedRoomId || '').trim() ? (
-                          <p className="font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
-                            {st.assignedRoomId}
-                          </p>
-                        ) : st.status === 'Active' ? (
-                          <StatusBadge status="Room Unassigned" />
-                        ) : (
-                          <p className="font-mono text-xs text-slate-400 whitespace-nowrap">
-                            No Room Assigned
-                          </p>
-                        )}
-                        <p className="text-xs text-slate-500 whitespace-nowrap mt-0.5">
-                          {st.hostelLocation || 'Unassigned'}
-                        </p>
-                      </td>
-                      <td className="py-3 px-4 text-xs text-slate-600 tabular-nums whitespace-nowrap">
-                        <p>In: {st.checkInDate}</p>
-                        {st.checkOutDate && (
-                          <p className="text-slate-500">Out: {st.checkOutDate}</p>
-                        )}
-                        <p className="text-slate-400">
-                          {billing.monthsBilled} {billing.monthsBilled === 1 ? 'month' : 'months'} billed
-                        </p>
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap">
-                        <p className="font-semibold text-slate-900">
-                          {formatRM(billing.effectiveMonthlyFee)}/mo
-                        </p>
-                        {billing.monthlyRebate > 0 && (
-                          <p className="text-emerald-700">
-                            -{formatRM(billing.monthlyRebate)} ({billing.rebateReason})
-                          </p>
-                        )}
-                        {(billing.firstMonthCharge !== billing.effectiveMonthlyFee ||
-                          billing.firstMonthNote !== 'Standard Full Month') && (
-                          <p className="text-blue-900">
-                            1st mo: {formatRM(billing.firstMonthCharge)} ({billing.firstMonthNote})
-                          </p>
-                        )}
-                        <p className="text-slate-500">
-                          Dep: {formatRM(st.depositPaid)}
-                        </p>
-                      </td>
-                      <td className="py-3 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap">
-                        <p
-                          className={`font-semibold ${
-                            billing.outstandingBalance > 0
-                              ? 'text-red-700'
-                              : 'text-emerald-700'
-                          }`}
-                        >
-                          {billing.outstandingBalance > 0
-                            ? `Due ${formatRM(billing.outstandingBalance)}`
-                            : 'Settled'}
-                        </p>
-                        <p className="text-slate-500">
-                          Paid {formatRM(billing.totalRentCredited)} / {formatRM(billing.totalExpectedRent)}
-                        </p>
-                      </td>
-                      <td className="py-3 px-4">
-                        <StatusBadge status={st.status} />
-                      </td>
-                      <td className="py-3 px-4">
-                        <p className="text-xs text-slate-700 truncate max-w-[140px]">
-                          {st.updatedBy}
-                        </p>
-                        <p className="text-xs text-slate-400 tabular-nums whitespace-nowrap">
-                          {formatTimestamp(st.updatedAt)}
-                        </p>
-                      </td>
-                      <td className="py-3 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1.5">
-                          {!(st.assignedRoomId || '').trim() && (
-                            <button
-                              type="button"
-                              onClick={() => openAssignRoomModal(st)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-md cursor-pointer"
-                              title="Assign a Vacant room directly to this resident"
-                            >
-                              <BedDouble className="w-3 h-3" />
-                              <span>Assign Room</span>
-                            </button>
+                          {(st.phone || st.emergencyContact) && (
+                            <p className="text-xs text-slate-400">
+                              {[
+                                st.phone,
+                                st.emergencyContact
+                                  ? `ICE: ${st.emergencyContact}`
+                                  : '',
+                              ]
+                                .filter(Boolean)
+                                .join(' · ')}
+                            </p>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => setStatementStudent(st)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
-                            title="View & edit stay history, statement, and past payments"
+                        </td>
+                        <td className="py-3 px-4">
+                          {(st.assignedRoomId || '').trim() ? (
+                            <p className="font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
+                              {st.assignedRoomId}
+                            </p>
+                          ) : st.status === 'Active' ? (
+                            <StatusBadge status="Room Unassigned" />
+                          ) : (
+                            <p className="font-mono text-xs text-slate-400 whitespace-nowrap">
+                              No Room Assigned
+                            </p>
+                          )}
+                          <p className="text-xs text-slate-500 whitespace-nowrap mt-0.5">
+                            {st.hostelLocation || 'Unassigned'}
+                          </p>
+                        </td>
+                        <td className="py-3 px-4 text-xs text-slate-600 tabular-nums whitespace-nowrap">
+                          <p>In: {st.checkInDate}</p>
+                          {st.checkOutDate && (
+                            <p className="text-slate-500">Out: {st.checkOutDate}</p>
+                          )}
+                          <p className="text-slate-400">
+                            {billing.monthsBilled}{' '}
+                            {billing.monthsBilled === 1 ? 'month' : 'months'} billed
+                          </p>
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap">
+                          <p className="font-semibold text-slate-900">
+                            {formatRM(billing.effectiveMonthlyFee)}/mo
+                          </p>
+                          {billing.monthlyRebate > 0 && (
+                            <p className="text-emerald-700">
+                              -{formatRM(billing.monthlyRebate)} ({billing.rebateReason})
+                            </p>
+                          )}
+                          {(billing.firstMonthCharge !== billing.effectiveMonthlyFee ||
+                            billing.firstMonthNote !== 'Standard Full Month') && (
+                            <p className="text-blue-900">
+                              1st mo: {formatRM(billing.firstMonthCharge)} (
+                              {billing.firstMonthNote})
+                            </p>
+                          )}
+                          <p className="text-slate-500">
+                            Dep: {formatRM(st.depositPaid)}
+                          </p>
+                        </td>
+                        <td className="py-3 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap">
+                          <p
+                            className={`font-semibold ${
+                              billing.outstandingBalance > 0
+                                ? 'text-red-700'
+                                : 'text-emerald-700'
+                            }`}
                           >
-                            <FileText className="w-3 h-3" />
-                            <span>View Statement</span>
-                          </button>
-                          {st.status === 'Active' &&
-                            Boolean((st.assignedRoomId || '').trim()) && (
+                            {billing.outstandingBalance > 0
+                              ? `Due ${formatRM(billing.outstandingBalance)}`
+                              : 'Settled'}
+                          </p>
+                          <p className="text-slate-500">
+                            Paid {formatRM(billing.totalRentCredited)} /{' '}
+                            {formatRM(billing.totalExpectedRent)}
+                          </p>
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <StatusBadge status={st.status} />
+                        </td>
+                        <td className="py-3 px-4">
+                          <p className="text-xs text-slate-700 truncate max-w-[140px]">
+                            {st.updatedBy}
+                          </p>
+                          <p className="text-xs text-slate-400 tabular-nums whitespace-nowrap">
+                            {formatTimestamp(st.updatedAt)}
+                          </p>
+                        </td>
+                        <td className="py-3 px-4 text-right whitespace-nowrap sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-4px_0_8px_-4px_rgba(15,23,42,0.08)] border-l border-slate-100">
+                          <div className="inline-flex items-center gap-1.5">
+                            {!(st.assignedRoomId || '').trim() && (
                               <button
                                 type="button"
-                                onClick={() => openTransferModal(st)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-md cursor-pointer"
-                                title="Transfer resident to another bed/room"
+                                onClick={() => openAssignRoomModal(st)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-md cursor-pointer"
+                                title="Assign a Vacant room directly to this resident"
                               >
-                                <ArrowLeftRight className="w-3 h-3" />
-                                <span>Transfer Room</span>
+                                <BedDouble className="w-3 h-3" />
+                                <span>Assign Room</span>
                               </button>
                             )}
-                          <button
-                            type="button"
-                            onClick={() => openEditModal(st, false)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            <span>Edit</span>
-                          </button>
-                          {st.status !== 'Checked-Out' && (
                             <button
                               type="button"
-                              onClick={() => openEditModal(st, true)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-md cursor-pointer"
+                              onClick={() => setStatementStudent(st)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
+                              title="View & edit stay history, statement, and past payments"
                             >
-                              <LogOut className="w-3 h-3" />
-                              <span>Check Out</span>
+                              <FileText className="w-3 h-3" />
+                              <span>View Statement</span>
                             </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                            {st.status === 'Active' &&
+                              Boolean((st.assignedRoomId || '').trim()) && (
+                                <button
+                                  type="button"
+                                  onClick={() => openTransferModal(st)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-md cursor-pointer"
+                                  title="Transfer resident to another bed/room"
+                                >
+                                  <ArrowLeftRight className="w-3 h-3" />
+                                  <span>Transfer Room</span>
+                                </button>
+                              )}
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(st, false)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              <span>Edit</span>
+                            </button>
+                            {st.status !== 'Checked-Out' && (
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(st, true)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-md cursor-pointer"
+                              >
+                                <LogOut className="w-3 h-3" />
+                                <span>Check Out</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 

@@ -591,141 +591,147 @@ export function RoomInventoryTab({
       </div>
 
       {/* Inventory Table */}
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        {loading ? (
-          <div className="p-8 text-center text-sm text-slate-500">
-            Loading hostel room inventory...
-          </div>
-        ) : filteredRooms.length === 0 ? (
-          <div className="p-10 text-center space-y-3">
-            <p className="text-sm font-medium text-slate-900">
-              No room or bed slots match the current filter.
-            </p>
-            <p className="text-xs text-slate-500">
-              Adjust your filters or add beds using &ldquo;Add Room/Bed&rdquo; or &ldquo;Bulk Add Beds&rdquo;.
-            </p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
-                  <th className="py-3 px-4">Room ID</th>
-                  <th className="py-3 px-4">Location</th>
-                  <th className="py-3 px-4">Block / Unit / Bed</th>
-                  <th className="py-3 px-4 text-right">Monthly Rate</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Assigned Resident</th>
-                  <th className="py-3 px-4">Last Updated</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 text-sm">
-                {filteredRooms.map((room) => (
-                  <tr key={room.roomId} className="hover:bg-slate-50/70">
-                    <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
-                      {room.roomId}
-                    </td>
-                    <td className="py-3 px-4 text-slate-700 whitespace-nowrap">
-                      {room.location}
-                    </td>
-                    <td className="py-3 px-4 text-xs text-slate-600 tabular-nums whitespace-nowrap">
-                      Blk {room.block} · Unit {room.unitNo} · {room.bedSlot}
-                    </td>
-                    <td className="py-3 px-4 text-right font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
-                      {formatRM(room.monthlyRate)}
-                    </td>
-                    <td className="py-3 px-4">
-                      <StatusBadge status={room.status} />
-                    </td>
-                    <td className="py-3 px-4">
-                      {room.currentStudentName ? (
-                        <div>
-                          <p className="text-xs font-medium text-slate-900">
-                            {room.currentStudentName}
+      {loading ? (
+        <div className="bg-white border border-slate-200 rounded-lg p-8 text-center text-sm text-slate-500">
+          Loading hostel room inventory...
+        </div>
+      ) : filteredRooms.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-lg p-10 text-center space-y-3">
+          <p className="text-sm font-medium text-slate-900">
+            No room or bed slots match the current filter.
+          </p>
+          <p className="text-xs text-slate-500">
+            Adjust your filters or add beds using &ldquo;Add Room/Bed&rdquo; or &ldquo;Bulk Add Beds&rdquo;.
+          </p>
+        </div>
+      ) : (
+        <div className="max-h-[72vh] overflow-auto border border-slate-200 rounded-lg bg-white">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 z-20 bg-slate-50 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">
+              <tr className="bg-slate-50 text-xs font-semibold text-slate-600">
+                <th className="py-3 px-4 sticky left-0 top-0 z-30 bg-slate-50 whitespace-nowrap shadow-[4px_0_8px_-4px_rgba(15,23,42,0.08)] border-r border-slate-200">
+                  Room ID
+                </th>
+                <th className="py-3 px-4 whitespace-nowrap">Location</th>
+                <th className="py-3 px-4 whitespace-nowrap">Block / Unit / Bed</th>
+                <th className="py-3 px-4 text-right whitespace-nowrap">Monthly Rate</th>
+                <th className="py-3 px-4 whitespace-nowrap">Status</th>
+                <th className="py-3 px-4 min-w-[170px] whitespace-nowrap">
+                  Assigned Resident
+                </th>
+                <th className="py-3 px-4 min-w-[150px] whitespace-nowrap">
+                  Last Updated
+                </th>
+                <th className="py-3 px-4 text-right sticky right-0 top-0 z-30 bg-slate-50 whitespace-nowrap shadow-[-4px_0_8px_-4px_rgba(15,23,42,0.08)] border-l border-slate-200">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-sm">
+              {filteredRooms.map((room) => (
+                <tr key={room.roomId} className="group hover:bg-slate-50">
+                  <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 whitespace-nowrap sticky left-0 z-10 bg-white group-hover:bg-slate-50 shadow-[4px_0_8px_-4px_rgba(15,23,42,0.08)] border-r border-slate-100">
+                    {room.roomId}
+                  </td>
+                  <td className="py-3 px-4 text-slate-700 whitespace-nowrap">
+                    {room.location}
+                  </td>
+                  <td className="py-3 px-4 text-xs text-slate-600 tabular-nums whitespace-nowrap">
+                    Blk {room.block} · Unit {room.unitNo} · {room.bedSlot}
+                  </td>
+                  <td className="py-3 px-4 text-right font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
+                    {formatRM(room.monthlyRate)}
+                  </td>
+                  <td className="py-3 px-4 whitespace-nowrap">
+                    <StatusBadge status={room.status} />
+                  </td>
+                  <td className="py-3 px-4">
+                    {room.currentStudentName ? (
+                      <div>
+                        <p className="text-xs font-medium text-slate-900 whitespace-nowrap">
+                          {room.currentStudentName}
+                        </p>
+                        <p className="text-xs font-mono text-slate-500 whitespace-nowrap">
+                          {room.currentStudentId}
+                        </p>
+                      </div>
+                    ) : room.status === 'Reserved / Blocked' || room.statusNote ? (
+                      <div>
+                        <p className="text-xs font-medium text-indigo-900 whitespace-nowrap">
+                          {room.statusNote || 'Exclusive Unit Blocked'}
+                        </p>
+                        {room.exclusiveResidentId && (
+                          <p className="text-xs font-mono text-slate-500 whitespace-nowrap">
+                            Holder: {room.exclusiveResidentId}
                           </p>
-                          <p className="text-xs font-mono text-slate-500">
-                            {room.currentStudentId}
-                          </p>
-                        </div>
-                      ) : room.status === 'Reserved / Blocked' || room.statusNote ? (
-                        <div>
-                          <p className="text-xs font-medium text-indigo-900">
-                            {room.statusNote || 'Exclusive Unit Blocked'}
-                          </p>
-                          {room.exclusiveResidentId && (
-                            <p className="text-xs font-mono text-slate-500">
-                              Holder: {room.exclusiveResidentId}
-                            </p>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-slate-400">Unassigned</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-xs text-slate-400">Unassigned</span>
+                    )}
+                  </td>
+                  <td className="py-3 px-4">
+                    <p className="text-xs text-slate-700 truncate max-w-[160px]">
+                      {room.updatedBy}
+                    </p>
+                    <p className="text-xs text-slate-400 tabular-nums whitespace-nowrap">
+                      {formatTimestamp(room.updatedAt)}
+                    </p>
+                  </td>
+                  <td className="py-3 px-4 text-right whitespace-nowrap sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-4px_0_8px_-4px_rgba(15,23,42,0.08)] border-l border-slate-100">
+                    <div className="inline-flex items-center gap-1.5">
+                      {room.status === 'Vacant' && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenAssignModal(room)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-md cursor-pointer"
+                          title="Assign an unassigned resident or register a new resident into this bed"
+                        >
+                          <UserPlus className="w-3 h-3" />
+                          <span>Assign Resident</span>
+                        </button>
                       )}
-                    </td>
-                    <td className="py-3 px-4">
-                      <p className="text-xs text-slate-700 truncate max-w-[160px]">
-                        {room.updatedBy}
-                      </p>
-                      <p className="text-xs text-slate-400 tabular-nums whitespace-nowrap">
-                        {formatTimestamp(room.updatedAt)}
-                      </p>
-                    </td>
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
-                      <div className="inline-flex items-center gap-1.5">
-                        {room.status === 'Vacant' && (
+                      <button
+                        type="button"
+                        onClick={() => setHistoryRoom(room)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
+                        title="View room stay & transfer history"
+                      >
+                        <History className="w-3 h-3" />
+                        <span>History</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditModal(room)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
+                        title="Edit room rate or status"
+                      >
+                        <Pencil className="w-3 h-3" />
+                        <span>Edit</span>
+                      </button>
+                      {room.status !== 'Occupied' &&
+                        room.status !== 'Reserved / Blocked' && (
                           <button
                             type="button"
-                            onClick={() => handleOpenAssignModal(room)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-md cursor-pointer"
-                            title="Assign an unassigned resident or register a new resident into this bed"
+                            onClick={() => {
+                              setFormError(null);
+                              setDeletingRoom(room);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-md cursor-pointer"
+                            title="Delete unoccupied bed"
+                            aria-label={`Delete ${room.roomId}`}
                           >
-                            <UserPlus className="w-3 h-3" />
-                            <span>Assign Resident</span>
+                            <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => setHistoryRoom(room)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
-                          title="View room stay & transfer history"
-                        >
-                          <History className="w-3 h-3" />
-                          <span>History</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenEditModal(room)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
-                          title="Edit room rate or status"
-                        >
-                          <Pencil className="w-3 h-3" />
-                          <span>Edit</span>
-                        </button>
-                        {room.status !== 'Occupied' &&
-                          room.status !== 'Reserved / Blocked' && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setFormError(null);
-                                setDeletingRoom(room);
-                              }}
-                              className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-md cursor-pointer"
-                              title="Delete unoccupied bed"
-                              aria-label={`Delete ${room.roomId}`}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* Add Single Room/Bed Modal */}
       {showAddModal && (

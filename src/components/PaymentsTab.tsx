@@ -736,188 +736,206 @@ export function PaymentsTab({
         </div>
 
         {/* Ledger Table */}
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          {loading ? (
-            <div className="p-8 text-center text-sm text-slate-500">
-              Loading hostel payment ledger...
-            </div>
-          ) : filteredPayments.length === 0 ? (
-            <div className="p-10 text-center space-y-2">
-              <p className="text-sm font-medium text-slate-900">
-                No payment records match the current filter.
-              </p>
-              <p className="text-xs text-slate-500">
-                Use &ldquo;Record Payment&rdquo; to log rent, deposit, or fee waiver entries.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-xs font-semibold text-slate-600">
-                    <th className="py-3 px-4">Receipt No.</th>
-                    <th className="py-3 px-4">Resident</th>
-                    <th className="py-3 px-4">Room / Hostel</th>
-                    <th className="py-3 px-4">Month &amp; Type</th>
-                    <th className="py-3 px-4">Method &amp; Bank Ref</th>
-                    <th className="py-3 px-4 text-right">Amount (RM)</th>
-                    <th className="py-3 px-4">Ledger &amp; Physical Receipt</th>
-                    <th className="py-3 px-4">Recorded By</th>
-                    <th className="py-3 px-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-sm">
-                  {filteredPayments.map((p) => {
-                    const receiptNo = getPaymentReceiptNo(p);
-                    const bankRef = getPaymentBankRef(p);
-                    const recordedBy = getPaymentRecordedBy(p);
-                    const isWaiver = p.paymentType === 'Rebate / Fee Waiver';
-                    const physStatus = getPhysicalReceiptStatus(p);
-                    return (
-                      <tr key={p.paymentId} className="hover:bg-slate-50/70">
-                        <td className="py-3 px-4 font-mono text-xs font-semibold text-blue-900 whitespace-nowrap">
-                          {receiptNo}
-                        </td>
-                        <td className="py-3 px-4">
-                          <p className="font-medium text-slate-900">{p.studentName}</p>
-                          <p className="text-xs font-mono text-slate-500">
-                            {p.studentId}
-                          </p>
-                        </td>
-                        <td className="py-3 px-4">
-                          <p className="font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
-                            {p.roomId || 'Room Unassigned'}
-                          </p>
-                          <p className="text-xs text-slate-500 whitespace-nowrap">
-                            {p.hostelLocation || 'Unassigned'}
-                          </p>
-                        </td>
-                        <td className="py-3 px-4">
-                          <p className="font-mono text-xs font-semibold text-slate-900 tabular-nums">
-                            {p.billingMonth}
-                          </p>
-                          <p
-                            className={`text-xs whitespace-nowrap ${
-                              isWaiver ? 'text-indigo-800 font-medium' : 'text-slate-500'
-                            }`}
-                          >
-                            {p.paymentType}
-                          </p>
-                        </td>
-                        <td className="py-3 px-4">
-                          <p className="text-xs text-slate-800 whitespace-nowrap">
-                            {p.paymentMethod}
-                          </p>
-                          <p className="text-xs font-mono text-slate-500">
-                            {bankRef || 'No bank ref'} · {p.paymentDate}
-                          </p>
-                        </td>
-                        <td className="py-3 px-4 text-right font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
-                          {formatRM(p.amount)}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex flex-col items-start gap-1">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <StatusBadge status={p.status} />
-                              <StatusBadge
-                                status={
-                                  physStatus === 'Issued'
-                                    ? 'Receipt Issued'
-                                    : 'Receipt Pending'
-                                }
-                              />
-                            </div>
-                            {p.physicalReceiptNo && (
-                              <span className="text-xs font-mono text-slate-500">
-                                Book: {p.physicalReceiptNo}
-                              </span>
-                            )}
+        {loading ? (
+          <div className="bg-white border border-slate-200 rounded-lg p-8 text-center text-sm text-slate-500">
+            Loading hostel payment ledger...
+          </div>
+        ) : filteredPayments.length === 0 ? (
+          <div className="bg-white border border-slate-200 rounded-lg p-10 text-center space-y-2">
+            <p className="text-sm font-medium text-slate-900">
+              No payment records match the current filter.
+            </p>
+            <p className="text-xs text-slate-500">
+              Use &ldquo;Record Payment&rdquo; to log rent, deposit, or fee waiver entries.
+            </p>
+          </div>
+        ) : (
+          <div className="max-h-[72vh] overflow-auto border border-slate-200 rounded-lg bg-white">
+            <table className="w-full text-left border-collapse">
+              <thead className="sticky top-0 z-20 bg-slate-50 shadow-[inset_0_-1px_0_0_rgb(226,232,240)]">
+                <tr className="bg-slate-50 text-xs font-semibold text-slate-600">
+                  <th className="py-3 px-4 sticky left-0 top-0 z-30 bg-slate-50 whitespace-nowrap shadow-[4px_0_8px_-4px_rgba(15,23,42,0.08)] border-r border-slate-200">
+                    Receipt No.
+                  </th>
+                  <th className="py-3 px-4 min-w-[170px] whitespace-nowrap">
+                    Resident
+                  </th>
+                  <th className="py-3 px-4 min-w-[140px] whitespace-nowrap">
+                    Room / Hostel
+                  </th>
+                  <th className="py-3 px-4 min-w-[140px] whitespace-nowrap">
+                    Month &amp; Type
+                  </th>
+                  <th className="py-3 px-4 min-w-[170px] whitespace-nowrap">
+                    Method &amp; Bank Ref
+                  </th>
+                  <th className="py-3 px-4 text-right whitespace-nowrap">
+                    Amount (RM)
+                  </th>
+                  <th className="py-3 px-4 min-w-[190px] whitespace-nowrap">
+                    Ledger &amp; Physical Receipt
+                  </th>
+                  <th className="py-3 px-4 min-w-[140px] whitespace-nowrap">
+                    Recorded By
+                  </th>
+                  <th className="py-3 px-4 text-right sticky right-0 top-0 z-30 bg-slate-50 whitespace-nowrap shadow-[-4px_0_8px_-4px_rgba(15,23,42,0.08)] border-l border-slate-200">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 text-sm">
+                {filteredPayments.map((p) => {
+                  const receiptNo = getPaymentReceiptNo(p);
+                  const bankRef = getPaymentBankRef(p);
+                  const recordedBy = getPaymentRecordedBy(p);
+                  const isWaiver = p.paymentType === 'Rebate / Fee Waiver';
+                  const physStatus = getPhysicalReceiptStatus(p);
+                  return (
+                    <tr key={p.paymentId} className="group hover:bg-slate-50">
+                      <td className="py-3 px-4 font-mono text-xs font-semibold text-blue-900 whitespace-nowrap sticky left-0 z-10 bg-white group-hover:bg-slate-50 shadow-[4px_0_8px_-4px_rgba(15,23,42,0.08)] border-r border-slate-100">
+                        {receiptNo}
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="font-medium text-slate-900 whitespace-nowrap">
+                          {p.studentName}
+                        </p>
+                        <p className="text-xs font-mono text-slate-500 whitespace-nowrap">
+                          {p.studentId}
+                        </p>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="font-mono text-xs font-semibold text-slate-900 whitespace-nowrap">
+                          {p.roomId || 'Room Unassigned'}
+                        </p>
+                        <p className="text-xs text-slate-500 whitespace-nowrap">
+                          {p.hostelLocation || 'Unassigned'}
+                        </p>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
+                          {p.billingMonth}
+                        </p>
+                        <p
+                          className={`text-xs whitespace-nowrap ${
+                            isWaiver ? 'text-indigo-800 font-medium' : 'text-slate-500'
+                          }`}
+                        >
+                          {p.paymentType}
+                        </p>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="text-xs text-slate-800 whitespace-nowrap">
+                          {p.paymentMethod}
+                        </p>
+                        <p className="text-xs font-mono text-slate-500 whitespace-nowrap">
+                          {bankRef || 'No bank ref'} · {p.paymentDate}
+                        </p>
+                      </td>
+                      <td className="py-3 px-4 text-right font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
+                        {formatRM(p.amount)}
+                      </td>
+                      <td className="py-3 px-4">
+                        <div className="flex flex-col items-start gap-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <StatusBadge status={p.status} />
+                            <StatusBadge
+                              status={
+                                physStatus === 'Issued'
+                                  ? 'Receipt Issued'
+                                  : 'Receipt Pending'
+                              }
+                            />
                           </div>
-                        </td>
-                        <td className="py-3 px-4">
-                          <p className="text-xs text-slate-700 truncate max-w-[140px]">
-                            {recordedBy}
-                          </p>
-                          <p className="text-xs text-slate-400 tabular-nums whitespace-nowrap">
-                            {formatTimestamp(p.recordedAt || p.updatedAt)}
-                          </p>
-                        </td>
-                        <td className="py-3 px-4 text-right whitespace-nowrap">
-                          <div className="inline-flex items-center gap-1.5">
-                            {p.proofImageData && (
-                              <button
-                                type="button"
-                                onClick={() => setViewingProofPayment(p)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-50 border border-slate-200 hover:bg-slate-100 rounded-md cursor-pointer"
-                                title="View uploaded payment proof image"
-                              >
-                                <ImageIcon className="w-3 h-3" />
-                                <span>View Proof</span>
-                              </button>
-                            )}
-                            {physStatus === 'Pending Issuance' && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setFormError(null);
-                                  setIssuingReceiptPayment(p);
-                                  setPhysicalReceiptNoInput(p.physicalReceiptNo || '');
-                                }}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-md cursor-pointer"
-                              >
-                                <FileCheck2 className="w-3 h-3" />
-                                <span>Mark Receipt Issued</span>
-                              </button>
-                            )}
-                            {(p.status === 'Pending' || p.status === 'Overdue') && (
-                              <button
-                                type="button"
-                                onClick={() => handleQuickMarkPaid(p)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-md cursor-pointer"
-                              >
-                                <Check className="w-3 h-3" />
-                                <span>Mark Paid</span>
-                              </button>
-                            )}
+                          {p.physicalReceiptNo && (
+                            <span className="text-xs font-mono text-slate-500 whitespace-nowrap">
+                              Book: {p.physicalReceiptNo}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4">
+                        <p className="text-xs text-slate-700 truncate max-w-[140px]">
+                          {recordedBy}
+                        </p>
+                        <p className="text-xs text-slate-400 tabular-nums whitespace-nowrap">
+                          {formatTimestamp(p.recordedAt || p.updatedAt)}
+                        </p>
+                      </td>
+                      <td className="py-3 px-4 text-right whitespace-nowrap sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-4px_0_8px_-4px_rgba(15,23,42,0.08)] border-l border-slate-100">
+                        <div className="inline-flex items-center gap-1.5">
+                          {p.proofImageData && (
                             <button
                               type="button"
-                              onClick={() => setPrintingPayment(p)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-md cursor-pointer"
-                              title="Open printable Official Receipt"
+                              onClick={() => setViewingProofPayment(p)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-50 border border-slate-200 hover:bg-slate-100 rounded-md cursor-pointer"
+                              title="View uploaded payment proof image"
                             >
-                              <Printer className="w-3 h-3" />
-                              <span>Print Receipt</span>
+                              <ImageIcon className="w-3 h-3" />
+                              <span>View Proof</span>
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenEdit(p)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
-                            >
-                              <Pencil className="w-3 h-3" />
-                              <span>Edit</span>
-                            </button>
+                          )}
+                          {physStatus === 'Pending Issuance' && (
                             <button
                               type="button"
                               onClick={() => {
                                 setFormError(null);
-                                setDeletingPayment(p);
+                                setIssuingReceiptPayment(p);
+                                setPhysicalReceiptNoInput(p.physicalReceiptNo || '');
                               }}
-                              className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-md cursor-pointer"
-                              title="Delete payment entry"
-                              aria-label={`Delete ${receiptNo}`}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 hover:bg-amber-100 rounded-md cursor-pointer"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <FileCheck2 className="w-3 h-3" />
+                              <span>Mark Receipt Issued</span>
                             </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+                          )}
+                          {(p.status === 'Pending' || p.status === 'Overdue') && (
+                            <button
+                              type="button"
+                              onClick={() => handleQuickMarkPaid(p)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-md cursor-pointer"
+                            >
+                              <Check className="w-3 h-3" />
+                              <span>Mark Paid</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setPrintingPayment(p)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-md cursor-pointer"
+                            title="Open printable Official Receipt"
+                          >
+                            <Printer className="w-3 h-3" />
+                            <span>Print Receipt</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEdit(p)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
+                          >
+                            <Pencil className="w-3 h-3" />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormError(null);
+                              setDeletingPayment(p);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-md cursor-pointer"
+                            title="Delete payment entry"
+                            aria-label={`Delete ${receiptNo}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Record Payment Modal */}

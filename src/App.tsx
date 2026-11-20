@@ -17,13 +17,27 @@ import {
 import type { Payment, Room, StaffUser, Student, TabKey } from './types/hostel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { SignInScreen } from './components/SignInScreen';
-import { Sidebar } from './components/Sidebar';
+import { Sidebar, type SidebarMode } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
 import { DashboardTab } from './components/DashboardTab';
 import { StudentsTab } from './components/StudentsTab';
 import { PaymentsTab, type PaymentPrefillRequest } from './components/PaymentsTab';
 import { RoomInventoryTab } from './components/RoomInventoryTab';
 import { UserManagementTab } from './components/UserManagementTab';
+
+const SIDEBAR_MODE_STORAGE_KEY = 'gis_hostel_sidebar_mode';
+
+function readStoredSidebarMode(): SidebarMode {
+  try {
+    const val = window.localStorage.getItem(SIDEBAR_MODE_STORAGE_KEY);
+    if (val === 'expanded' || val === 'collapsed' || val === 'hidden') {
+      return val;
+    }
+  } catch {
+    // Ignore storage access errors
+  }
+  return 'expanded';
+}
 
 function HostelPortal() {
   const [user, setUser] = useState<User | null>(null);
@@ -34,6 +48,25 @@ function HostelPortal() {
 
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(readStoredSidebarMode);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(SIDEBAR_MODE_STORAGE_KEY, sidebarMode);
+    } catch {
+      // Ignore storage access errors
+    }
+  }, [sidebarMode]);
+
+  const handleToggleCollapse = () => {
+    setSidebarMode((prev) => (prev === 'collapsed' ? 'expanded' : 'collapsed'));
+  };
+
+  const handleCycleDesktopSidebar = () => {
+    setSidebarMode((prev) =>
+      prev === 'expanded' ? 'collapsed' : prev === 'collapsed' ? 'hidden' : 'expanded'
+    );
+  };
 
   const [rooms, setRooms] = useState<Room[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -285,9 +318,11 @@ function HostelPortal() {
         counts={sidebarCounts}
         mobileOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
+        sidebarMode={sidebarMode}
+        onToggleCollapse={handleToggleCollapse}
       />
 
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 transition-all duration-200 ease-in-out">
         <TopBar
           activeTab={effectiveTab}
           user={user}
@@ -300,9 +335,11 @@ function HostelPortal() {
             void signOutStaff();
           }}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
+          sidebarMode={sidebarMode}
+          onCycleDesktopSidebar={handleCycleDesktopSidebar}
         />
 
-        <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl w-full mx-auto print:p-0 print:max-w-none">
+        <main className="flex-1 min-w-0 w-full p-4 sm:p-6 lg:p-8 print:p-0">
           {seedError && (
             <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 print:hidden">
               {seedError}

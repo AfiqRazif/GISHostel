@@ -117,9 +117,9 @@
         },
         "occupancyMode": {
           "type": "string",
-          "enum": ["Single Bed", "Whole Unit Exclusive"],
+          "enum": ["Single Bed", "Whole Unit Exclusive", "Unassigned"],
           "maxLength": 32,
-          "description": "Single bed or whole-unit exclusive occupancy"
+          "description": "Single bed, whole-unit exclusive, or unassigned occupancy"
         },
         "phone": {
           "type": "string",
@@ -141,16 +141,16 @@
         },
         "assignedRoomId": {
           "type": "string",
-          "minLength": 3,
+          "minLength": 0,
           "maxLength": 64,
-          "pattern": "^[a-zA-Z0-9_\\-]+$",
-          "description": "Assigned roomId from the rooms collection"
+          "pattern": "^(|[a-zA-Z0-9_\\-]+)$",
+          "description": "Assigned roomId from the rooms collection (empty string when Unassigned)"
         },
         "hostelLocation": {
           "type": "string",
-          "enum": ["Apartment Desa Jati 2", "Nilai Square"],
+          "enum": ["Apartment Desa Jati 2", "Nilai Square", "Unassigned"],
           "maxLength": 64,
-          "description": "Hostel complex of the assigned room"
+          "description": "Hostel complex of the assigned room, or Unassigned"
         },
         "checkInDate": {
           "type": "string",
@@ -271,16 +271,16 @@
         },
         "roomId": {
           "type": "string",
-          "minLength": 3,
+          "minLength": 0,
           "maxLength": 64,
-          "pattern": "^[a-zA-Z0-9_\\-]+$",
-          "description": "Referenced roomId"
+          "pattern": "^(|[a-zA-Z0-9_\\-]+)$",
+          "description": "Referenced roomId (empty string if Unassigned)"
         },
         "hostelLocation": {
           "type": "string",
-          "enum": ["Apartment Desa Jati 2", "Nilai Square"],
+          "enum": ["Apartment Desa Jati 2", "Nilai Square", "Unassigned"],
           "maxLength": 64,
-          "description": "Hostel complex"
+          "description": "Hostel complex or Unassigned"
         },
         "billingMonth": {
           "type": "string",

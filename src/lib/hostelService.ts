@@ -42,6 +42,7 @@ import {
   PhysicalReceiptStatus,
   ProgramType,
   ResidentHostelLocation,
+  ResidentOccupancyMode,
   ResidentType,
   Room,
   RoomStatus,
@@ -607,7 +608,7 @@ export interface RegisterStudentInput {
   studentId: string;
   fullName: string;
   residentType: ResidentType;
-  occupancyMode: OccupancyMode;
+  occupancyMode?: ResidentOccupancyMode;
   phone: string;
   emergencyContact: string;
   program: ProgramType;
@@ -625,7 +626,7 @@ export interface RegisterStudentInput {
 
 export async function registerStudent(
   input: RegisterStudentInput,
-  selectedRoom: Room,
+  selectedRoom: Room | null,
   allRooms: Room[],
   staffEmail: string
 ): Promise<{ blockedSiblings: string[] }> {
@@ -634,36 +635,46 @@ export async function registerStudent(
   const fullName = input.fullName.trim().slice(0, FIELD_LIMITS.fullName.max);
   const phone = input.phone.trim().slice(0, FIELD_LIMITS.phone.max);
   const emergencyContact = input.emergencyContact.trim().slice(0, FIELD_LIMITS.emergencyContact.max);
-  const standardRoomRate = clampNumber(
-    input.standardRoomRate,
-    FIELD_LIMITS.monthlyFee.min,
-    FIELD_LIMITS.monthlyFee.max
-  );
-  const monthlyRebate = clampNumber(
-    input.monthlyRebate,
-    FIELD_LIMITS.monthlyFee.min,
-    FIELD_LIMITS.monthlyFee.max
-  );
-  const effectiveMonthlyFee = Math.max(
-    0,
-    Math.round((standardRoomRate - monthlyRebate) * 100) / 100
-  );
+  const cleanAssignedRoomId = (input.assignedRoomId || '').trim();
+  const isUnassigned = !cleanAssignedRoomId || !selectedRoom;
+
+  const standardRoomRate = isUnassigned
+    ? 0
+    : clampNumber(
+        input.standardRoomRate,
+        FIELD_LIMITS.monthlyFee.min,
+        FIELD_LIMITS.monthlyFee.max
+      );
+  const monthlyRebate = isUnassigned
+    ? 0
+    : clampNumber(
+        input.monthlyRebate,
+        FIELD_LIMITS.monthlyFee.min,
+        FIELD_LIMITS.monthlyFee.max
+      );
+  const effectiveMonthlyFee = isUnassigned
+    ? 0
+    : Math.max(0, Math.round((standardRoomRate - monthlyRebate) * 100) / 100);
   const firstMonthDefaults = calculateFirstMonthDefaults(
     input.checkInDate,
     effectiveMonthlyFee
   );
-  const firstMonthCharge = clampNumber(
-    typeof input.firstMonthCharge === 'number' && !Number.isNaN(input.firstMonthCharge)
-      ? input.firstMonthCharge
-      : firstMonthDefaults.firstMonthCharge,
-    FIELD_LIMITS.monthlyFee.min,
-    FIELD_LIMITS.monthlyFee.max
-  );
-  const firstMonthNote = (
-    input.firstMonthNote?.trim() || firstMonthDefaults.firstMonthNote
-  ).slice(0, 64);
+  const firstMonthCharge = isUnassigned
+    ? 0
+    : clampNumber(
+        typeof input.firstMonthCharge === 'number' && !Number.isNaN(input.firstMonthCharge)
+          ? input.firstMonthCharge
+          : firstMonthDefaults.firstMonthCharge,
+        FIELD_LIMITS.monthlyFee.min,
+        FIELD_LIMITS.monthlyFee.max
+      );
+  const firstMonthNote = isUnassigned
+    ? 'Unassigned — No Room Rent'
+    : (input.firstMonthNote?.trim() || firstMonthDefaults.firstMonthNote).slice(0, 64);
 
-  const rebateReason = (input.rebateReason || 'None').trim().slice(0, FIELD_LIMITS.rebateReason.max);
+  const rebateReason = isUnassigned
+    ? 'None'
+    : (input.rebateReason || 'None').trim().slice(0, FIELD_LIMITS.rebateReason.max);
   const depositPaid = clampNumber(
     input.depositPaid,
     FIELD_LIMITS.depositPaid.min,
@@ -689,12 +700,11 @@ export async function registerStudent(
     if (input.checkOutDate < input.checkInDate) {
       throw new Error('Check-Out Date cannot be earlier than Check-In Date.');
     }
-  } else if (selectedRoom.status !== 'Vacant') {
+  } else if (!isUnassigned && selectedRoom.status !== 'Vacant') {
     throw new Error('Selected room is no longer Vacant. Please choose another available bed.');
   }
 
   const studentRef = doc(db, 'students', studentId);
-  const roomRef = doc(db, 'rooms', selectedRoom.roomId);
   const blockedSiblings: string[] = [];
 
   try {
@@ -704,6 +714,43 @@ export async function registerStudent(
     }
 
     const batch = writeBatch(db);
+
+    if (isUnassigned) {
+      batch.set(studentRef, {
+        studentId,
+        fullName,
+        residentType: input.residentType,
+        occupancyMode: 'Unassigned',
+        phone,
+        emergencyContact,
+        program: input.program,
+        assignedRoomId: '',
+        hostelLocation: 'Unassigned',
+        checkInDate: input.checkInDate,
+        checkOutDate: input.status === 'Checked-Out' ? input.checkOutDate : null,
+        depositPaid,
+        standardRoomRate: 0,
+        monthlyRebate: 0,
+        rebateReason: 'None',
+        effectiveMonthlyFee: 0,
+        monthlyFee: 0,
+        firstMonthCharge: 0,
+        firstMonthNote: 'Unassigned — No Room Rent',
+        stayHistory: [],
+        status: input.status,
+        updatedBy: email,
+        updatedAt: serverTimestamp(),
+      });
+
+      await batch.commit();
+      return { blockedSiblings };
+    }
+
+    const resolvedOccupancyMode: OccupancyMode =
+      input.occupancyMode === 'Whole Unit Exclusive'
+        ? 'Whole Unit Exclusive'
+        : 'Single Bed';
+    const roomRef = doc(db, 'rooms', selectedRoom.roomId);
 
     if (input.status === 'Active') {
       const freshRoom = await getDoc(roomRef);
@@ -721,7 +768,7 @@ export async function registerStudent(
         updatedAt: serverTimestamp(),
       });
 
-      if (input.occupancyMode === 'Whole Unit Exclusive') {
+      if (resolvedOccupancyMode === 'Whole Unit Exclusive') {
         const siblings = allRooms.filter(
           (r) =>
             r.roomId !== selectedRoom.roomId &&
@@ -754,7 +801,7 @@ export async function registerStudent(
       id: createStaySegmentId(),
       roomId: selectedRoom.roomId,
       hostelLocation: selectedRoom.location,
-      occupancyMode: input.occupancyMode,
+      occupancyMode: resolvedOccupancyMode,
       startDate: input.checkInDate,
       endDate: input.status === 'Checked-Out' ? input.checkOutDate : null,
       standardRoomRate,
@@ -773,7 +820,7 @@ export async function registerStudent(
       studentId,
       fullName,
       residentType: input.residentType,
-      occupancyMode: input.occupancyMode,
+      occupancyMode: resolvedOccupancyMode,
       phone,
       emergencyContact,
       program: input.program,
@@ -1254,7 +1301,7 @@ export async function updateStudentRecord(
     batch.update(studentRef, {
       fullName,
       residentType: input.residentType,
-      occupancyMode: input.occupancyMode,
+      occupancyMode: !targetRoomId ? 'Unassigned' : input.occupancyMode,
       phone,
       emergencyContact,
       program: input.program,
@@ -1658,8 +1705,12 @@ export async function assignRoomToStudent(
 
     const isFirstSegment = closedExisting.length === 0;
     const defaults = calculateFirstMonthDefaults(input.placementDate, effectiveMonthlyFee);
+    const hadPriorAssignedRoomOrRate =
+      Boolean((student.assignedRoomId || '').trim()) ||
+      (student.effectiveMonthlyFee ?? student.monthlyFee ?? 0) > 0;
     const resolvedFirstMonthCharge =
       isFirstSegment &&
+      hadPriorAssignedRoomOrRate &&
       typeof student.firstMonthCharge === 'number' &&
       student.checkInDate === input.placementDate
         ? student.firstMonthCharge

@@ -364,7 +364,11 @@ export function RoomInventoryTab({
     setAssignPlacementDate(
       firstUnassigned?.checkInDate || getTodayISO()
     );
-    setAssignOccupancyMode(firstUnassigned?.occupancyMode || 'Single Bed');
+    setAssignOccupancyMode(
+      firstUnassigned?.occupancyMode === 'Whole Unit Exclusive'
+        ? 'Whole Unit Exclusive'
+        : 'Single Bed'
+    );
     setAssignUseRoomRate(true);
     setAssignCustomRate(String(room.monthlyRate));
 
@@ -1569,7 +1573,11 @@ export function RoomInventoryTab({
                             const st = unassignedStudents.find((s) => s.studentId === id);
                             if (st) {
                               setAssignPlacementDate(st.checkInDate || getTodayISO());
-                              setAssignOccupancyMode(st.occupancyMode || 'Single Bed');
+                              setAssignOccupancyMode(
+                                st.occupancyMode === 'Whole Unit Exclusive'
+                                  ? 'Whole Unit Exclusive'
+                                  : 'Single Bed'
+                              );
                             }
                           }}
                           className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"

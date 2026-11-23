@@ -516,23 +516,32 @@ export function StudentsTab({
     setRegFullName('');
     setRegResidentType('Student');
     setRegOccupancyMode('Single Bed');
-    setRegStatus(vacantRooms.length > 0 ? 'Active' : 'Checked-Out');
+    setRegStatus('Active');
     setRegPhone('');
     setRegEmergency('');
     setRegProgram('Diploma');
-    const initialRoom = vacantRooms[0] || allRoomsSorted[0];
+    const initialRoom = vacantRooms[0] || null;
     setRegRoomId(initialRoom ? initialRoom.roomId : '');
     const today = getTodayISO();
-    const initialRate = initialRoom ? initialRoom.monthlyRate : 250;
-    const fmDefaults = calculateFirstMonthDefaults(today, initialRate);
     setRegCheckInDate(today);
     setRegCheckOutDate(today);
-    setRegDepositPaid(String(initialRate));
-    setRegStandardRate(String(initialRate));
-    setRegMonthlyRebate('0');
-    setRegRebateReason('None');
-    setRegFirstMonthCharge(String(fmDefaults.firstMonthCharge));
-    setRegFirstMonthNote(fmDefaults.firstMonthNote);
+    if (initialRoom) {
+      const initialRate = initialRoom.monthlyRate;
+      const fmDefaults = calculateFirstMonthDefaults(today, initialRate);
+      setRegDepositPaid(String(initialRate));
+      setRegStandardRate(String(initialRate));
+      setRegMonthlyRebate('0');
+      setRegRebateReason('None');
+      setRegFirstMonthCharge(String(fmDefaults.firstMonthCharge));
+      setRegFirstMonthNote(fmDefaults.firstMonthNote);
+    } else {
+      setRegDepositPaid('0');
+      setRegStandardRate('0');
+      setRegMonthlyRebate('0');
+      setRegRebateReason('None');
+      setRegFirstMonthCharge('0');
+      setRegFirstMonthNote('Unassigned — No Room Rent');
+    }
     setRegFirstMonthManual(false);
     setShowRegisterModal(true);
   };
@@ -551,37 +560,53 @@ export function StudentsTab({
 
   const handleRegStatusChange = (nextStatus: 'Active' | 'Checked-Out') => {
     setRegStatus(nextStatus);
+    if (!regRoomId) return;
     const choices = nextStatus === 'Checked-Out' ? allRoomsSorted : vacantRooms;
     if (!choices.some((r) => r.roomId === regRoomId)) {
-      const fallback = choices[0];
+      const fallback = choices[0] || null;
       setRegRoomId(fallback ? fallback.roomId : '');
       if (fallback) {
         const nextStd = String(fallback.monthlyRate);
         setRegStandardRate(nextStd);
         setRegDepositPaid(nextStd);
         syncRegFirstMonth(regCheckInDate, nextStd, regMonthlyRebate);
+      } else {
+        setRegStandardRate('0');
+        setRegMonthlyRebate('0');
+        setRegRebateReason('None');
+        setRegFirstMonthCharge('0');
+        setRegFirstMonthNote('Unassigned — No Room Rent');
+        setRegFirstMonthManual(false);
       }
     }
   };
 
   const handleRoomSelectionChange = (roomId: string) => {
+    const wasUnassigned = !regRoomId;
     setRegRoomId(roomId);
+    if (!roomId) {
+      setRegStandardRate('0');
+      setRegMonthlyRebate('0');
+      setRegRebateReason('None');
+      setRegFirstMonthCharge('0');
+      setRegFirstMonthNote('Unassigned — No Room Rent');
+      setRegFirstMonthManual(false);
+      return;
+    }
     const room = registerRoomChoices.find((r) => r.roomId === roomId);
     if (room) {
       const nextStd = String(room.monthlyRate);
       setRegStandardRate(nextStd);
       setRegDepositPaid(nextStd);
-      syncRegFirstMonth(regCheckInDate, nextStd, regMonthlyRebate);
+      syncRegFirstMonth(regCheckInDate, nextStd, regMonthlyRebate, wasUnassigned);
     }
   };
 
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRegisterRoom) {
+    if (regRoomId && !selectedRegisterRoom) {
       setFormError(
-        regStatus === 'Active'
-          ? 'Please select an available Vacant room.'
-          : 'Please select a room for historical reference.'
+        'Selected room is no longer available. Please choose another Vacant room or select "Unassigned (Assign Room Later)".'
       );
       return;
     }
@@ -593,27 +618,35 @@ export function StudentsTab({
           studentId: regStudentId,
           fullName: regFullName,
           residentType: regResidentType,
-          occupancyMode: regOccupancyMode,
+          occupancyMode: selectedRegisterRoom ? regOccupancyMode : 'Unassigned',
           phone: regPhone,
           emergencyContact: regEmergency,
           program: regProgram,
-          assignedRoomId: selectedRegisterRoom.roomId,
+          assignedRoomId: selectedRegisterRoom ? selectedRegisterRoom.roomId : '',
           status: regStatus,
           checkInDate: regCheckInDate,
           checkOutDate: regStatus === 'Checked-Out' ? regCheckOutDate : null,
           depositPaid: Number(regDepositPaid),
-          standardRoomRate: Number(regStandardRate),
-          monthlyRebate: Number(regMonthlyRebate),
-          rebateReason: regRebateReason,
-          firstMonthCharge: Number(regFirstMonthCharge),
-          firstMonthNote: regFirstMonthNote,
+          standardRoomRate: selectedRegisterRoom ? Number(regStandardRate) : 0,
+          monthlyRebate: selectedRegisterRoom ? Number(regMonthlyRebate) : 0,
+          rebateReason: selectedRegisterRoom ? regRebateReason : 'None',
+          firstMonthCharge: selectedRegisterRoom ? Number(regFirstMonthCharge) : 0,
+          firstMonthNote: selectedRegisterRoom
+            ? regFirstMonthNote
+            : 'Unassigned — No Room Rent',
         },
         selectedRegisterRoom,
         rooms,
         staffEmail
       );
       setShowRegisterModal(false);
-      if (regStatus === 'Checked-Out') {
+      if (!selectedRegisterRoom) {
+        setFeedbackBanner(
+          regStatus === 'Checked-Out'
+            ? `Imported past resident ${regFullName.trim()} (Checked-Out, Room Unassigned).`
+            : `Registered ${regFullName.trim()} as Room Unassigned (RM 0.00/mo until a room is assigned).`
+        );
+      } else if (regStatus === 'Checked-Out') {
         setFeedbackBanner(
           `Imported past resident ${regFullName.trim()} (Checked-Out). Room ${selectedRegisterRoom.roomId} remains unchanged.`
         );
@@ -645,7 +678,11 @@ export function StudentsTab({
     setEditingStudent(student);
     setEditFullName(student.fullName);
     setEditResidentType(billing.residentType);
-    setEditOccupancyMode(billing.occupancyMode);
+    setEditOccupancyMode(
+      billing.occupancyMode === 'Whole Unit Exclusive'
+        ? 'Whole Unit Exclusive'
+        : 'Single Bed'
+    );
     setEditPhone(student.phone);
     setEditEmergency(student.emergencyContact);
     setEditProgram(student.program);
@@ -783,7 +820,11 @@ export function StudentsTab({
     setTransferStudent(student);
     setTransferDate(getTodayISO());
     setTransferNewRoomId(firstVacant ? firstVacant.roomId : '');
-    setTransferOccupancyMode(billing.occupancyMode);
+    setTransferOccupancyMode(
+      billing.occupancyMode === 'Whole Unit Exclusive'
+        ? 'Whole Unit Exclusive'
+        : 'Single Bed'
+    );
     setTransferStdRate(
       firstVacant
         ? String(firstVacant.monthlyRate)
@@ -900,7 +941,11 @@ export function StudentsTab({
     setAssigningStudent(student);
     setAssignRoomId(firstVacant ? firstVacant.roomId : '');
     setAssignPlacementDate(student.checkInDate || getTodayISO());
-    setAssignOccupancyMode(student.occupancyMode || 'Single Bed');
+    setAssignOccupancyMode(
+      student.occupancyMode === 'Whole Unit Exclusive'
+        ? 'Whole Unit Exclusive'
+        : 'Single Bed'
+    );
     setAssignStdRate(
       firstVacant
         ? String(firstVacant.monthlyRate)
@@ -1877,439 +1922,436 @@ export function StudentsTab({
               </button>
             </div>
 
-            {allRoomsSorted.length === 0 ? (
-              <>
-                <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
-                  {formError && (
-                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                      {formError}
-                    </div>
-                  )}
-                  <div className="p-5 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900 space-y-2">
-                    <p className="font-semibold">No Rooms in Inventory</p>
-                    <p className="text-xs leading-relaxed">
-                      Add rooms or beds in the Room Inventory tab before registering residents.
-                    </p>
+            <form
+              onSubmit={handleRegisterSubmit}
+              className="flex flex-col flex-1 min-h-0 overflow-hidden"
+            >
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
+                {formError && (
+                  <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
+                    {formError}
                   </div>
-                </div>
-                <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setShowRegisterModal(false)}
-                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
-                  >
-                    Close
-                  </button>
-                </div>
-              </>
-            ) : (
-              <form
-                onSubmit={handleRegisterSubmit}
-                className="flex flex-col flex-1 min-h-0 overflow-hidden"
-              >
-                {/* Scrollable Body */}
-                <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-4">
-                  {formError && (
-                    <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700">
-                      {formError}
-                    </div>
-                  )}
+                )}
 
-                  {/* Status + Resident Type + Occupancy Mode */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Registration Mode
-                      </label>
-                      <select
-                        value={regStatus}
-                        onChange={(e) =>
-                          handleRegStatusChange(e.target.value as 'Active' | 'Checked-Out')
-                        }
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      >
-                        <option value="Active" disabled={vacantRooms.length === 0}>
-                          Active (Occupy Bed){vacantRooms.length === 0 ? ' — No Vacant Beds' : ''}
-                        </option>
-                        <option value="Checked-Out">
-                          Checked-Out (Past Record Import)
-                        </option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Resident Type
-                      </label>
-                      <select
-                        value={regResidentType}
-                        onChange={(e) =>
-                          handleRegResidentTypeChange(e.target.value as ResidentType)
-                        }
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      >
-                        {RESIDENT_TYPES.map((rt) => (
-                          <option key={rt} value={rt}>
-                            {rt}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Occupancy Mode
-                      </label>
-                      <select
-                        value={regOccupancyMode}
-                        onChange={(e) =>
-                          setRegOccupancyMode(e.target.value as OccupancyMode)
-                        }
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      >
-                        {OCCUPANCY_MODES.map((om) => (
-                          <option key={om} value={om}>
-                            {om}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Resident ID (Matrix / IC / Staff No.)
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        minLength={3}
-                        maxLength={64}
-                        value={regStudentId}
-                        onChange={(e) => setRegStudentId(e.target.value)}
-                        placeholder="e.g. GIS250301 or STF-GIS-020"
-                        className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Program / Category
-                      </label>
-                      <select
-                        value={regProgram}
-                        onChange={(e) => setRegProgram(e.target.value as ProgramType)}
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      >
-                        {PROGRAMS.map((p) => (
-                          <option key={p} value={p}>
-                            {p}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
+                {/* Status + Resident Type + Occupancy Mode */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Full Name (as per IC / Passport)
+                      Registration Mode
+                    </label>
+                    <select
+                      value={regStatus}
+                      onChange={(e) =>
+                        handleRegStatusChange(e.target.value as 'Active' | 'Checked-Out')
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      <option value="Active">
+                        Active ({vacantRooms.length === 0 ? 'Room Unassigned' : 'Occupy Bed or Leave Unassigned'})
+                      </option>
+                      <option value="Checked-Out">
+                        Checked-Out (Past Record Import)
+                      </option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Resident Type
+                    </label>
+                    <select
+                      value={regResidentType}
+                      onChange={(e) =>
+                        handleRegResidentTypeChange(e.target.value as ResidentType)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      {RESIDENT_TYPES.map((rt) => (
+                        <option key={rt} value={rt}>
+                          {rt}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Occupancy Mode
+                    </label>
+                    <select
+                      value={!regRoomId ? '' : regOccupancyMode}
+                      disabled={!regRoomId}
+                      onChange={(e) =>
+                        setRegOccupancyMode(e.target.value as OccupancyMode)
+                      }
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                    >
+                      {!regRoomId && (
+                        <option value="">Unassigned (Disabled until room assigned)</option>
+                      )}
+                      {OCCUPANCY_MODES.map((om) => (
+                        <option key={om} value={om}>
+                          {om}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Resident ID (Matrix / IC / Staff No.)
                     </label>
                     <input
                       type="text"
                       required
-                      minLength={2}
-                      maxLength={120}
-                      value={regFullName}
-                      onChange={(e) => setRegFullName(e.target.value)}
-                      placeholder="e.g. Aisyah binti Mohd Farid"
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      minLength={3}
+                      maxLength={64}
+                      value={regStudentId}
+                      onChange={(e) => setRegStudentId(e.target.value)}
+                      placeholder="e.g. GIS250301 or STF-GIS-020"
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     />
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Phone Number
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        minLength={6}
-                        maxLength={32}
-                        value={regPhone}
-                        onChange={(e) => setRegPhone(e.target.value)}
-                        placeholder="e.g. 012-345 6789"
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Emergency Contact
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        minLength={6}
-                        maxLength={120}
-                        value={regEmergency}
-                        onChange={(e) => setRegEmergency(e.target.value)}
-                        placeholder="e.g. Farid (Father) 019-221 8810"
-                        className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                      />
-                    </div>
-                  </div>
-
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      {regStatus === 'Checked-Out'
-                        ? 'Historical Room / Bed Occupied (All Rooms Shown)'
-                        : 'Assign Vacant Room / Bed'}
+                      Program / Category
                     </label>
                     <select
-                      value={regRoomId}
-                      onChange={(e) => handleRoomSelectionChange(e.target.value)}
-                      required
+                      value={regProgram}
+                      onChange={(e) => setRegProgram(e.target.value as ProgramType)}
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     >
-                      {registerRoomChoices.map((r) => (
-                        <option key={r.roomId} value={r.roomId}>
-                          {r.roomId} — {r.location} (Blk {r.block}, Unit {r.unitNo}, {r.bedSlot}) · {formatRM(r.monthlyRate)}/mo
-                          {regStatus === 'Checked-Out' ? ` [${r.status}]` : ''}
+                      {PROGRAMS.map((p) => (
+                        <option key={p} value={p}>
+                          {p}
                         </option>
                       ))}
                     </select>
-                    {regStatus === 'Checked-Out' && (
-                      <p className="text-xs text-slate-600 mt-1">
-                        Historical import: the selected room&apos;s current live status will <strong>not</strong> be changed.
-                      </p>
-                    )}
-                    {regStatus === 'Active' && regOccupancyMode === 'Whole Unit Exclusive' && selectedRegisterRoom && (
-                      <div className="mt-2 p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
-                        {regSiblingVacantBeds.length > 0 ? (
-                          <p>
-                            <strong>Whole Unit Exclusive:</strong> Registering in{' '}
-                            <span className="font-mono">{selectedRegisterRoom.roomId}</span> will also mark{' '}
-                            <strong className="font-mono">
-                              {regSiblingVacantBeds.map((b) => b.roomId).join(', ')}
-                            </strong>{' '}
-                            as <strong>Reserved / Blocked</strong>.
-                          </p>
-                        ) : (
-                          <p>
-                            <strong>Whole Unit Exclusive:</strong> No other Vacant beds remain in Block{' '}
-                            {selectedRegisterRoom.block} Unit {selectedRegisterRoom.unitNo}.
-                          </p>
-                        )}
-                      </div>
-                    )}
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Check-In Date
-                      </label>
-                      <input
-                        type="date"
-                        required
-                        value={regCheckInDate}
-                        onChange={(e) => {
-                          setRegCheckInDate(e.target.value);
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    Full Name (as per IC / Passport)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    minLength={2}
+                    maxLength={120}
+                    value={regFullName}
+                    onChange={(e) => setRegFullName(e.target.value)}
+                    placeholder="e.g. Aisyah binti Mohd Farid"
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Phone Number
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={6}
+                      maxLength={32}
+                      value={regPhone}
+                      onChange={(e) => setRegPhone(e.target.value)}
+                      placeholder="e.g. 012-345 6789"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Emergency Contact
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      minLength={6}
+                      maxLength={120}
+                      value={regEmergency}
+                      onChange={(e) => setRegEmergency(e.target.value)}
+                      placeholder="e.g. Farid (Father) 019-221 8810"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 mb-1">
+                    {regStatus === 'Checked-Out'
+                      ? 'Historical Room / Bed Occupied (Optional)'
+                      : 'Assign Vacant Room / Bed (Optional)'}
+                  </label>
+                  <select
+                    value={regRoomId}
+                    onChange={(e) => handleRoomSelectionChange(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                  >
+                    <option value="">Unassigned (Assign Room Later)</option>
+                    {registerRoomChoices.map((r) => (
+                      <option key={r.roomId} value={r.roomId}>
+                        {r.roomId} — {r.location} (Blk {r.block}, Unit {r.unitNo}, {r.bedSlot}) · {formatRM(r.monthlyRate)}/mo
+                        {regStatus === 'Checked-Out' ? ` [${r.status}]` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {!regRoomId && (
+                    <p className="mt-1.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      Student will be registered without a room. Monthly rent will remain RM 0 until a room is assigned via &apos;Assign Room&apos;.
+                    </p>
+                  )}
+                  {regStatus === 'Checked-Out' && regRoomId && (
+                    <p className="text-xs text-slate-600 mt-1">
+                      Historical import: the selected room&apos;s current live status will <strong>not</strong> be changed.
+                    </p>
+                  )}
+                  {regStatus === 'Active' && regOccupancyMode === 'Whole Unit Exclusive' && selectedRegisterRoom && (
+                    <div className="mt-2 p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
+                      {regSiblingVacantBeds.length > 0 ? (
+                        <p>
+                          <strong>Whole Unit Exclusive:</strong> Registering in{' '}
+                          <span className="font-mono">{selectedRegisterRoom.roomId}</span> will also mark{' '}
+                          <strong className="font-mono">
+                            {regSiblingVacantBeds.map((b) => b.roomId).join(', ')}
+                          </strong>{' '}
+                          as <strong>Reserved / Blocked</strong>.
+                        </p>
+                      ) : (
+                        <p>
+                          <strong>Whole Unit Exclusive:</strong> No other Vacant beds remain in Block{' '}
+                          {selectedRegisterRoom.block} Unit {selectedRegisterRoom.unitNo}.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Check-In Date
+                    </label>
+                    <input
+                      type="date"
+                      required
+                      value={regCheckInDate}
+                      onChange={(e) => {
+                        setRegCheckInDate(e.target.value);
+                        if (regRoomId) {
                           syncRegFirstMonth(
                             e.target.value,
                             regStandardRate,
                             regMonthlyRebate
                           );
-                        }}
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                  {regStatus === 'Checked-Out' && (
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Check-Out Date
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={regCheckOutDate}
+                        onChange={(e) => setRegCheckOutDate(e.target.value)}
                         className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                       />
                     </div>
-                    {regStatus === 'Checked-Out' && (
-                      <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Check-Out Date
-                        </label>
-                        <input
-                          type="date"
-                          required
-                          value={regCheckOutDate}
-                          onChange={(e) => setRegCheckOutDate(e.target.value)}
-                          className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                        />
-                      </div>
-                    )}
-                    <div className={regStatus === 'Checked-Out' ? 'sm:col-span-2' : ''}>
+                  )}
+                  <div className={regStatus === 'Checked-Out' ? 'sm:col-span-2' : ''}>
+                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                      Deposit Paid (RM)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      min={0}
+                      max={50000}
+                      step="0.01"
+                      value={regDepositPaid}
+                      onChange={(e) => setRegDepositPaid(e.target.value)}
+                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    />
+                  </div>
+                </div>
+
+                {/* Pricing, Monthly Rebates & First-Month Proration */}
+                <div className={`border border-slate-200 rounded-lg p-3.5 space-y-3 ${!regRoomId ? 'bg-slate-100/80 opacity-80' : 'bg-slate-50'}`}>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Monthly Rate, Concession &amp; First-Month Proration
+                      {!regRoomId && (
+                        <span className="ml-1.5 font-normal text-amber-800">
+                          (RM 0.00 until room assigned)
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-xs font-mono font-semibold text-blue-900 tabular-nums">
+                      Effective Monthly Fee: {formatRM(!regRoomId ? 0 : regEffectiveFee)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Deposit Paid (RM)
+                        Standard Room Rate (RM)
                       </label>
                       <input
                         type="number"
-                        required
+                        required={!regRoomId ? false : true}
+                        disabled={!regRoomId}
                         min={0}
-                        max={50000}
+                        max={10000}
                         step="0.01"
-                        value={regDepositPaid}
-                        onChange={(e) => setRegDepositPaid(e.target.value)}
-                        className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        value={!regRoomId ? '0' : regStandardRate}
+                        onChange={(e) => {
+                          setRegStandardRate(e.target.value);
+                          syncRegFirstMonth(
+                            regCheckInDate,
+                            e.target.value,
+                            regMonthlyRebate
+                          );
+                        }}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                       />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Monthly Rebate (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required={!regRoomId ? false : true}
+                        disabled={!regRoomId}
+                        min={0}
+                        max={10000}
+                        step="0.01"
+                        value={!regRoomId ? '0' : regMonthlyRebate}
+                        onChange={(e) => {
+                          setRegMonthlyRebate(e.target.value);
+                          syncRegFirstMonth(
+                            regCheckInDate,
+                            regStandardRate,
+                            e.target.value
+                          );
+                        }}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Rebate Reason
+                      </label>
+                      <select
+                        value={!regRoomId ? 'None' : regRebateReason}
+                        disabled={!regRoomId}
+                        onChange={(e) => setRegRebateReason(e.target.value)}
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
+                      >
+                        {REBATE_REASONS.map((rr) => (
+                          <option key={rr} value={rr}>
+                            {rr}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
-                  {/* Pricing, Monthly Rebates & First-Month Proration */}
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+                  <div className="pt-2.5 border-t border-slate-200 space-y-2">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
-                      <span className="text-xs font-semibold text-slate-700">
-                        Monthly Rate, Concession &amp; First-Month Proration
+                      <span className="text-xs font-medium text-slate-700">
+                        First Month Rule (Day &gt; 15 = 50% Half-Rate)
                       </span>
-                      <span className="text-xs font-mono font-semibold text-blue-900 tabular-nums">
-                        Effective Monthly Fee: {formatRM(regEffectiveFee)}
-                      </span>
+                      <button
+                        type="button"
+                        disabled={!regRoomId}
+                        onClick={() =>
+                          syncRegFirstMonth(
+                            regCheckInDate,
+                            regStandardRate,
+                            regMonthlyRebate,
+                            true
+                          )
+                        }
+                        className="inline-flex items-center gap-1 text-xs font-medium text-blue-900 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer whitespace-nowrap"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Apply Auto-Rule</span>
+                      </button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Standard Room Rate (RM)
+                          First Month Charge (RM)
                         </label>
                         <input
                           type="number"
-                          required
+                          required={!regRoomId ? false : true}
+                          disabled={!regRoomId}
                           min={0}
                           max={10000}
                           step="0.01"
-                          value={regStandardRate}
+                          value={!regRoomId ? '0' : regFirstMonthCharge}
                           onChange={(e) => {
-                            setRegStandardRate(e.target.value);
-                            syncRegFirstMonth(
-                              regCheckInDate,
-                              e.target.value,
-                              regMonthlyRebate
-                            );
+                            setRegFirstMonthCharge(e.target.value);
+                            setRegFirstMonthManual(true);
                           }}
-                          className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                         />
                       </div>
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Monthly Rebate (RM)
+                          First Month Proration Note
                         </label>
                         <input
-                          type="number"
-                          required
-                          min={0}
-                          max={10000}
-                          step="0.01"
-                          value={regMonthlyRebate}
+                          type="text"
+                          disabled={!regRoomId}
+                          maxLength={64}
+                          value={!regRoomId ? 'Unassigned — No Room Rent' : regFirstMonthNote}
                           onChange={(e) => {
-                            setRegMonthlyRebate(e.target.value);
-                            syncRegFirstMonth(
-                              regCheckInDate,
-                              regStandardRate,
-                              e.target.value
-                            );
+                            setRegFirstMonthNote(e.target.value);
+                            setRegFirstMonthManual(true);
                           }}
-                          className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          placeholder="e.g. After 15th Half-Rate"
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                         />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Rebate Reason
-                        </label>
-                        <select
-                          value={regRebateReason}
-                          onChange={(e) => setRegRebateReason(e.target.value)}
-                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                        >
-                          {REBATE_REASONS.map((rr) => (
-                            <option key={rr} value={rr}>
-                              {rr}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="pt-2.5 border-t border-slate-200 space-y-2">
-                      <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="text-xs font-medium text-slate-700">
-                          First Month Rule (Day &gt; 15 = 50% Half-Rate)
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            syncRegFirstMonth(
-                              regCheckInDate,
-                              regStandardRate,
-                              regMonthlyRebate,
-                              true
-                            )
-                          }
-                          className="inline-flex items-center gap-1 text-xs font-medium text-blue-900 hover:text-blue-700 cursor-pointer whitespace-nowrap"
-                        >
-                          <RotateCcw className="w-3 h-3" />
-                          <span>Apply Auto-Rule</span>
-                        </button>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">
-                            First Month Charge (RM)
-                          </label>
-                          <input
-                            type="number"
-                            required
-                            min={0}
-                            max={10000}
-                            step="0.01"
-                            value={regFirstMonthCharge}
-                            onChange={(e) => {
-                              setRegFirstMonthCharge(e.target.value);
-                              setRegFirstMonthManual(true);
-                            }}
-                            className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-slate-700 mb-1">
-                            First Month Proration Note
-                          </label>
-                          <input
-                            type="text"
-                            maxLength={64}
-                            value={regFirstMonthNote}
-                            onChange={(e) => {
-                              setRegFirstMonthNote(e.target.value);
-                              setRegFirstMonthManual(true);
-                            }}
-                            placeholder="e.g. After 15th Half-Rate"
-                            className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                          />
-                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
+              </div>
 
-                {/* Pinned Footer */}
-                <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setShowRegisterModal(false)}
-                    className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
-                  >
-                    {submitting
-                      ? 'Saving...'
-                      : regStatus === 'Checked-Out'
-                        ? 'Import Past Resident'
+              {/* Pinned Footer */}
+              <div className="shrink-0 px-4 sm:px-6 py-3.5 border-t border-slate-100 bg-slate-50/50 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowRegisterModal(false)}
+                  className="px-4 py-2 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
+                >
+                  {submitting
+                    ? 'Saving...'
+                    : regStatus === 'Checked-Out'
+                      ? 'Import Past Resident'
+                      : !regRoomId
+                        ? 'Register (Room Unassigned)'
                         : 'Register & Occupy Bed'}
-                  </button>
-                </div>
-              </form>
-            )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
@@ -2394,12 +2436,22 @@ export function StudentsTab({
                       Occupancy Mode
                     </label>
                     <select
-                      value={editOccupancyMode}
+                      value={
+                        !(editingStudent.assignedRoomId || '').trim() && !editNewRoomId
+                          ? ''
+                          : editOccupancyMode
+                      }
+                      disabled={
+                        !(editingStudent.assignedRoomId || '').trim() && !editNewRoomId
+                      }
                       onChange={(e) =>
                         setEditOccupancyMode(e.target.value as OccupancyMode)
                       }
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900 disabled:bg-slate-100 disabled:text-slate-500 disabled:cursor-not-allowed"
                     >
+                      {!(editingStudent.assignedRoomId || '').trim() && !editNewRoomId && (
+                        <option value="">Unassigned (Select a Vacant Room below first)</option>
+                      )}
                       {OCCUPANCY_MODES.map((om) => (
                         <option key={om} value={om}>
                           {om}

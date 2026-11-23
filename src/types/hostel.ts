@@ -9,6 +9,7 @@ export type RoomStatus =
   | 'Reserved / Blocked';
 export type ResidentType = 'Student' | 'Lecturer / Staff' | 'Guest';
 export type OccupancyMode = 'Single Bed' | 'Whole Unit Exclusive';
+export type ResidentOccupancyMode = OccupancyMode | 'Unassigned';
 export type RebateReason =
   | 'None'
   | 'Management Rebate'
@@ -171,7 +172,7 @@ export interface Student {
   studentId: string;
   fullName: string;
   residentType?: ResidentType;
-  occupancyMode?: OccupancyMode;
+  occupancyMode?: ResidentOccupancyMode;
   phone: string;
   emergencyContact: string;
   program: ProgramType;
@@ -242,7 +243,7 @@ export interface SegmentBillingBreakdown {
 
 export interface ResidentBillingSummary {
   residentType: ResidentType;
-  occupancyMode: OccupancyMode;
+  occupancyMode: ResidentOccupancyMode;
   standardRoomRate: number;
   monthlyRebate: number;
   rebateReason: string;
@@ -471,7 +472,11 @@ export function getNormalizedStayHistory(student: Student): StayHistorySegment[]
           id: seg.id || `SEG-${student.studentId}-${idx + 1}`,
           roomId: seg.roomId || '',
           hostelLocation: seg.hostelLocation || student.hostelLocation || 'Unassigned',
-          occupancyMode: seg.occupancyMode || student.occupancyMode || 'Single Bed',
+          occupancyMode:
+            seg.occupancyMode ||
+            (student.occupancyMode === 'Whole Unit Exclusive'
+              ? 'Whole Unit Exclusive'
+              : 'Single Bed'),
           startDate: segStartDate,
           endDate: seg.endDate ?? null,
           standardRoomRate: segStdRate,
@@ -502,7 +507,10 @@ export function getNormalizedStayHistory(student: Student): StayHistorySegment[]
       id: `SEG-INIT-${student.studentId}`,
       roomId: student.assignedRoomId || '',
       hostelLocation: student.hostelLocation || 'Unassigned',
-      occupancyMode: student.occupancyMode || 'Single Bed',
+      occupancyMode:
+        student.occupancyMode === 'Whole Unit Exclusive'
+          ? 'Whole Unit Exclusive'
+          : 'Single Bed',
       startDate: student.checkInDate,
       endDate: student.status === 'Checked-Out' ? student.checkOutDate : null,
       standardRoomRate,
@@ -526,7 +534,11 @@ export function calculateResidentBilling(
   asOfDate = getTodayISO()
 ): ResidentBillingSummary {
   const residentType: ResidentType = student.residentType || 'Student';
-  const occupancyMode: OccupancyMode = student.occupancyMode || 'Single Bed';
+  const occupancyMode: ResidentOccupancyMode = !(student.assignedRoomId || '').trim()
+    ? 'Unassigned'
+    : student.occupancyMode === 'Whole Unit Exclusive'
+      ? 'Whole Unit Exclusive'
+      : 'Single Bed';
   const standardRoomRate =
     typeof student.standardRoomRate === 'number'
       ? student.standardRoomRate

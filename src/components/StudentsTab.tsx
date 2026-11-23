@@ -95,6 +95,7 @@ export function StudentsTab({
   loading,
 }: StudentsTabProps) {
   const isMasterAdmin = staffRole === 'Master Admin';
+  const isViewer = staffRole === 'Viewer';
   const [searchQuery, setSearchQuery] = useState('');
   const [locationFilter, setLocationFilter] = useState<'All' | ResidentHostelLocation>('All');
   const [residentTypeFilter, setResidentTypeFilter] = useState<'All' | ResidentType>('All');
@@ -1542,40 +1543,42 @@ export function StudentsTab({
           </select>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5 shrink-0 self-start xl:self-auto">
-          {isMasterAdmin && (
+        {!isViewer && (
+          <div className="flex flex-wrap items-center gap-2.5 shrink-0 self-start xl:self-auto">
+            {isMasterAdmin && (
+              <button
+                type="button"
+                onClick={() => {
+                  setImportModalType('tenancyHistory');
+                  setShowImportModal(true);
+                }}
+                className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-blue-900" />
+                <span>Bulk Tenancy History</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
-                setImportModalType('tenancyHistory');
+                setImportModalType('students');
                 setShowImportModal(true);
               }}
-              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-900" />
-              <span>Bulk Tenancy History</span>
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Import Excel / CSV</span>
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => {
-              setImportModalType('students');
-              setShowImportModal(true);
-            }}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-            <span>Import Excel / CSV</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenRegisterModal}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-          >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>Register Resident</span>
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={handleOpenRegisterModal}
+              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+            >
+              <UserPlus className="w-3.5 h-3.5" />
+              <span>Register Resident</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Summary Counts */}
@@ -1781,7 +1784,7 @@ export function StudentsTab({
                         </td>
                         <td className="py-3 px-4 text-right whitespace-nowrap sticky right-0 z-10 bg-white group-hover:bg-slate-50 shadow-[-4px_0_8px_-4px_rgba(15,23,42,0.08)] border-l border-slate-100">
                           <div className="inline-flex items-center gap-1.5">
-                            {!(st.assignedRoomId || '').trim() && (
+                            {!isViewer && !(st.assignedRoomId || '').trim() && (
                               <button
                                 type="button"
                                 onClick={() => openAssignRoomModal(st)}
@@ -1796,12 +1799,17 @@ export function StudentsTab({
                               type="button"
                               onClick={() => setStatementStudent(st)}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
-                              title="View & edit stay history, statement, and past payments"
+                              title={
+                                isViewer
+                                  ? 'View stay history and resident statement (Read-Only)'
+                                  : 'View & edit stay history, statement, and past payments'
+                              }
                             >
                               <FileText className="w-3 h-3" />
                               <span>View Statement</span>
                             </button>
-                            {st.status === 'Active' &&
+                            {!isViewer &&
+                              st.status === 'Active' &&
                               Boolean((st.assignedRoomId || '').trim()) && (
                                 <button
                                   type="button"
@@ -1813,15 +1821,17 @@ export function StudentsTab({
                                   <span>Transfer Room</span>
                                 </button>
                               )}
-                            <button
-                              type="button"
-                              onClick={() => openEditModal(st, false)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
-                            >
-                              <Pencil className="w-3 h-3" />
-                              <span>Edit</span>
-                            </button>
-                            {st.status !== 'Checked-Out' && (
+                            {!isViewer && (
+                              <button
+                                type="button"
+                                onClick={() => openEditModal(st, false)}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
+                              >
+                                <Pencil className="w-3 h-3" />
+                                <span>Edit</span>
+                              </button>
+                            )}
+                            {!isViewer && st.status !== 'Checked-Out' && (
                               <button
                                 type="button"
                                 onClick={() => openEditModal(st, true)}
@@ -3479,7 +3489,9 @@ export function StudentsTab({
                     <p className="text-xs text-slate-500">
                       {isMasterAdmin
                         ? 'Chronological stay segments (Master Admin can add historical stays or edit rates without changing live bed occupancy)'
-                        : 'Chronological stay segments (historical stay editing is restricted to Master Admin)'}
+                        : isViewer
+                          ? 'Chronological stay segments (read-only view)'
+                          : 'Chronological stay segments (historical stay editing is restricted to Master Admin)'}
                     </p>
                   </div>
                   {isMasterAdmin && (
@@ -3626,41 +3638,43 @@ export function StudentsTab({
                       {statementPayments.length === 1 ? 'entry' : 'entries'} recorded
                     </p>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 print:hidden">
-                    {isMasterAdmin &&
-                      liveStatementStudent.status === 'Checked-Out' &&
-                      statementBilling.outstandingBalance > 0.009 && (
+                  {!isViewer && (
+                    <div className="flex flex-wrap items-center gap-2 print:hidden">
+                      {isMasterAdmin &&
+                        liveStatementStudent.status === 'Checked-Out' &&
+                        statementBilling.outstandingBalance > 0.009 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormError(null);
+                              setSettleBalanceConfirmOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-lg cursor-pointer whitespace-nowrap"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Settle Full Historical Balance</span>
+                          </button>
+                        )}
+                      {isMasterAdmin && (
                         <button
                           type="button"
-                          onClick={() => {
-                            setFormError(null);
-                            setSettleBalanceConfirmOpen(true);
-                          }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-lg cursor-pointer whitespace-nowrap"
+                          onClick={openBatchPastPaymentsModal}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
                         >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Settle Full Historical Balance</span>
+                          <CalendarCheck2 className="w-3.5 h-3.5" />
+                          <span>Batch Add Past Payments</span>
                         </button>
                       )}
-                    {isMasterAdmin && (
                       <button
                         type="button"
-                        onClick={openBatchPastPaymentsModal}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
+                        onClick={openStmtRecordPaymentModal}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
                       >
-                        <CalendarCheck2 className="w-3.5 h-3.5" />
-                        <span>Batch Add Past Payments</span>
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Record / Backdate Payment</span>
                       </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={openStmtRecordPaymentModal}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Record / Backdate Payment</span>
-                    </button>
-                  </div>
+                    </div>
+                  )}
                 </div>
 
                 {statementPayments.length === 0 ? (
@@ -3679,7 +3693,9 @@ export function StudentsTab({
                           <th className="py-2.5 px-3 text-right">Amount</th>
                           <th className="py-2.5 px-3">Physical Receipt</th>
                           <th className="py-2.5 px-3">Status</th>
-                          <th className="py-2.5 px-3 text-right print:hidden">Actions</th>
+                          {!isViewer && (
+                            <th className="py-2.5 px-3 text-right print:hidden">Actions</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -3721,31 +3737,33 @@ export function StudentsTab({
                               <td className="py-2.5 px-3 whitespace-nowrap">
                                 <StatusBadge status={p.status} />
                               </td>
-                              <td className="py-2.5 px-3 text-right whitespace-nowrap print:hidden">
-                                <div className="inline-flex items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => openStmtEditPaymentModal(p)}
-                                    className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded cursor-pointer"
-                                    title="Edit payment entry"
-                                  >
-                                    <Pencil className="w-3 h-3" />
-                                    <span>Edit</span>
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setFormError(null);
-                                      setStmtDeletingPayment(p);
-                                    }}
-                                    className="p-1 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded cursor-pointer"
-                                    title="Delete payment entry"
-                                    aria-label={`Delete ${getPaymentReceiptNo(p)}`}
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </td>
+                              {!isViewer && (
+                                <td className="py-2.5 px-3 text-right whitespace-nowrap print:hidden">
+                                  <div className="inline-flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => openStmtEditPaymentModal(p)}
+                                      className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded cursor-pointer"
+                                      title="Edit payment entry"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                      <span>Edit</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setFormError(null);
+                                        setStmtDeletingPayment(p);
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded cursor-pointer"
+                                      title="Delete payment entry"
+                                      aria-label={`Delete ${getPaymentReceiptNo(p)}`}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
                             </tr>
                           );
                         })}

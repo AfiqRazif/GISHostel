@@ -26,6 +26,7 @@ import {
   isCashPaymentType,
   Payment,
   Room,
+  StaffRole,
   Student,
   TabKey,
 } from '../types/hostel';
@@ -35,6 +36,7 @@ interface DashboardTabProps {
   rooms: Room[];
   students: Student[];
   payments: Payment[];
+  staffRole: StaffRole;
   loading: boolean;
   onNavigate: (tab: TabKey) => void;
   onRecordPayment: (studentId: string, amount: number) => void;
@@ -71,12 +73,14 @@ export function DashboardTab({
   rooms,
   students,
   payments,
+  staffRole,
   loading,
   onNavigate,
   onRecordPayment,
   onLoadSampleData,
   seedingData,
 }: DashboardTabProps) {
+  const isViewer = staffRole === 'Viewer';
   const [locationFilter, setLocationFilter] = useState<'All' | HostelLocation>('All');
   const [selectedMonth, setSelectedMonth] = useState<string>(getCurrentMonthISO());
   const [watchlistSegment, setWatchlistSegment] = useState<'active' | 'checked-out'>('active');
@@ -444,14 +448,16 @@ export function DashboardTab({
           manually in Room Inventory.
         </p>
         <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-          <button
-            type="button"
-            onClick={onLoadSampleData}
-            disabled={seedingData}
-            className="px-4 py-2.5 text-sm font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
-          >
-            {seedingData ? 'Loading Sample Data...' : 'Load Sample GIS Data'}
-          </button>
+          {!isViewer && (
+            <button
+              type="button"
+              onClick={onLoadSampleData}
+              disabled={seedingData}
+              className="px-4 py-2.5 text-sm font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
+            >
+              {seedingData ? 'Loading Sample Data...' : 'Load Sample GIS Data'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => onNavigate('rooms')}
@@ -460,6 +466,11 @@ export function DashboardTab({
             Go to Room Inventory
           </button>
         </div>
+        {isViewer && (
+          <p className="text-xs text-amber-800 mt-4">
+            Read-Only Viewer Mode — Contact a Master Admin or Staff member to initialize hostel data.
+          </p>
+        )}
       </div>
     );
   }
@@ -708,7 +719,7 @@ export function DashboardTab({
                   <th className="py-3 px-4 text-right">Credited</th>
                   <th className="py-3 px-4 text-right">Outstanding</th>
                   <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Action</th>
+                  {!isViewer && <th className="py-3 px-4 text-right">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-sm">
@@ -749,18 +760,20 @@ export function DashboardTab({
                     <td className="py-3 px-4">
                       <StatusBadge status={student.status} />
                     </td>
-                    <td className="py-3 px-4 text-right whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          onRecordPayment(student.studentId, billing.outstandingBalance)
-                        }
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-md cursor-pointer whitespace-nowrap"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>Record Payment</span>
-                      </button>
-                    </td>
+                    {!isViewer && (
+                      <td className="py-3 px-4 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onRecordPayment(student.studentId, billing.outstandingBalance)
+                          }
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-md cursor-pointer whitespace-nowrap"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Record Payment</span>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

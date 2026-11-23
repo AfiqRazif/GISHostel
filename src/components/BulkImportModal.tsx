@@ -476,9 +476,11 @@ export function BulkImportModal({
     total: 0,
   });
 
+  const isViewerRestricted = staffRole === 'Viewer';
   const isMasterAdminRestricted =
-    (importType === 'tenancyHistory' || importType === 'payments') &&
-    staffRole !== 'Master Admin';
+    isViewerRestricted ||
+    ((importType === 'tenancyHistory' || importType === 'payments') &&
+      staffRole !== 'Master Admin');
 
   const validatedRows = useMemo((): ParsedPreviewRow<unknown>[] => {
     if (rawRows.length === 0 || isMasterAdminRestricted) return [];
@@ -1373,12 +1375,19 @@ export function BulkImportModal({
         <div className="flex-1 overflow-y-auto min-h-0 p-4 sm:p-6 space-y-5">
           {isMasterAdminRestricted ? (
             <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 space-y-1">
-              <p className="font-semibold">Master Admin Access Required</p>
+              <p className="font-semibold">
+                {isViewerRestricted
+                  ? 'Read-Only Viewer Mode'
+                  : 'Master Admin Access Required'}
+              </p>
               <p>
-                {importType === 'payments'
-                  ? 'Bulk Historical Payments Import is restricted strictly to Master Admin accounts. Staff and Admin users should use the standard Record Payment form (with AI Receipt Scanner).'
-                  : 'Bulk Tenancy History Upload is restricted strictly to Master Admin accounts.'}{' '}
-                Your current role ({staffRole}) cannot access this batch import tool.
+                {isViewerRestricted
+                  ? 'Read-Only Viewer accounts cannot import or modify portal records. Contact a Master Admin to request editing access.'
+                  : importType === 'payments'
+                    ? 'Bulk Historical Payments Import is restricted strictly to Master Admin accounts. Staff and Admin users should use the standard Record Payment form (with AI Receipt Scanner).'
+                    : 'Bulk Tenancy History Upload is restricted strictly to Master Admin accounts.'}{' '}
+                {!isViewerRestricted &&
+                  `Your current role (${staffRole}) cannot access this batch import tool.`}
               </p>
             </div>
           ) : (

@@ -112,6 +112,7 @@ export function PaymentsTab({
   prefillRequest,
 }: PaymentsTabProps) {
   const isMasterAdmin = staffRole === 'Master Admin';
+  const isViewer = staffRole === 'Viewer';
   const [searchQuery, setSearchQuery] = useState('');
   const [locationFilter, setLocationFilter] = useState<'All' | HostelLocation>('All');
   const [statusFilter, setStatusFilter] = useState<'All' | PaymentStatus>('All');
@@ -713,26 +714,28 @@ export function PaymentsTab({
             </select>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0 self-start xl:self-auto">
-            {isMasterAdmin && (
+          {!isViewer && (
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0 self-start xl:self-auto">
+              {isMasterAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(true)}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                  <span>Import Excel / CSV</span>
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => setShowImportModal(true)}
-                className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                onClick={handleOpenAddModal}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
               >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
-                <span>Import Excel / CSV</span>
+                <Plus className="w-3.5 h-3.5" />
+                <span>Record Payment</span>
               </button>
-            )}
-            <button
-              type="button"
-              onClick={handleOpenAddModal}
-              className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Record Payment</span>
-            </button>
-          </div>
+            </div>
+          )}
         </div>
 
         {/* Ledger Table */}
@@ -874,7 +877,7 @@ export function PaymentsTab({
                               <span>View Proof</span>
                             </button>
                           )}
-                          {physStatus === 'Pending Issuance' && (
+                          {!isViewer && physStatus === 'Pending Issuance' && (
                             <button
                               type="button"
                               onClick={() => {
@@ -888,7 +891,7 @@ export function PaymentsTab({
                               <span>Mark Receipt Issued</span>
                             </button>
                           )}
-                          {(p.status === 'Pending' || p.status === 'Overdue') && (
+                          {!isViewer && (p.status === 'Pending' || p.status === 'Overdue') && (
                             <button
                               type="button"
                               onClick={() => handleQuickMarkPaid(p)}
@@ -907,26 +910,30 @@ export function PaymentsTab({
                             <Printer className="w-3 h-3" />
                             <span>Print Receipt</span>
                           </button>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEdit(p)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            <span>Edit</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setFormError(null);
-                              setDeletingPayment(p);
-                            }}
-                            className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-md cursor-pointer"
-                            title="Delete payment entry"
-                            aria-label={`Delete ${receiptNo}`}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {!isViewer && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(p)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              <span>Edit</span>
+                            </button>
+                          )}
+                          {!isViewer && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormError(null);
+                                setDeletingPayment(p);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-md cursor-pointer"
+                              title="Delete payment entry"
+                              aria-label={`Delete ${receiptNo}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

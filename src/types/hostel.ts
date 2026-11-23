@@ -32,10 +32,15 @@ export type PaymentMethod =
   | 'Historical Migration';
 export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Waived';
 export type PhysicalReceiptStatus = 'Pending Issuance' | 'Issued';
-export type StaffRole = 'Master Admin' | 'Admin' | 'Staff';
+export type StaffRole = 'Master Admin' | 'Admin' | 'Staff' | 'Viewer';
 export type TabKey = 'dashboard' | 'students' | 'payments' | 'rooms' | 'users';
 
-export const STAFF_ROLES: StaffRole[] = ['Master Admin', 'Admin', 'Staff'];
+export const STAFF_ROLES: StaffRole[] = [
+  'Master Admin',
+  'Admin',
+  'Staff',
+  'Viewer',
+];
 
 export const HOSTEL_LOCATIONS: HostelLocation[] = [
   'Apartment Desa Jati 2',
@@ -222,6 +227,7 @@ export interface StaffUser {
   fullName: string;
   role: StaffRole;
   active: boolean;
+  authProvider?: string;
   createdAt: Timestamp | null;
   updatedBy?: string;
   updatedAt?: Timestamp | null;

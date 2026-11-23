@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, doc, onSnapshot } from 'firebase/firestore';
 import {
   auth,
   db,
@@ -207,24 +207,68 @@ function HostelPortal() {
       }
     );
 
+    const unsubOwnStaffDoc = onSnapshot(
+      doc(db, 'staff_users', user.uid),
+      (snap) => {
+        if (!snap.exists()) return;
+        const me = snap.data() as StaffUser;
+        if (!me.active) {
+          setAuthNotice(
+            'Your staff account has been disabled by the Master Admin. Please contact GIS Nilai Hostel Administration.'
+          );
+          setCurrentStaffUser(null);
+          void signOutStaff();
+        } else {
+          setCurrentStaffUser((prev) => {
+            if (
+              prev &&
+              prev.uid === me.uid &&
+              prev.role === me.role &&
+              prev.active === me.active &&
+              prev.fullName === me.fullName &&
+              prev.email === me.email
+            ) {
+              return prev;
+            }
+            return me;
+          });
+        }
+      },
+      (error) => {
+        try {
+          handleFirestoreError(error, OperationType.GET, `staff_users/${user.uid}`);
+        } catch (wrapped) {
+          setFatalError(wrapped instanceof Error ? wrapped : new Error(String(wrapped)));
+        }
+      }
+    );
+
+    return () => {
+      unsubRooms();
+      unsubStudents();
+      unsubPayments();
+      unsubOwnStaffDoc();
+    };
+  }, [authReady, user?.uid, currentStaffUser?.active]);
+
+  useEffect(() => {
+    if (
+      !authReady ||
+      !user ||
+      !currentStaffUser?.active ||
+      currentStaffUser.role !== 'Master Admin'
+    ) {
+      setStaffUsers([]);
+      setStaffUsersLoaded(true);
+      return;
+    }
+
+    setStaffUsersLoaded(false);
     const unsubStaffUsers = onSnapshot(
       collection(db, 'staff_users'),
       (snap) => {
-        const list = snap.docs.map((d) => d.data() as StaffUser);
-        setStaffUsers(list);
+        setStaffUsers(snap.docs.map((d) => d.data() as StaffUser));
         setStaffUsersLoaded(true);
-        const me = list.find((u) => u.uid === user.uid);
-        if (me) {
-          if (!me.active) {
-            setAuthNotice(
-              'Your staff account has been disabled by the Master Admin. Please contact GIS Nilai Hostel Administration.'
-            );
-            setCurrentStaffUser(null);
-            void signOutStaff();
-          } else {
-            setCurrentStaffUser(me);
-          }
-        }
       },
       (error) => {
         try {
@@ -236,12 +280,9 @@ function HostelPortal() {
     );
 
     return () => {
-      unsubRooms();
-      unsubStudents();
-      unsubPayments();
       unsubStaffUsers();
     };
-  }, [authReady, user?.uid, currentStaffUser?.active]);
+  }, [authReady, user?.uid, currentStaffUser?.active, currentStaffUser?.role]);
 
   const dataLoading = !roomsLoaded || !studentsLoaded || !paymentsLoaded;
   const isDatabaseEmpty =
@@ -351,6 +392,7 @@ function HostelPortal() {
               rooms={rooms}
               students={students}
               payments={payments}
+              staffRole={currentStaffUser.role}
               loading={dataLoading}
               onNavigate={setActiveTab}
               onRecordPayment={handleRecordPaymentFromDashboard}
@@ -386,6 +428,7 @@ function HostelPortal() {
               rooms={rooms}
               students={students}
               staffEmail={staffEmail}
+              staffRole={currentStaffUser.role}
               loading={dataLoading}
             />
           )}

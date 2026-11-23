@@ -47,9 +47,12 @@ export function UserManagementTab({
       'Master Admin': 0,
       Admin: 1,
       Staff: 2,
+      Viewer: 3,
     };
     return [...staffUsers].sort((a, b) => {
-      if (rank[a.role] !== rank[b.role]) return rank[a.role] - rank[b.role];
+      if ((rank[a.role] ?? 9) !== (rank[b.role] ?? 9)) {
+        return (rank[a.role] ?? 9) - (rank[b.role] ?? 9);
+      }
       return a.fullName.localeCompare(b.fullName);
     });
   }, [staffUsers]);
@@ -60,7 +63,10 @@ export function UserManagementTab({
     const masterAdmins = staffUsers.filter(
       (u) => u.role === 'Master Admin' && u.active
     ).length;
-    return { total: staffUsers.length, active, disabled, masterAdmins };
+    const viewers = staffUsers.filter(
+      (u) => u.role === 'Viewer' && u.active
+    ).length;
+    return { total: staffUsers.length, active, disabled, masterAdmins, viewers };
   }, [staffUsers]);
 
   const previewEmail = customEmail.trim()
@@ -246,6 +252,14 @@ export function UserManagementTab({
         <span>
           <strong className="text-blue-900">{counts.masterAdmins}</strong> Master Admin
         </span>
+        {counts.viewers > 0 && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>
+              <strong className="text-amber-700">{counts.viewers}</strong> Read-Only Viewer
+            </span>
+          </>
+        )}
       </div>
 
       {/* Staff Accounts Table */}

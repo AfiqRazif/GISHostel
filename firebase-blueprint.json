@@ -466,11 +466,16 @@
         },
         "role": {
           "type": "string",
-          "enum": ["Master Admin", "Admin", "Staff"],
+          "enum": ["Master Admin", "Admin", "Staff", "Viewer"],
           "maxLength": 32
         },
         "active": {
           "type": "boolean"
+        },
+        "authProvider": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Authentication provider used during registration (e.g. google, password)"
         },
         "createdAt": {
           "type": "string",

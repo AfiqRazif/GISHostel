@@ -119,7 +119,7 @@ export function SignInScreen({ authNotice }: SignInScreenProps) {
                 Sign in to continue
               </h2>
               <p className="text-xs text-slate-500">
-                First account to sign in is automatically assigned Master Admin.
+                New Google accounts enter in Read-Only Viewer Mode until promoted by a Master Admin.
               </p>
             </div>
 

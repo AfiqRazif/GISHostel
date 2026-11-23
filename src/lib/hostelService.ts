@@ -131,28 +131,46 @@ export async function syncStaffUserRecord(user: User): Promise<StaffUser> {
     const isBootstrapOwner =
       email.toLowerCase() === 'afiqjacksonmusic@gmail.com' &&
       user.emailVerified;
+    const isGoogleSignIn = user.providerData.some(
+      (provider) => provider.providerId === 'google.com'
+    );
 
-    if (!isBootstrapOwner) {
+    if (!isBootstrapOwner && !isGoogleSignIn) {
       throw new Error(
         'NOT_PROVISIONED: Your account has not been provisioned in GIS Nilai Staff Accounts. Please ask a Master Admin to create your staff login.'
       );
     }
 
-    const firstCheckSnap = await getDocs(
-      query(collection(db, 'staff_users'), limit(1))
-    );
-    const isFirstUser = firstCheckSnap.empty;
+    let isFirstUser = false;
+    if (isBootstrapOwner) {
+      try {
+        const firstCheckSnap = await getDocs(
+          query(collection(db, 'staff_users'), limit(1))
+        );
+        isFirstUser = firstCheckSnap.empty;
+      } catch {
+        isFirstUser = false;
+      }
+    }
 
-    const fullName = (
+    const baseUsername = extractUsernameFromEmail(email).slice(0, 64);
+    const username =
+      baseUsername.length >= 2
+        ? baseUsername
+        : `${baseUsername || 'user'}01`.slice(0, 64);
+    const rawFullName = (
       user.displayName ||
-      extractUsernameFromEmail(email) ||
-      'GIS Staff'
-    )
-      .trim()
-      .slice(0, FIELD_LIMITS.fullName.max);
-    const username = extractUsernameFromEmail(email).slice(0, 64);
+      username ||
+      'GIS Viewer'
+    ).trim();
+    const fullName = (
+      rawFullName.length >= 2 ? rawFullName : `${rawFullName} User`
+    ).slice(0, FIELD_LIMITS.fullName.max);
     const role: StaffRole =
-      isFirstUser || isBootstrapOwner ? 'Master Admin' : 'Staff';
+      isBootstrapOwner && (isFirstUser || isBootstrapOwner)
+        ? 'Master Admin'
+        : 'Viewer';
+    const authProvider = isGoogleSignIn ? 'google' : 'password';
 
     const newRecord = {
       uid: user.uid,
@@ -161,6 +179,7 @@ export async function syncStaffUserRecord(user: User): Promise<StaffUser> {
       fullName,
       role,
       active: true,
+      authProvider,
       createdAt: serverTimestamp(),
       updatedBy: email,
       updatedAt: serverTimestamp(),
@@ -176,6 +195,7 @@ export async function syncStaffUserRecord(user: User): Promise<StaffUser> {
         fullName,
         role,
         active: true,
+        authProvider,
         createdAt: null,
       }
     );
@@ -242,6 +262,7 @@ export async function createManagedStaffAccount(
       fullName,
       role: input.role,
       active: true,
+      authProvider: 'password',
       createdAt: serverTimestamp(),
       updatedBy: adminEmail,
       updatedAt: serverTimestamp(),

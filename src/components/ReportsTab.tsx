@@ -72,6 +72,8 @@ interface UnitSummaryRow {
   unitNo: string;
   bedLabels: string[];
   totalBeds: number;
+  hasConfiguredBeds: boolean;
+  hasVaryingRates: boolean;
   standardMonthlyRate: number;
   optimalMonthlyRent: number;
   months: MonthCellData[]; // length 12
@@ -79,6 +81,8 @@ interface UnitSummaryRow {
   periodActual: number;
   periodOutstanding: number;
   isArchived?: boolean;
+  isConsolidatedLegacy?: boolean;
+  legacySourceCount?: number;
 }
 
 interface SectionTotals {
@@ -155,6 +159,21 @@ function computeSectionTotals(
     totalActual: roundMoney(totalActual),
     totalOutstanding: roundMoney(totalExpected - totalActual),
   };
+}
+
+const JATI_PAST_REGEX = /^jati\s*\(past\)/i;
+const JATI_PAST_UNIT_KEY = 'Apartment Desa Jati 2::__JATI_PAST__';
+
+function isJatiPastIdentifier(value: string | null | undefined): boolean {
+  return JATI_PAST_REGEX.test((value || '').trim());
+}
+
+function isJatiPastRoom(room: Room): boolean {
+  return (
+    isJatiPastIdentifier(room.roomId) ||
+    isJatiPastIdentifier(room.unitNo) ||
+    isJatiPastIdentifier(room.block)
+  );
 }
 
 function parseUnitPrefixFromRoomId(roomId: string): {
@@ -269,12 +288,16 @@ export function ReportsTab({
       unitNo: string;
       bedLabels: string[];
       totalBeds: number;
+      configuredBedsCount: number;
       optimalMonthlyRent: number;
       standardMonthlyRate: number;
+      observedRates: Set<number>;
+      legacySourceUnits: Set<string>;
       tenantSets: Array<Set<string>>;
       expectedByMonth: number[];
       actualByMonth: number[];
       isArchived: boolean;
+      isConsolidatedLegacy: boolean;
     }
 
     const unitsByKey = new Map<string, UnitAccumulator>();
@@ -288,9 +311,51 @@ export function ReportsTab({
     ) =>
       `${location}::${sanitizeIdSegment(block) || 'X'}::${sanitizeIdSegment(unitNo) || '00'}`;
 
-    // Group existing rooms into physical units
+    const ensureJatiPastAccumulator = (): UnitAccumulator => {
+      let existing = unitsByKey.get(JATI_PAST_UNIT_KEY);
+      if (!existing) {
+        existing = {
+          unitKey: JATI_PAST_UNIT_KEY,
+          unitCode: 'Jati (Past)',
+          location: 'Apartment Desa Jati 2',
+          block: 'Legacy',
+          unitNo: 'Jati (Past)',
+          bedLabels: [],
+          totalBeds: 0,
+          configuredBedsCount: 0,
+          optimalMonthlyRent: 0,
+          standardMonthlyRate: 0,
+          observedRates: new Set<number>(),
+          legacySourceUnits: new Set<string>(),
+          tenantSets: Array.from({ length: 12 }, () => new Set<string>()),
+          expectedByMonth: Array.from({ length: 12 }, () => 0),
+          actualByMonth: Array.from({ length: 12 }, () => 0),
+          isArchived: true,
+          isConsolidatedLegacy: true,
+        };
+        unitsByKey.set(JATI_PAST_UNIT_KEY, existing);
+      }
+      return existing;
+    };
+
+    // Group existing rooms into physical units (consolidating any "Jati (Past) ..." rooms)
     const roomsByUnit = new Map<string, Room[]>();
     for (const r of rooms) {
+      if (isJatiPastRoom(r)) {
+        const legacyAcc = ensureJatiPastAccumulator();
+        legacyAcc.configuredBedsCount += 1;
+        legacyAcc.totalBeds += 1;
+        legacyAcc.optimalMonthlyRent = roundMoney(
+          legacyAcc.optimalMonthlyRent + (r.monthlyRate || 0)
+        );
+        if (typeof r.monthlyRate === 'number' && r.monthlyRate >= 0) {
+          legacyAcc.observedRates.add(roundMoney(r.monthlyRate));
+        }
+        legacyAcc.bedLabels.push(r.bedSlot);
+        legacyAcc.legacySourceUnits.add(r.roomId || r.unitNo || 'Jati (Past)');
+        roomIdToUnitKey.set(r.roomId, JATI_PAST_UNIT_KEY);
+        continue;
+      }
       const uKey = makeUnitKey(r.location, r.block, r.unitNo);
       const list = roomsByUnit.get(uKey) || [];
       list.push(r);
@@ -317,6 +382,9 @@ export function ReportsTab({
       );
       const standardMonthlyRate =
         totalBeds > 0 ? roundMoney(optimalMonthlyRent / totalBeds) : 0;
+      const observedRates = new Set<number>(
+        sortedBeds.map((b) => roundMoney(b.monthlyRate || 0))
+      );
 
       unitsByKey.set(uKey, {
         unitKey: uKey,
@@ -326,12 +394,16 @@ export function ReportsTab({
         unitNo: sample.unitNo,
         bedLabels: sortedBeds.map((b) => b.bedSlot),
         totalBeds,
+        configuredBedsCount: totalBeds,
         optimalMonthlyRent,
         standardMonthlyRate,
+        observedRates,
+        legacySourceUnits: new Set<string>(),
         tenantSets: Array.from({ length: 12 }, () => new Set<string>()),
         expectedByMonth: Array.from({ length: 12 }, () => 0),
         actualByMonth: Array.from({ length: 12 }, () => 0),
         isArchived: false,
+        isConsolidatedLegacy: false,
       });
 
       unitCodeToUnitKey.set(defaultUnitCode, uKey);
@@ -348,6 +420,16 @@ export function ReportsTab({
     ): string | null => {
       const roomId = (rawRoomId || '').trim();
       if (!roomId) return null;
+
+      if (isJatiPastIdentifier(roomId)) {
+        const legacyAcc = ensureJatiPastAccumulator();
+        legacyAcc.legacySourceUnits.add(roomId);
+        if (typeof fallbackRate === 'number' && fallbackRate > 0) {
+          legacyAcc.observedRates.add(roundMoney(fallbackRate));
+        }
+        roomIdToUnitKey.set(roomId, JATI_PAST_UNIT_KEY);
+        return JATI_PAST_UNIT_KEY;
+      }
 
       const exact = roomIdToUnitKey.get(roomId);
       if (exact) return exact;
@@ -370,12 +452,16 @@ export function ReportsTab({
             unitNo: parsed.unitNo,
             bedLabels: [roomId],
             totalBeds: 1,
+            configuredBedsCount: 1,
             optimalMonthlyRent: rate,
             standardMonthlyRate: rate,
+            observedRates: new Set<number>([rate]),
+            legacySourceUnits: new Set<string>(),
             tenantSets: Array.from({ length: 12 }, () => new Set<string>()),
             expectedByMonth: Array.from({ length: 12 }, () => 0),
             actualByMonth: Array.from({ length: 12 }, () => 0),
             isArchived: true,
+            isConsolidatedLegacy: false,
           });
           unitCodeToUnitKey.set(parsed.unitCode, newKey);
         }
@@ -395,12 +481,16 @@ export function ReportsTab({
             unitNo: roomId,
             bedLabels: [roomId],
             totalBeds: 1,
+            configuredBedsCount: 1,
             optimalMonthlyRent: rate,
             standardMonthlyRate: rate,
+            observedRates: new Set<number>([rate]),
+            legacySourceUnits: new Set<string>(),
             tenantSets: Array.from({ length: 12 }, () => new Set<string>()),
             expectedByMonth: Array.from({ length: 12 }, () => 0),
             actualByMonth: Array.from({ length: 12 }, () => 0),
             isArchived: true,
+            isConsolidatedLegacy: false,
           });
         }
         roomIdToUnitKey.set(roomId, newKey);
@@ -510,6 +600,21 @@ export function ReportsTab({
         const periodActual = roundMoney(
           visibleMonthIndices.reduce((sum, idx) => sum + months[idx].actual, 0)
         );
+
+        const hasConfiguredBeds =
+          !acc.isConsolidatedLegacy || acc.configuredBedsCount > 0;
+        const rateList = Array.from(acc.observedRates).filter((r) => r >= 0);
+        const hasVaryingRates =
+          acc.isConsolidatedLegacy && rateList.length > 1;
+        const resolvedStandardRate =
+          acc.configuredBedsCount > 0
+            ? roundMoney(acc.optimalMonthlyRent / acc.configuredBedsCount)
+            : rateList.length > 0
+              ? roundMoney(
+                  rateList.reduce((sum, r) => sum + r, 0) / rateList.length
+                )
+              : acc.standardMonthlyRate;
+
         return {
           unitKey: acc.unitKey,
           unitCode: acc.unitCode,
@@ -518,18 +623,25 @@ export function ReportsTab({
           unitNo: acc.unitNo,
           bedLabels: acc.bedLabels,
           totalBeds: acc.totalBeds,
-          standardMonthlyRate: acc.standardMonthlyRate,
+          hasConfiguredBeds,
+          hasVaryingRates,
+          standardMonthlyRate: resolvedStandardRate,
           optimalMonthlyRent: acc.optimalMonthlyRent,
           months,
           periodExpected,
           periodActual,
           periodOutstanding: roundMoney(periodExpected - periodActual),
           isArchived: acc.isArchived,
+          isConsolidatedLegacy: acc.isConsolidatedLegacy,
+          legacySourceCount: acc.legacySourceUnits.size,
         };
       })
       .sort((a, b) => {
         if (a.location !== b.location) {
           return a.location.localeCompare(b.location);
+        }
+        if (Boolean(a.isConsolidatedLegacy) !== Boolean(b.isConsolidatedLegacy)) {
+          return a.isConsolidatedLegacy ? 1 : -1;
         }
         const blkCmp = a.block.localeCompare(b.block, undefined, { numeric: true });
         if (blkCmp !== 0) return blkCmp;
@@ -799,8 +911,8 @@ export function ReportsTab({
       for (const r of rows) {
         const line: Array<string | number> = [
           r.unitCode,
-          r.totalBeds,
-          r.standardMonthlyRate,
+          r.hasConfiguredBeds ? r.totalBeds : 'N/A (Legacy)',
+          r.hasVaryingRates ? 'Varies' : r.standardMonthlyRate,
           r.optimalMonthlyRent,
         ];
         for (const mIdx of visibleMonthIndices) {
@@ -1035,22 +1147,56 @@ export function ReportsTab({
               {rows.map((row) => (
                 <tr
                   key={row.unitKey}
-                  className="group hover:bg-slate-50/90 transition-colors print:break-inside-avoid"
+                  className={`group transition-colors print:break-inside-avoid ${
+                    row.isConsolidatedLegacy
+                      ? 'bg-amber-50/35 hover:bg-amber-50/70'
+                      : 'hover:bg-slate-50/90'
+                  }`}
                 >
-                  <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-3 py-2 border-r border-slate-200 whitespace-nowrap shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)] print:static print:shadow-none print:px-1 print:py-1">
+                  <td
+                    className={`sticky left-0 z-10 px-3 py-2 border-r border-slate-200 whitespace-nowrap shadow-[2px_0_4px_-2px_rgba(0,0,0,0.06)] print:static print:shadow-none print:px-1 print:py-1 ${
+                      row.isConsolidatedLegacy
+                        ? 'bg-amber-50/60 group-hover:bg-amber-50'
+                        : 'bg-white group-hover:bg-slate-50'
+                    }`}
+                  >
                     <div className="font-mono font-semibold text-slate-900">
                       {row.unitCode}
                     </div>
                     <div className="text-[11px] text-slate-500 print:text-[7px]">
-                      Blk {row.block} · Unit {row.unitNo}
-                      {row.isArchived ? ' · Archived' : ''}
+                      {row.isConsolidatedLegacy
+                        ? `Consolidated Legacy (${row.legacySourceCount || 1} unit${
+                            (row.legacySourceCount || 1) === 1 ? '' : 's'
+                          })`
+                        : `Blk ${row.block} · Unit ${row.unitNo}${
+                            row.isArchived ? ' · Archived' : ''
+                          }`}
                     </div>
                   </td>
                   <td className="px-2.5 py-2 text-right font-mono tabular-nums text-slate-800 border-r border-slate-200 print:px-1 print:py-1">
-                    {row.totalBeds}
+                    {row.hasConfiguredBeds ? (
+                      row.totalBeds
+                    ) : (
+                      <span className="text-xs text-slate-500 font-sans">
+                        N/A (Legacy)
+                      </span>
+                    )}
                   </td>
                   <td className="px-2.5 py-2 text-right font-mono tabular-nums text-slate-700 border-r border-slate-200 print:px-1 print:py-1">
-                    {formatCompactMoney(row.standardMonthlyRate)}
+                    {row.hasVaryingRates ? (
+                      <div>
+                        <span className="font-sans font-medium text-slate-700">
+                          Varies
+                        </span>
+                        {row.standardMonthlyRate > 0 && (
+                          <span className="block text-[10px] text-slate-500 print:text-[7px]">
+                            Avg {formatCompactMoney(row.standardMonthlyRate)}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      formatCompactMoney(row.standardMonthlyRate)
+                    )}
                   </td>
                   <td className="px-2.5 py-2 text-right font-mono tabular-nums font-medium text-slate-900 border-r border-slate-300 print:px-1 print:py-1">
                     {formatCompactMoney(row.optimalMonthlyRent)}
@@ -1100,7 +1246,13 @@ export function ReportsTab({
                     );
                   })}
 
-                  <td className="sticky right-0 z-10 bg-white group-hover:bg-slate-50 px-3 py-1.5 border-l border-slate-300 font-mono tabular-nums text-[11px] leading-tight shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.06)] print:static print:shadow-none print:px-1 print:py-1 print:text-[7.5px]">
+                  <td
+                    className={`sticky right-0 z-10 px-3 py-1.5 border-l border-slate-300 font-mono tabular-nums text-[11px] leading-tight shadow-[-2px_0_4px_-2px_rgba(0,0,0,0.06)] print:static print:shadow-none print:px-1 print:py-1 print:text-[7.5px] ${
+                      row.isConsolidatedLegacy
+                        ? 'bg-amber-50/60 group-hover:bg-amber-50'
+                        : 'bg-white group-hover:bg-slate-50'
+                    }`}
+                  >
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-slate-500">Exp:</span>
                       <span className="font-semibold text-slate-900">

@@ -25,11 +25,13 @@ import {
   HostelLocation,
   isCashPaymentType,
   Payment,
+  resolveOccupantType,
   Room,
   StaffRole,
   Student,
   TabKey,
 } from '../types/hostel';
+import { computeUnitCapacities } from '../lib/hostelService';
 import { StatusBadge } from './StatusBadge';
 
 interface DashboardTabProps {
@@ -111,12 +113,19 @@ export function DashboardTab({
   }, [scopedStudents, payments]);
 
   const metrics = useMemo(() => {
+    const unitCaps = Array.from(
+      computeUnitCapacities(scopedRooms, scopedStudents).values()
+    );
     const totalBeds = scopedRooms.length;
     const activeOccupiedBeds = scopedRooms.filter((r) => r.status === 'Occupied').length;
     const blockedBeds = scopedRooms.filter((r) => r.status === 'Reserved / Blocked').length;
-    const vacantBeds = scopedRooms.filter((r) => r.status === 'Vacant').length;
-    const maintenanceBeds = scopedRooms.filter((r) => r.status === 'Maintenance').length;
-    const effectiveOccupied = activeOccupiedBeds + blockedBeds;
+    const vacantBeds = unitCaps.reduce((sum, u) => sum + u.availableBeds, 0);
+    const maintenanceBeds = unitCaps.reduce((sum, u) => sum + u.maintenanceBeds, 0);
+    const occupiedBedsFromUnits = unitCaps.reduce((sum, u) => sum + u.occupiedBeds, 0);
+    const effectiveOccupied = Math.min(
+      totalBeds,
+      Math.max(occupiedBedsFromUnits, activeOccupiedBeds + blockedBeds)
+    );
     const effectiveOccupancyPct =
       totalBeds > 0 ? (effectiveOccupied / totalBeds) * 100 : 0;
 
@@ -173,6 +182,7 @@ export function DashboardTab({
 
     return {
       totalBeds,
+      effectiveOccupied,
       activeOccupiedBeds,
       blockedBeds,
       vacantBeds,
@@ -189,7 +199,7 @@ export function DashboardTab({
       totalDepositsHeld,
       pendingPhysicalReceiptsCount,
     };
-  }, [scopedRooms, scopedPayments, studentBillings, selectedMonth]);
+  }, [scopedRooms, scopedStudents, scopedPayments, studentBillings, selectedMonth]);
 
   const activeWatchlist = useMemo(() => {
     return studentBillings
@@ -215,16 +225,24 @@ export function DashboardTab({
   const locationBreakdown = useMemo(() => {
     return HOSTEL_LOCATIONS.map((loc) => {
       const locRooms = rooms.filter((r) => r.location === loc);
+      const locStudents = students.filter((s) => s.hostelLocation === loc);
+      const unitCaps = Array.from(
+        computeUnitCapacities(locRooms, locStudents).values()
+      );
       const total = locRooms.length;
-      const occupied = locRooms.filter((r) => r.status === 'Occupied').length;
+      const primaryOccupied = locRooms.filter((r) => r.status === 'Occupied').length;
       const blocked = locRooms.filter((r) => r.status === 'Reserved / Blocked').length;
-      const vacant = locRooms.filter((r) => r.status === 'Vacant').length;
-      const maintenance = locRooms.filter((r) => r.status === 'Maintenance').length;
-      const occupancyPct =
-        total > 0 ? Math.round(((occupied + blocked) / total) * 100) : 0;
+      const occupiedFromUnits = unitCaps.reduce((sum, u) => sum + u.occupiedBeds, 0);
+      const occupied = Math.min(
+        total,
+        Math.max(occupiedFromUnits, primaryOccupied + blocked)
+      );
+      const vacant = unitCaps.reduce((sum, u) => sum + u.availableBeds, 0);
+      const maintenance = unitCaps.reduce((sum, u) => sum + u.maintenanceBeds, 0);
+      const occupancyPct = total > 0 ? Math.round((occupied / total) * 100) : 0;
 
-      const activeEffectiveRevenue = students
-        .filter((s) => s.status === 'Active' && s.hostelLocation === loc)
+      const activeEffectiveRevenue = locStudents
+        .filter((s) => s.status === 'Active')
         .reduce(
           (sum, s) => sum + calculateResidentBilling(s, payments).effectiveMonthlyFee,
           0
@@ -236,6 +254,7 @@ export function DashboardTab({
       return {
         location: loc,
         total,
+        primaryOccupied,
         occupied,
         blocked,
         vacant,
@@ -299,8 +318,9 @@ export function DashboardTab({
     const headers = [
       'Resident ID',
       'Full Name',
-      'Resident Type',
+      'Occupant Type',
       'Occupancy Mode',
+      'Beds Occupied',
       'Program',
       'Hostel Location',
       'Assigned Room ID',
@@ -326,8 +346,9 @@ export function DashboardTab({
       .map(({ student, billing }) => [
         student.studentId,
         student.fullName,
-        billing.residentType,
+        resolveOccupantType(student),
         billing.occupancyMode,
+        billing.bedsOccupied,
         student.program,
         student.hostelLocation,
         student.assignedRoomId,
@@ -553,12 +574,15 @@ export function DashboardTab({
             {metrics.effectiveOccupancyPct.toFixed(1)}%
           </p>
           <p className="text-xs text-slate-600 mt-1 tabular-nums">
-            {metrics.activeOccupiedBeds} Occupied · {metrics.blockedBeds} Blocked ·{' '}
-            <strong className="text-emerald-700">{metrics.vacantBeds} Vacant</strong>
+            {metrics.effectiveOccupied} / {metrics.totalBeds} Occupied
+            {metrics.blockedBeds > 0
+              ? ` (${metrics.activeOccupiedBeds} Primary + ${metrics.blockedBeds} Multi-Bed/Excl)`
+              : ''}{' '}
+            · <strong className="text-emerald-700">{metrics.vacantBeds} Vacant</strong>
           </p>
           {metrics.maintenanceBeds > 0 && (
             <p className="text-xs text-amber-700 mt-0.5 tabular-nums">
-              {metrics.maintenanceBeds} Maintenance ({metrics.totalBeds} total)
+              {metrics.maintenanceBeds} Maintenance
             </p>
           )}
         </div>
@@ -728,7 +752,8 @@ export function DashboardTab({
                     <td className="py-3 px-4">
                       <p className="font-medium text-slate-900">{student.fullName}</p>
                       <p className="text-xs text-slate-500 font-mono">
-                        {student.studentId} · {billing.residentType}
+                        {student.studentId} · {resolveOccupantType(student)}
+                        {billing.bedsOccupied > 1 ? ` · ${billing.bedsOccupied} Beds` : ''}
                       </p>
                     </td>
                     <td className="py-3 px-4">
@@ -813,7 +838,7 @@ export function DashboardTab({
                       {item.location}
                     </p>
                     <p className="text-xs text-slate-500 tabular-nums mt-0.5">
-                      {item.occupied} Occ · {item.blocked} Blk · {item.vacant} Vac · {item.maintenance} Maint
+                      {item.occupied} Occ ({item.primaryOccupied} Primary + {item.blocked} Multi-Bed/Excl) · {item.vacant} Vac · {item.maintenance} Maint
                     </p>
                   </div>
                   <div className="text-right">
@@ -834,13 +859,13 @@ export function DashboardTab({
                     <>
                       <div
                         className="bg-blue-900 h-full"
-                        style={{ width: `${(item.occupied / item.total) * 100}%` }}
-                        title={`Occupied: ${item.occupied}`}
+                        style={{ width: `${(item.primaryOccupied / item.total) * 100}%` }}
+                        title={`Primary Occupied: ${item.primaryOccupied}`}
                       />
                       <div
                         className="bg-indigo-400 h-full"
                         style={{ width: `${(item.blocked / item.total) * 100}%` }}
-                        title={`Reserved / Blocked: ${item.blocked}`}
+                        title={`Multi-Bed / Exclusive Locked: ${item.blocked}`}
                       />
                       <div
                         className="bg-amber-400 h-full"

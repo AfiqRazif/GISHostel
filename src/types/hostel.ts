@@ -8,8 +8,13 @@ export type RoomStatus =
   | 'Maintenance'
   | 'Reserved / Blocked';
 export type ResidentType = 'Student' | 'Lecturer / Staff' | 'Guest';
-export type OccupancyMode = 'Single Bed' | 'Whole Unit Exclusive';
-export type ResidentOccupancyMode = OccupancyMode | 'Unassigned';
+export type OccupantType = 'Student' | 'Lecturer / Staff' | 'Event Guest';
+export type AssignableOccupancyMode =
+  | 'Single Bed'
+  | 'Custom Multi-Bed'
+  | 'Whole Unit Exclusive';
+export type OccupancyMode = AssignableOccupancyMode | 'Unassigned';
+export type ResidentOccupancyMode = OccupancyMode;
 export type RebateReason =
   | 'None'
   | 'Management Rebate'
@@ -61,8 +66,15 @@ export const RESIDENT_TYPES: ResidentType[] = [
   'Guest',
 ];
 
-export const OCCUPANCY_MODES: OccupancyMode[] = [
+export const OCCUPANT_TYPES: OccupantType[] = [
+  'Student',
+  'Lecturer / Staff',
+  'Event Guest',
+];
+
+export const OCCUPANCY_MODES: AssignableOccupancyMode[] = [
   'Single Bed',
+  'Custom Multi-Bed',
   'Whole Unit Exclusive',
 ];
 
@@ -157,6 +169,7 @@ export interface StayHistorySegment {
   roomId: string;
   hostelLocation: ResidentHostelLocation;
   occupancyMode: OccupancyMode;
+  bedsOccupied?: number;
   startDate: string; // YYYY-MM-DD
   endDate: string | null; // YYYY-MM-DD | null
   standardRoomRate: number;
@@ -172,7 +185,9 @@ export interface Student {
   studentId: string;
   fullName: string;
   residentType?: ResidentType;
+  occupantType?: OccupantType;
   occupancyMode?: ResidentOccupancyMode;
+  bedsOccupied?: number;
   phone: string;
   emergencyContact: string;
   program: ProgramType;
@@ -243,7 +258,9 @@ export interface SegmentBillingBreakdown {
 
 export interface ResidentBillingSummary {
   residentType: ResidentType;
+  occupantType: OccupantType;
   occupancyMode: ResidentOccupancyMode;
+  bedsOccupied: number;
   standardRoomRate: number;
   monthlyRebate: number;
   rebateReason: string;
@@ -255,6 +272,52 @@ export interface ResidentBillingSummary {
   totalRentCredited: number;
   outstandingBalance: number;
   segments: SegmentBillingBreakdown[];
+}
+
+export function resolveOccupantType(
+  resident?: Pick<Student, 'occupantType' | 'residentType'> | null
+): OccupantType {
+  if (
+    resident?.occupantType === 'Student' ||
+    resident?.occupantType === 'Lecturer / Staff' ||
+    resident?.occupantType === 'Event Guest'
+  ) {
+    return resident.occupantType;
+  }
+  if (resident?.residentType === 'Lecturer / Staff') {
+    return 'Lecturer / Staff';
+  }
+  if (resident?.residentType === 'Guest') {
+    return 'Event Guest';
+  }
+  return 'Student';
+}
+
+export function toLegacyResidentType(occupantType: OccupantType): ResidentType {
+  if (occupantType === 'Lecturer / Staff') return 'Lecturer / Staff';
+  if (occupantType === 'Event Guest') return 'Guest';
+  return 'Student';
+}
+
+export function normalizeAssignableOccupancyMode(
+  mode: string | null | undefined
+): AssignableOccupancyMode {
+  if (mode === 'Whole Unit Exclusive') return 'Whole Unit Exclusive';
+  if (mode === 'Custom Multi-Bed') return 'Custom Multi-Bed';
+  return 'Single Bed';
+}
+
+export function resolveBedsOccupiedCount(
+  mode: string | null | undefined,
+  bedsOccupied?: number | null,
+  hasAssignedRoom = true
+): number {
+  if (!hasAssignedRoom || mode === 'Unassigned') return 0;
+  if (mode === 'Single Bed') return 1;
+  if (typeof bedsOccupied === 'number' && Number.isFinite(bedsOccupied) && bedsOccupied >= 1) {
+    return Math.floor(bedsOccupied);
+  }
+  return 1;
 }
 
 export function formatRM(amount: number | null | undefined): string {
@@ -466,17 +529,31 @@ export function getNormalizedStayHistory(student: Student): StayHistorySegment[]
           typeof seg.firstMonthCharge === 'number'
             ? seg.firstMonthCharge
             : calculateFirstMonthDefaults(segStartDate, segEffFee).firstMonthCharge;
+        const segOccupancyMode: OccupancyMode =
+          seg.occupancyMode === 'Unassigned'
+            ? 'Unassigned'
+            : seg.occupancyMode
+              ? normalizeAssignableOccupancyMode(seg.occupancyMode)
+              : student.occupancyMode && student.occupancyMode !== 'Unassigned'
+                ? normalizeAssignableOccupancyMode(student.occupancyMode)
+                : 'Single Bed';
+        const segBedsOccupied = resolveBedsOccupiedCount(
+          segOccupancyMode,
+          typeof seg.bedsOccupied === 'number'
+            ? seg.bedsOccupied
+            : !seg.endDate
+              ? student.bedsOccupied
+              : undefined,
+          Boolean((seg.roomId || '').trim())
+        );
 
         return {
           ...seg,
           id: seg.id || `SEG-${student.studentId}-${idx + 1}`,
           roomId: seg.roomId || '',
           hostelLocation: seg.hostelLocation || student.hostelLocation || 'Unassigned',
-          occupancyMode:
-            seg.occupancyMode ||
-            (student.occupancyMode === 'Whole Unit Exclusive'
-              ? 'Whole Unit Exclusive'
-              : 'Single Bed'),
+          occupancyMode: segOccupancyMode,
+          bedsOccupied: segBedsOccupied,
           startDate: segStartDate,
           endDate: seg.endDate ?? null,
           standardRoomRate: segStdRate,
@@ -501,16 +578,22 @@ export function getNormalizedStayHistory(student: Student): StayHistorySegment[]
     typeof student.effectiveMonthlyFee === 'number'
       ? student.effectiveMonthlyFee
       : Math.max(0, standardRoomRate - monthlyRebate);
+  const fallbackMode: OccupancyMode = !(student.assignedRoomId || '').trim()
+    ? 'Unassigned'
+    : normalizeAssignableOccupancyMode(student.occupancyMode);
+  const fallbackBeds = resolveBedsOccupiedCount(
+    fallbackMode,
+    student.bedsOccupied,
+    Boolean((student.assignedRoomId || '').trim())
+  );
 
   return [
     {
       id: `SEG-INIT-${student.studentId}`,
       roomId: student.assignedRoomId || '',
       hostelLocation: student.hostelLocation || 'Unassigned',
-      occupancyMode:
-        student.occupancyMode === 'Whole Unit Exclusive'
-          ? 'Whole Unit Exclusive'
-          : 'Single Bed',
+      occupancyMode: fallbackMode,
+      bedsOccupied: fallbackBeds,
       startDate: student.checkInDate,
       endDate: student.status === 'Checked-Out' ? student.checkOutDate : null,
       standardRoomRate,
@@ -533,12 +616,18 @@ export function calculateResidentBilling(
   payments: Payment[],
   asOfDate = getTodayISO()
 ): ResidentBillingSummary {
-  const residentType: ResidentType = student.residentType || 'Student';
-  const occupancyMode: ResidentOccupancyMode = !(student.assignedRoomId || '').trim()
+  const occupantType = resolveOccupantType(student);
+  const residentType: ResidentType =
+    student.residentType || toLegacyResidentType(occupantType);
+  const hasAssignedRoom = Boolean((student.assignedRoomId || '').trim());
+  const occupancyMode: ResidentOccupancyMode = !hasAssignedRoom
     ? 'Unassigned'
-    : student.occupancyMode === 'Whole Unit Exclusive'
-      ? 'Whole Unit Exclusive'
-      : 'Single Bed';
+    : normalizeAssignableOccupancyMode(student.occupancyMode);
+  const bedsOccupied = resolveBedsOccupiedCount(
+    occupancyMode,
+    student.bedsOccupied,
+    hasAssignedRoom
+  );
   const standardRoomRate =
     typeof student.standardRoomRate === 'number'
       ? student.standardRoomRate
@@ -692,7 +781,9 @@ export function calculateResidentBilling(
 
   return {
     residentType,
+    occupantType,
     occupancyMode,
+    bedsOccupied,
     standardRoomRate,
     monthlyRebate,
     rebateReason,

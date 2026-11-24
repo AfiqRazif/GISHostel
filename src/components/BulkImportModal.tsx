@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  AssignableOccupancyMode,
   calculateFirstMonthDefaults,
   DATE_REGEX,
   FIELD_LIMITS,
@@ -22,7 +23,9 @@ import {
   ID_REGEX,
   MONTH_REGEX,
   OCCUPANCY_MODES,
+  OCCUPANT_TYPES,
   OccupancyMode,
+  OccupantType,
   Payment,
   PAYMENT_METHODS,
   PAYMENT_STATUSES,
@@ -33,13 +36,12 @@ import {
   PhysicalReceiptStatus,
   PROGRAMS,
   ProgramType,
-  RESIDENT_TYPES,
   ResidentHostelLocation,
-  ResidentType,
   Room,
   sanitizeIdSegment,
   StaffRole,
   Student,
+  toLegacyResidentType,
 } from '../types/hostel';
 import {
   BulkImportPaymentItem,
@@ -258,6 +260,42 @@ function matchResidentLocation(raw: string): ResidentHostelLocation | null {
   return matchLocation(raw);
 }
 
+function matchOccupantType(raw: string): OccupantType | null {
+  const clean = raw.trim().toLowerCase();
+  if (!clean) return null;
+  if (clean === 'lecturer' || clean === 'staff' || clean === 'lecturer/staff') {
+    return 'Lecturer / Staff';
+  }
+  if (clean === 'guest' || clean === 'event' || clean === 'event guest') {
+    return 'Event Guest';
+  }
+  return matchEnum(raw, OCCUPANT_TYPES);
+}
+
+function matchOccupancyMode(raw: string): AssignableOccupancyMode | null {
+  const clean = raw.trim().toLowerCase();
+  if (!clean) return null;
+  if (clean === 'single' || clean === 'single bed') {
+    return 'Single Bed';
+  }
+  if (
+    clean === 'custom multi-bed' ||
+    clean === 'multi-bed' ||
+    clean === 'multibed' ||
+    clean === 'custom multibed'
+  ) {
+    return 'Custom Multi-Bed';
+  }
+  if (
+    clean === 'whole unit exclusive' ||
+    clean === 'whole unit' ||
+    clean === 'exclusive'
+  ) {
+    return 'Whole Unit Exclusive';
+  }
+  return matchEnum(raw, OCCUPANCY_MODES);
+}
+
 function downloadTemplateWorkbook(type: BulkImportType) {
   let filename = '';
   let sheetName = '';
@@ -305,8 +343,9 @@ function downloadTemplateWorkbook(type: BulkImportType) {
         phone: '012-345 6789',
         emergencyContact: 'Zulkifli bin Ahmad 019-222 1100',
         program: 'Diploma',
-        residentType: 'Student',
+        occupantType: 'Student',
         occupancyMode: 'Single Bed',
+        bedsOccupied: 1,
         assignedRoomId: 'DJ2-A-04-B3',
         hostelLocation: 'Apartment Desa Jati 2',
         checkInDate: '2026-10-18',
@@ -319,13 +358,34 @@ function downloadTemplateWorkbook(type: BulkImportType) {
         status: 'Active',
       },
       {
+        studentId: 'EVT260008',
+        fullName: 'Dr. Syafiqah binti Ramli',
+        phone: '019-880 3311',
+        emergencyContact: 'GIS Academic Office 06-799 1000',
+        program: 'Other',
+        occupantType: 'Event Guest',
+        occupancyMode: 'Custom Multi-Bed',
+        bedsOccupied: 2,
+        assignedRoomId: 'NSQ-C-09-B1',
+        hostelLocation: 'Nilai Square',
+        checkInDate: '2026-11-01',
+        checkOutDate: '',
+        depositPaid: 0,
+        standardRoomRate: 560,
+        monthlyRebate: 0,
+        rebateReason: 'None',
+        firstMonthCharge: '',
+        status: 'Active',
+      },
+      {
         studentId: 'GIS240199',
         fullName: 'Daniel Hakim bin Roslan',
         phone: '011-7788 9900',
         emergencyContact: 'Roslan bin Isa 013-900 4411',
         program: 'SKM',
-        residentType: 'Student',
+        occupantType: 'Student',
         occupancyMode: 'Single Bed',
+        bedsOccupied: 1,
         assignedRoomId: 'DJ2-A-04-B1',
         hostelLocation: 'Apartment Desa Jati 2',
         checkInDate: '2026-01-05',
@@ -343,8 +403,9 @@ function downloadTemplateWorkbook(type: BulkImportType) {
         phone: '',
         emergencyContact: '',
         program: 'Diploma',
-        residentType: 'Student',
+        occupantType: 'Student',
         occupancyMode: 'Single Bed',
+        bedsOccupied: 0,
         assignedRoomId: '',
         hostelLocation: '',
         checkInDate: '',
@@ -366,6 +427,7 @@ function downloadTemplateWorkbook(type: BulkImportType) {
         roomId: 'DJ2-A-01-B1',
         hostelLocation: 'Apartment Desa Jati 2',
         occupancyMode: 'Single Bed',
+        bedsOccupied: 1,
         startDate: '2026-01-05',
         endDate: '2026-06-30',
         standardRoomRate: 250,
@@ -377,13 +439,14 @@ function downloadTemplateWorkbook(type: BulkImportType) {
         studentId: 'GIS250101',
         roomId: 'NSQ-C-09-B1',
         hostelLocation: 'Nilai Square',
-        occupancyMode: 'Single Bed',
+        occupancyMode: 'Custom Multi-Bed',
+        bedsOccupied: 2,
         startDate: '2026-07-01',
         endDate: '',
-        standardRoomRate: 280,
-        monthlyRebate: 30,
+        standardRoomRate: 560,
+        monthlyRebate: 60,
         firstMonthCharge: '',
-        reason: 'Maintenance / Unit Upgrade',
+        reason: 'Multi-Bed Assignment / Upgrade',
       },
     ];
   } else {
@@ -587,10 +650,13 @@ export function BulkImportModal({
           getCell(raw, 'emergencyContact', 'emergency', 'Emergency Contact')
         );
         const rawResidentType =
-          trimCell(getCell(raw, 'residentType', 'Resident Type')) || 'Student';
+          trimCell(
+            getCell(raw, 'occupantType', 'residentType', 'Occupant Type', 'Resident Type')
+          ) || 'Student';
         const rawProgram = trimCell(getCell(raw, 'program', 'Program'));
         const rawOccupancyMode =
           trimCell(getCell(raw, 'occupancyMode', 'Occupancy Mode')) || 'Single Bed';
+        const rawBedsOccupied = getCell(raw, 'bedsOccupied', 'beds', 'Beds Occupied');
         const rawRoomId = trimCell(
           getCell(raw, 'assignedRoomId', 'roomId', 'Assigned Room ID')
         );
@@ -638,27 +704,25 @@ export function BulkImportModal({
           errors.push('fullName must be at least 2 characters');
         }
 
-        const residentTypeNorm =
-          rawResidentType.toLowerCase() === 'lecturer' ||
-          rawResidentType.toLowerCase() === 'staff'
-            ? 'Lecturer / Staff'
-            : matchEnum(rawResidentType, RESIDENT_TYPES);
-        if (!residentTypeNorm) {
-          errors.push(`Invalid residentType "${rawResidentType}"`);
+        const occupantTypeNorm = matchOccupantType(rawResidentType);
+        if (!occupantTypeNorm) {
+          errors.push(`Invalid occupantType "${rawResidentType}" (Student, Lecturer / Staff, Event Guest)`);
         }
 
         const program: ProgramType | null = rawProgram
           ? matchEnum(rawProgram, PROGRAMS)
-          : residentTypeNorm && residentTypeNorm !== 'Student'
+          : occupantTypeNorm && occupantTypeNorm !== 'Student'
             ? 'Other'
             : 'Diploma';
         if (!program) {
           errors.push(`Invalid program "${rawProgram}" (Diploma, SKM, DiFFER, Other)`);
         }
 
-        const occupancyMode = matchEnum(rawOccupancyMode, OCCUPANCY_MODES);
-        if (!occupancyMode) {
-          errors.push(`Invalid occupancyMode "${rawOccupancyMode}"`);
+        const parsedOccupancyMode = matchOccupancyMode(rawOccupancyMode);
+        if (!parsedOccupancyMode) {
+          errors.push(
+            `Invalid occupancyMode "${rawOccupancyMode}" (Single Bed, Custom Multi-Bed, Whole Unit Exclusive)`
+          );
         }
 
         const status = matchEnum(rawStatus, ['Active', 'Checked-Out'] as const);
@@ -667,6 +731,52 @@ export function BulkImportModal({
         }
 
         const room = assignedRoomId ? roomById.get(assignedRoomId) : undefined;
+        const unitRooms = room
+          ? rooms
+              .filter(
+                (r) =>
+                  r.location === room.location &&
+                  r.block === room.block &&
+                  r.unitNo === room.unitNo
+              )
+              .sort((a, b) =>
+                a.bedSlot.localeCompare(b.bedSlot, undefined, { numeric: true })
+              )
+          : [];
+        const vacantSiblingsInUnit = room
+          ? unitRooms.filter(
+              (r) =>
+                r.roomId !== room.roomId &&
+                r.status === 'Vacant' &&
+                !claimedRoomsInFile.has(r.roomId)
+            )
+          : [];
+
+        let bedsOccupied = 1;
+        if (!room) {
+          bedsOccupied = 0;
+        } else if (parsedOccupancyMode === 'Whole Unit Exclusive') {
+          bedsOccupied = Math.max(1, unitRooms.length);
+        } else if (parsedOccupancyMode === 'Custom Multi-Bed') {
+          if (trimCell(rawBedsOccupied) === '') {
+            bedsOccupied = 2;
+          } else {
+            const parsedBeds = parseNumberCell(rawBedsOccupied);
+            if (
+              parsedBeds === null ||
+              !Number.isInteger(parsedBeds) ||
+              parsedBeds < 1 ||
+              parsedBeds > 50
+            ) {
+              errors.push('bedsOccupied must be a whole number between 1 and 50');
+            } else {
+              bedsOccupied = parsedBeds;
+            }
+          }
+        } else {
+          bedsOccupied = 1;
+        }
+
         if (assignedRoomId) {
           if (!room) {
             errors.push(`Room ID ${assignedRoomId} not found`);
@@ -677,9 +787,35 @@ export function BulkImportModal({
               errors.push(
                 `Room ${room.roomId} already claimed/blocked by an earlier row in this file`
               );
+            } else if (parsedOccupancyMode === 'Whole Unit Exclusive') {
+              const blockingBed = unitRooms.find(
+                (r) =>
+                  r.roomId !== room.roomId &&
+                  (r.status !== 'Vacant' || claimedRoomsInFile.has(r.roomId))
+              );
+              if (blockingBed) {
+                errors.push(
+                  `Whole Unit Exclusive requires an empty unit; ${blockingBed.roomId} is ${
+                    claimedRoomsInFile.has(blockingBed.roomId)
+                      ? 'already claimed in file'
+                      : blockingBed.status
+                  }`
+                );
+              }
+            } else if (parsedOccupancyMode === 'Custom Multi-Bed') {
+              const availableBeds = 1 + vacantSiblingsInUnit.length;
+              if (bedsOccupied > availableBeds) {
+                errors.push(
+                  `Custom Multi-Bed requested ${bedsOccupied} bed(s), but only ${availableBeds} vacant bed(s) remain in unit ${room.block}-${room.unitNo}`
+                );
+              }
             }
           }
         }
+
+        const resolvedOccupancyMode: OccupancyMode = room
+          ? parsedOccupancyMode ?? 'Single Bed'
+          : 'Unassigned';
 
         let hostelLocation: ResidentHostelLocation | null = room
           ? room.location
@@ -725,10 +861,13 @@ export function BulkImportModal({
           errors.push('depositPaid must be a valid RM amount');
         }
 
+        const defaultStdRate = room
+          ? resolvedOccupancyMode === 'Custom Multi-Bed'
+            ? Math.round((room.monthlyRate ?? 250) * Math.max(1, bedsOccupied) * 100) / 100
+            : (room.monthlyRate ?? 250)
+          : 0;
         const standardRoomRate =
-          trimCell(stdRateRaw) === ''
-            ? room?.monthlyRate ?? 250
-            : parseNumberCell(stdRateRaw);
+          trimCell(stdRateRaw) === '' ? defaultStdRate : parseNumberCell(stdRateRaw);
         if (
           standardRoomRate === null ||
           standardRoomRate < 0 ||
@@ -780,17 +919,13 @@ export function BulkImportModal({
           seenStudentIds.add(studentId);
           if (room && status === 'Active') {
             claimedRoomsInFile.add(room.roomId);
-            if (occupancyMode === 'Whole Unit Exclusive') {
-              for (const sib of rooms) {
-                if (
-                  sib.roomId !== room.roomId &&
-                  sib.location === room.location &&
-                  sib.block === room.block &&
-                  sib.unitNo === room.unitNo &&
-                  sib.status === 'Vacant'
-                ) {
-                  claimedRoomsInFile.add(sib.roomId);
-                }
+            if (resolvedOccupancyMode === 'Whole Unit Exclusive') {
+              for (const sib of vacantSiblingsInUnit) {
+                claimedRoomsInFile.add(sib.roomId);
+              }
+            } else if (resolvedOccupancyMode === 'Custom Multi-Bed') {
+              for (const sib of vacantSiblingsInUnit.slice(0, Math.max(0, bedsOccupied - 1))) {
+                claimedRoomsInFile.add(sib.roomId);
               }
             }
           }
@@ -801,7 +936,11 @@ export function BulkImportModal({
           valid,
           errors,
           summaryLabel: `${studentId || rawStudentId || '(missing ID)'} · ${fullName || 'Unnamed'}`,
-          detailLabel: `${assignedRoomId || 'Room Unassigned'} · ${hostelLocation || 'Unassigned'} · In: ${checkInDate || 'invalid'}${
+          detailLabel: `${assignedRoomId || 'Room Unassigned'} · ${
+            occupantTypeNorm || rawResidentType
+          }${bedsOccupied > 1 ? ` · ${bedsOccupied} Beds (${resolvedOccupancyMode})` : ''} · ${
+            hostelLocation || 'Unassigned'
+          } · In: ${checkInDate || 'invalid'}${
             status === 'Checked-Out' ? ` · Out: ${checkOutDate || 'missing'}` : ''
           } · 1st mo: ${formatRM(firstMonthCharge)} (${firstMonthNote})`,
           amountOrRateLabel: `${formatRM(effectiveMonthlyFee)}/mo`,
@@ -809,8 +948,8 @@ export function BulkImportModal({
           payload:
             valid &&
             hostelLocation &&
-            residentTypeNorm &&
-            occupancyMode &&
+            occupantTypeNorm &&
+            parsedOccupancyMode &&
             program &&
             status &&
             depositPaid !== null &&
@@ -825,8 +964,10 @@ export function BulkImportModal({
                     FIELD_LIMITS.emergencyContact.max
                   ),
                   program,
-                  residentType: residentTypeNorm,
-                  occupancyMode,
+                  residentType: toLegacyResidentType(occupantTypeNorm),
+                  occupantType: occupantTypeNorm,
+                  occupancyMode: resolvedOccupancyMode,
+                  bedsOccupied,
                   assignedRoomId: room ? room.roomId : '',
                   hostelLocation,
                   checkInDate,
@@ -868,6 +1009,7 @@ export function BulkImportModal({
           const rawOccupancyMode =
             trimCell(getCell(raw, 'occupancyMode', 'Occupancy Mode')) ||
             'Single Bed';
+          const rawBedsOccupied = getCell(raw, 'bedsOccupied', 'beds', 'Beds Occupied');
           const startDate = normalizeExcelDate(
             getCell(raw, 'startDate', 'checkInDate', 'Start Date')
           );
@@ -902,9 +1044,28 @@ export function BulkImportModal({
             errors.push('roomId is required (historical/custom Room IDs allowed)');
           }
 
-          const occupancyMode = matchEnum(rawOccupancyMode, OCCUPANCY_MODES);
+          const occupancyMode = matchOccupancyMode(rawOccupancyMode);
           if (!occupancyMode) {
-            errors.push(`Invalid occupancyMode "${rawOccupancyMode}"`);
+            errors.push(
+              `Invalid occupancyMode "${rawOccupancyMode}" (Single Bed, Custom Multi-Bed, Whole Unit Exclusive)`
+            );
+          }
+
+          let bedsOccupied = 1;
+          if (trimCell(rawBedsOccupied) === '') {
+            bedsOccupied = occupancyMode === 'Custom Multi-Bed' ? 2 : 1;
+          } else {
+            const parsedBeds = parseNumberCell(rawBedsOccupied);
+            if (
+              parsedBeds === null ||
+              !Number.isInteger(parsedBeds) ||
+              parsedBeds < 1 ||
+              parsedBeds > 50
+            ) {
+              errors.push('bedsOccupied must be a whole number between 1 and 50');
+            } else {
+              bedsOccupied = parsedBeds;
+            }
           }
 
           const matchedRoom = roomId
@@ -1008,7 +1169,9 @@ export function BulkImportModal({
             summaryLabel: student
               ? `${student.studentId} · ${student.fullName}`
               : studentId || rawStudentId || '(missing ID)',
-            detailLabel: `${roomId || '(missing room)'} · ${hostelLocation || 'Unassigned'} · ${
+            detailLabel: `${roomId || '(missing room)'}${
+              bedsOccupied > 1 ? ` (${bedsOccupied} Beds)` : ''
+            } · ${hostelLocation || 'Unassigned'} · ${
               startDate || 'invalid'
             } → ${hasEndDateInput ? endDate || 'invalid' : 'Present'} · 1st mo: ${formatRM(
               firstMonthCharge
@@ -1027,6 +1190,7 @@ export function BulkImportModal({
                     roomId,
                     hostelLocation,
                     occupancyMode,
+                    bedsOccupied,
                     startDate,
                     endDate: hasEndDateInput ? endDate : null,
                     standardRoomRate,

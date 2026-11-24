@@ -293,7 +293,7 @@ export function ReportsTab({
       standardMonthlyRate: number;
       observedRates: Set<number>;
       legacySourceUnits: Set<string>;
-      tenantSets: Array<Set<string>>;
+      tenantBedsByMonth: Array<Map<string, number>>;
       expectedByMonth: number[];
       actualByMonth: number[];
       isArchived: boolean;
@@ -327,7 +327,7 @@ export function ReportsTab({
           standardMonthlyRate: 0,
           observedRates: new Set<number>(),
           legacySourceUnits: new Set<string>(),
-          tenantSets: Array.from({ length: 12 }, () => new Set<string>()),
+          tenantBedsByMonth: Array.from({ length: 12 }, () => new Map<string, number>()),
           expectedByMonth: Array.from({ length: 12 }, () => 0),
           actualByMonth: Array.from({ length: 12 }, () => 0),
           isArchived: true,
@@ -399,7 +399,7 @@ export function ReportsTab({
         standardMonthlyRate,
         observedRates,
         legacySourceUnits: new Set<string>(),
-        tenantSets: Array.from({ length: 12 }, () => new Set<string>()),
+        tenantBedsByMonth: Array.from({ length: 12 }, () => new Map<string, number>()),
         expectedByMonth: Array.from({ length: 12 }, () => 0),
         actualByMonth: Array.from({ length: 12 }, () => 0),
         isArchived: false,
@@ -457,7 +457,7 @@ export function ReportsTab({
             standardMonthlyRate: rate,
             observedRates: new Set<number>([rate]),
             legacySourceUnits: new Set<string>(),
-            tenantSets: Array.from({ length: 12 }, () => new Set<string>()),
+            tenantBedsByMonth: Array.from({ length: 12 }, () => new Map<string, number>()),
             expectedByMonth: Array.from({ length: 12 }, () => 0),
             actualByMonth: Array.from({ length: 12 }, () => 0),
             isArchived: true,
@@ -486,7 +486,7 @@ export function ReportsTab({
             standardMonthlyRate: rate,
             observedRates: new Set<number>([rate]),
             legacySourceUnits: new Set<string>(),
-            tenantSets: Array.from({ length: 12 }, () => new Set<string>()),
+            tenantBedsByMonth: Array.from({ length: 12 }, () => new Map<string, number>()),
             expectedByMonth: Array.from({ length: 12 }, () => 0),
             actualByMonth: Array.from({ length: 12 }, () => 0),
             isArchived: true,
@@ -546,7 +546,15 @@ export function ReportsTab({
 
           const monthExpected =
             ym === segStartYM ? segFirstCharge : seg.effectiveMonthlyFee;
-          unitAcc.tenantSets[mIdx].add(student.studentId);
+          const segBeds =
+            seg.occupancyMode === 'Unassigned'
+              ? 0
+              : Math.max(1, Math.floor(Number(seg.bedsOccupied) || 1));
+          const prevBeds = unitAcc.tenantBedsByMonth[mIdx].get(student.studentId) ?? 0;
+          unitAcc.tenantBedsByMonth[mIdx].set(
+            student.studentId,
+            Math.max(prevBeds, segBeds)
+          );
           unitAcc.expectedByMonth[mIdx] += monthExpected;
           studentMonthUnitMap.set(`${student.studentId}::${ym}`, targetUnitKey);
         }
@@ -590,7 +598,10 @@ export function ReportsTab({
     const allUnitRows: UnitSummaryRow[] = Array.from(unitsByKey.values())
       .map((acc) => {
         const months: MonthCellData[] = Array.from({ length: 12 }, (_, idx) => ({
-          tenantCount: acc.tenantSets[idx].size,
+          tenantCount: Array.from(acc.tenantBedsByMonth[idx].values()).reduce(
+            (sum, beds) => sum + beds,
+            0
+          ),
           expected: roundMoney(acc.expectedByMonth[idx]),
           actual: roundMoney(acc.actualByMonth[idx]),
         }));

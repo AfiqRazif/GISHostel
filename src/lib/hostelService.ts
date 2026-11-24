@@ -19,6 +19,7 @@ import {
   OperationType,
 } from './firebase';
 import {
+  AssignableOccupancyMode,
   buildRoomId,
   calculateFirstMonthDefaults,
   calculateStudentBilling,
@@ -33,8 +34,11 @@ import {
   HostelLocation,
   ID_REGEX,
   MONTH_REGEX,
+  normalizeAssignableOccupancyMode,
   normalizeStaffLoginEmail,
   OccupancyMode,
+  OCCUPANT_TYPES,
+  OccupantType,
   Payment,
   PaymentMethod,
   PaymentStatus,
@@ -44,6 +48,8 @@ import {
   ResidentHostelLocation,
   ResidentOccupancyMode,
   ResidentType,
+  resolveBedsOccupiedCount,
+  resolveOccupantType,
   Room,
   RoomStatus,
   sanitizeIdSegment,
@@ -53,9 +59,373 @@ import {
   Student,
   StudentStatus,
   subtractOneDayISO,
+  toLegacyResidentType,
 } from '../types/hostel';
 
 export { calculateStudentBilling };
+
+export interface UnitOccupantInfo {
+  student: Student;
+  occupantType: OccupantType;
+  occupancyMode: OccupancyMode;
+  bedsOccupied: number;
+}
+
+export interface UnitCapacitySummary {
+  unitKey: string;
+  location: HostelLocation;
+  block: string;
+  unitNo: string;
+  rooms: Room[];
+  totalBeds: number;
+  occupiedBeds: number;
+  availableBeds: number;
+  blockedBeds: number;
+  maintenanceBeds: number;
+  standardMonthlyRate: number;
+  activeOccupants: UnitOccupantInfo[];
+}
+
+export function getUnitKey(
+  room: Pick<Room, 'location' | 'block' | 'unitNo'>
+): string {
+  return `${room.location}::${room.block}::${room.unitNo}`;
+}
+
+export function computeUnitCapacities(
+  allRooms: Room[],
+  allStudents: Student[]
+): Map<string, UnitCapacitySummary> {
+  const unitRoomsMap = new Map<string, Room[]>();
+  for (const r of allRooms) {
+    const key = getUnitKey(r);
+    const list = unitRoomsMap.get(key) ?? [];
+    list.push(r);
+    unitRoomsMap.set(key, list);
+  }
+
+  const studentById = new Map(allStudents.map((s) => [s.studentId, s]));
+  const result = new Map<string, UnitCapacitySummary>();
+
+  for (const [unitKey, unitRooms] of unitRoomsMap.entries()) {
+    const sortedRooms = [...unitRooms].sort((a, b) =>
+      a.bedSlot.localeCompare(b.bedSlot, undefined, { numeric: true })
+    );
+    const first = sortedRooms[0];
+    const totalBeds = sortedRooms.length;
+    const availableBeds = sortedRooms.filter((r) => r.status === 'Vacant').length;
+    const blockedBeds = sortedRooms.filter(
+      (r) => r.status === 'Reserved / Blocked'
+    ).length;
+    const maintenanceBeds = sortedRooms.filter(
+      (r) => r.status === 'Maintenance'
+    ).length;
+
+    const seenStudentIds = new Set<string>();
+    const activeOccupants: UnitOccupantInfo[] = [];
+    let occupiedBeds = 0;
+
+    for (const r of sortedRooms) {
+      if (r.status === 'Occupied' && r.currentStudentId) {
+        if (!seenStudentIds.has(r.currentStudentId)) {
+          seenStudentIds.add(r.currentStudentId);
+          const stu = studentById.get(r.currentStudentId);
+          if (stu) {
+            const mode = normalizeAssignableOccupancyMode(stu.occupancyMode);
+            const beds =
+              mode === 'Whole Unit Exclusive'
+                ? Math.max(
+                    1,
+                    resolveBedsOccupiedCount(mode, stu.bedsOccupied, true),
+                    1 +
+                      sortedRooms.filter(
+                        (sib) =>
+                          sib.roomId !== r.roomId &&
+                          sib.status === 'Reserved / Blocked' &&
+                          (sib.exclusiveResidentId === stu.studentId ||
+                            !sib.exclusiveResidentId)
+                      ).length
+                  )
+                : Math.min(
+                    totalBeds,
+                    Math.max(1, resolveBedsOccupiedCount(mode, stu.bedsOccupied, true))
+                  );
+            activeOccupants.push({
+              student: stu,
+              occupantType: resolveOccupantType(stu),
+              occupancyMode: mode,
+              bedsOccupied: beds,
+            });
+            occupiedBeds += beds;
+          } else {
+            occupiedBeds += 1;
+          }
+        }
+      } else if (r.status === 'Occupied') {
+        occupiedBeds += 1;
+      }
+    }
+
+    // Fallback: if no student match existed for some blocked beds or legacy whole-unit blocks,
+    // ensure occupiedBeds reflects resident-blocked slots without double-counting.
+    const residentBlockedCount = sortedRooms.filter(
+      (r) => r.status === 'Reserved / Blocked' && Boolean(r.exclusiveResidentId)
+    ).length;
+    const rawOccupiedRoomCount = sortedRooms.filter(
+      (r) => r.status === 'Occupied'
+    ).length;
+    occupiedBeds = Math.min(
+      totalBeds,
+      Math.max(occupiedBeds, rawOccupiedRoomCount + residentBlockedCount)
+    );
+
+    const standardMonthlyRate =
+      sortedRooms.find((r) => r.monthlyRate > 0)?.monthlyRate ??
+      first.monthlyRate ??
+      0;
+
+    result.set(unitKey, {
+      unitKey,
+      location: first.location,
+      block: first.block,
+      unitNo: first.unitNo,
+      rooms: sortedRooms,
+      totalBeds,
+      occupiedBeds,
+      availableBeds,
+      blockedBeds,
+      maintenanceBeds,
+      standardMonthlyRate,
+      activeOccupants,
+    });
+  }
+
+  return result;
+}
+
+export interface UnitAvailabilityInfo {
+  unitRooms: Room[];
+  totalBeds: number;
+  vacantCount: number;
+  reclaimableCount: number;
+  availableForResident: number;
+  isUnitEmptyForExclusive: boolean;
+}
+
+export function getUnitAvailabilityForRoom(
+  targetRoom: Room | null | undefined,
+  allRooms: Room[],
+  excludeStudentId?: string | null,
+  prevOccupancyMode?: OccupancyMode | null
+): UnitAvailabilityInfo {
+  if (!targetRoom) {
+    return {
+      unitRooms: [],
+      totalBeds: 0,
+      vacantCount: 0,
+      reclaimableCount: 0,
+      availableForResident: 0,
+      isUnitEmptyForExclusive: false,
+    };
+  }
+  const unitRooms = allRooms.filter(
+    (r) =>
+      r.location === targetRoom.location &&
+      r.block === targetRoom.block &&
+      r.unitNo === targetRoom.unitNo
+  );
+
+  const isReclaimable = (r: Room): boolean => {
+    if (!excludeStudentId) return false;
+    if (r.currentStudentId === excludeStudentId) return true;
+    if (r.status === 'Reserved / Blocked') {
+      if (r.exclusiveResidentId === excludeStudentId) return true;
+      if (!r.exclusiveResidentId && prevOccupancyMode === 'Whole Unit Exclusive') {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  let vacantCount = 0;
+  let reclaimableCount = 0;
+  let availableForResident = 0;
+  let nonEmptyForExclusive = false;
+
+  for (const r of unitRooms) {
+    const reclaimable = isReclaimable(r);
+    if (r.status === 'Vacant') vacantCount += 1;
+    if (reclaimable) reclaimableCount += 1;
+    if (r.status === 'Vacant' || reclaimable) {
+      availableForResident += 1;
+    } else {
+      nonEmptyForExclusive = true;
+    }
+  }
+
+  return {
+    unitRooms,
+    totalBeds: unitRooms.length,
+    vacantCount,
+    reclaimableCount,
+    availableForResident,
+    isUnitEmptyForExclusive: unitRooms.length > 0 && !nonEmptyForExclusive,
+  };
+}
+
+interface PlannedRoomReservation {
+  resolvedBedsOccupied: number;
+  blockedSiblings: string[];
+  roomUpdates: Map<string, Record<string, unknown>>;
+}
+
+function buildSimulatedOccupancyMap(allRooms: Room[]): Map<string, RoomStatus> {
+  return new Map(allRooms.map((r) => [r.roomId, r.status]));
+}
+
+function queueReleaseForResident(
+  allRooms: Room[],
+  residentId: string,
+  prevRoom: Room | undefined,
+  prevOccupancyMode: OccupancyMode | string | undefined,
+  email: string,
+  roomUpdates: Map<string, Record<string, unknown>>,
+  simStatus: Map<string, RoomStatus>
+): void {
+  for (const r of allRooms) {
+    const isPrimaryOwned = r.currentStudentId === residentId;
+    const isBlockedByResident =
+      r.status === 'Reserved / Blocked' &&
+      (r.exclusiveResidentId === residentId ||
+        (!r.exclusiveResidentId &&
+          prevOccupancyMode === 'Whole Unit Exclusive' &&
+          prevRoom &&
+          r.location === prevRoom.location &&
+          r.block === prevRoom.block &&
+          r.unitNo === prevRoom.unitNo));
+
+    if (isPrimaryOwned || isBlockedByResident) {
+      simStatus.set(r.roomId, 'Vacant');
+      roomUpdates.set(r.roomId, {
+        status: 'Vacant',
+        currentStudentId: null,
+        currentStudentName: null,
+        statusNote: null,
+        exclusiveResidentId: null,
+        updatedBy: email,
+        updatedAt: serverTimestamp(),
+      });
+    }
+  }
+}
+
+function queueReserveForResident(
+  targetRoom: Room,
+  allRooms: Room[],
+  residentId: string,
+  residentName: string,
+  occupancyMode: AssignableOccupancyMode,
+  requestedBedsOccupied: number | undefined,
+  email: string,
+  roomUpdates: Map<string, Record<string, unknown>>,
+  simStatus: Map<string, RoomStatus>
+): { resolvedBedsOccupied: number; blockedSiblings: string[] } {
+  const targetSimStatus = simStatus.get(targetRoom.roomId) ?? targetRoom.status;
+  if (targetSimStatus !== 'Vacant') {
+    throw new Error(`Room "${targetRoom.roomId}" is no longer Vacant.`);
+  }
+
+  const unitRooms = allRooms
+    .filter(
+      (r) =>
+        r.location === targetRoom.location &&
+        r.block === targetRoom.block &&
+        r.unitNo === targetRoom.unitNo
+    )
+    .sort((a, b) => a.bedSlot.localeCompare(b.bedSlot, undefined, { numeric: true }));
+
+  const siblings = unitRooms.filter((r) => r.roomId !== targetRoom.roomId);
+  const vacantSiblings = siblings.filter(
+    (r) => (simStatus.get(r.roomId) ?? r.status) === 'Vacant'
+  );
+
+  let resolvedBedsOccupied = 1;
+  let siblingsToBlock: Room[] = [];
+  let blockNotePrefix = '';
+
+  if (occupancyMode === 'Whole Unit Exclusive') {
+    const occupiedOrBlockedByOther = siblings.some(
+      (r) => (simStatus.get(r.roomId) ?? r.status) !== 'Vacant'
+    );
+    if (occupiedOrBlockedByOther) {
+      throw new Error(
+        `Whole Unit Exclusive requires all beds in ${targetRoom.location} ${targetRoom.block}-${targetRoom.unitNo} to be Vacant.`
+      );
+    }
+    resolvedBedsOccupied = Math.max(1, unitRooms.length);
+    siblingsToBlock = vacantSiblings;
+    blockNotePrefix = `Exclusive Unit: ${residentName}`.slice(
+      0,
+      FIELD_LIMITS.statusNote.max
+    );
+  } else if (occupancyMode === 'Custom Multi-Bed') {
+    const requested = Math.max(
+      1,
+      Math.floor(Number(requestedBedsOccupied) || 2)
+    );
+    const maxAvailable = 1 + vacantSiblings.length;
+    if (requested > maxAvailable) {
+      throw new Error(
+        `Only ${maxAvailable} bed(s) available in ${targetRoom.location} ${targetRoom.block}-${targetRoom.unitNo}, cannot assign ${requested} beds.`
+      );
+    }
+    resolvedBedsOccupied = requested;
+    siblingsToBlock = vacantSiblings.slice(0, requested - 1);
+    blockNotePrefix = `Multi-Bed (${requested} Beds): ${residentName}`.slice(
+      0,
+      FIELD_LIMITS.statusNote.max
+    );
+  } else {
+    resolvedBedsOccupied = 1;
+  }
+
+  simStatus.set(targetRoom.roomId, 'Occupied');
+  roomUpdates.set(targetRoom.roomId, {
+    status: 'Occupied',
+    currentStudentId: residentId,
+    currentStudentName: residentName,
+    statusNote: null,
+    exclusiveResidentId: null,
+    updatedBy: email,
+    updatedAt: serverTimestamp(),
+  });
+
+  const blockedSiblings: string[] = [];
+  for (const sib of siblingsToBlock) {
+    simStatus.set(sib.roomId, 'Reserved / Blocked');
+    roomUpdates.set(sib.roomId, {
+      status: 'Reserved / Blocked',
+      currentStudentId: null,
+      currentStudentName: null,
+      statusNote: blockNotePrefix,
+      exclusiveResidentId: residentId,
+      updatedBy: email,
+      updatedAt: serverTimestamp(),
+    });
+    blockedSiblings.push(sib.roomId);
+  }
+
+  return { resolvedBedsOccupied, blockedSiblings };
+}
+
+function applyRoomUpdateMapToBatch(
+  batch: ReturnType<typeof writeBatch>,
+  roomUpdates: Map<string, Record<string, unknown>>
+): void {
+  for (const [roomId, payload] of roomUpdates.entries()) {
+    batch.update(doc(db, 'rooms', roomId), payload);
+  }
+}
 
 function createStaySegmentId(): string {
   const stamp = Date.now().toString(36).toUpperCase();
@@ -607,8 +977,10 @@ export async function deleteVacantRoom(room: Room): Promise<void> {
 export interface RegisterStudentInput {
   studentId: string;
   fullName: string;
-  residentType: ResidentType;
+  residentType?: ResidentType;
+  occupantType?: OccupantType;
   occupancyMode?: ResidentOccupancyMode;
+  bedsOccupied?: number;
   phone: string;
   emergencyContact: string;
   program: ProgramType;
@@ -637,6 +1009,12 @@ export async function registerStudent(
   const emergencyContact = input.emergencyContact.trim().slice(0, FIELD_LIMITS.emergencyContact.max);
   const cleanAssignedRoomId = (input.assignedRoomId || '').trim();
   const isUnassigned = !cleanAssignedRoomId || !selectedRoom;
+
+  const resolvedOccupantType: OccupantType =
+    input.occupantType && OCCUPANT_TYPES.includes(input.occupantType)
+      ? input.occupantType
+      : resolveOccupantType({ residentType: input.residentType });
+  const legacyResidentType = toLegacyResidentType(resolvedOccupantType);
 
   const standardRoomRate = isUnassigned
     ? 0
@@ -705,7 +1083,7 @@ export async function registerStudent(
   }
 
   const studentRef = doc(db, 'students', studentId);
-  const blockedSiblings: string[] = [];
+  let blockedSiblings: string[] = [];
 
   try {
     const existingStudent = await getDoc(studentRef);
@@ -719,8 +1097,10 @@ export async function registerStudent(
       batch.set(studentRef, {
         studentId,
         fullName,
-        residentType: input.residentType,
+        residentType: legacyResidentType,
+        occupantType: resolvedOccupantType,
         occupancyMode: 'Unassigned',
+        bedsOccupied: 0,
         phone,
         emergencyContact,
         program: input.program,
@@ -746,55 +1126,44 @@ export async function registerStudent(
       return { blockedSiblings };
     }
 
-    const resolvedOccupancyMode: OccupancyMode =
-      input.occupancyMode === 'Whole Unit Exclusive'
-        ? 'Whole Unit Exclusive'
-        : 'Single Bed';
-    const roomRef = doc(db, 'rooms', selectedRoom.roomId);
+    const resolvedOccupancyMode = normalizeAssignableOccupancyMode(input.occupancyMode);
+    let resolvedBedsOccupied = resolveBedsOccupiedCount(
+      resolvedOccupancyMode,
+      input.bedsOccupied,
+      true
+    );
 
     if (input.status === 'Active') {
+      const roomRef = doc(db, 'rooms', selectedRoom.roomId);
       const freshRoom = await getDoc(roomRef);
       if (!freshRoom.exists() || freshRoom.data()?.status !== 'Vacant') {
         throw new Error(`Room "${selectedRoom.roomId}" is not currently Vacant.`);
       }
 
-      batch.update(roomRef, {
-        status: 'Occupied',
-        currentStudentId: studentId,
-        currentStudentName: fullName,
-        statusNote: null,
-        exclusiveResidentId: null,
-        updatedBy: email,
-        updatedAt: serverTimestamp(),
-      });
-
-      if (resolvedOccupancyMode === 'Whole Unit Exclusive') {
-        const siblings = allRooms.filter(
-          (r) =>
-            r.roomId !== selectedRoom.roomId &&
-            r.location === selectedRoom.location &&
-            r.block === selectedRoom.block &&
-            r.unitNo === selectedRoom.unitNo &&
-            r.status === 'Vacant'
-        );
-        const note = `Exclusive Unit: ${fullName}`.slice(0, FIELD_LIMITS.statusNote.max);
-        for (const sib of siblings) {
-          const sibRef = doc(db, 'rooms', sib.roomId);
-          const sibSnap = await getDoc(sibRef);
-          if (sibSnap.exists() && sibSnap.data()?.status === 'Vacant') {
-            batch.update(sibRef, {
-              status: 'Reserved / Blocked',
-              currentStudentId: null,
-              currentStudentName: null,
-              statusNote: note,
-              exclusiveResidentId: studentId,
-              updatedBy: email,
-              updatedAt: serverTimestamp(),
-            });
-            blockedSiblings.push(sib.roomId);
-          }
-        }
-      }
+      const simStatus = buildSimulatedOccupancyMap(allRooms);
+      const roomUpdates = new Map<string, Record<string, unknown>>();
+      const reserved = queueReserveForResident(
+        selectedRoom,
+        allRooms,
+        studentId,
+        fullName,
+        resolvedOccupancyMode,
+        input.bedsOccupied,
+        email,
+        roomUpdates,
+        simStatus
+      );
+      resolvedBedsOccupied = reserved.resolvedBedsOccupied;
+      blockedSiblings = reserved.blockedSiblings;
+      applyRoomUpdateMapToBatch(batch, roomUpdates);
+    } else if (resolvedOccupancyMode === 'Whole Unit Exclusive') {
+      const unitCount = allRooms.filter(
+        (r) =>
+          r.location === selectedRoom.location &&
+          r.block === selectedRoom.block &&
+          r.unitNo === selectedRoom.unitNo
+      ).length;
+      resolvedBedsOccupied = Math.max(1, unitCount || resolvedBedsOccupied);
     }
 
     const initialSegment: StayHistorySegment = {
@@ -802,6 +1171,7 @@ export async function registerStudent(
       roomId: selectedRoom.roomId,
       hostelLocation: selectedRoom.location,
       occupancyMode: resolvedOccupancyMode,
+      bedsOccupied: resolvedBedsOccupied,
       startDate: input.checkInDate,
       endDate: input.status === 'Checked-Out' ? input.checkOutDate : null,
       standardRoomRate,
@@ -819,8 +1189,10 @@ export async function registerStudent(
     batch.set(studentRef, {
       studentId,
       fullName,
-      residentType: input.residentType,
+      residentType: legacyResidentType,
+      occupantType: resolvedOccupantType,
       occupancyMode: resolvedOccupancyMode,
+      bedsOccupied: resolvedBedsOccupied,
       phone,
       emergencyContact,
       program: input.program,
@@ -849,7 +1221,9 @@ export async function registerStudent(
       error instanceof Error &&
       (error.message.includes('already registered') ||
         error.message.includes('Vacant') ||
-        error.message.includes('Check-Out'))
+        error.message.includes('Check-Out') ||
+        error.message.includes('available') ||
+        error.message.includes('Exclusive'))
     ) {
       throw error;
     }
@@ -859,8 +1233,10 @@ export async function registerStudent(
 
 export interface UpdateStudentInput {
   fullName: string;
-  residentType: ResidentType;
+  residentType?: ResidentType;
+  occupantType?: OccupantType;
   occupancyMode: OccupancyMode;
+  bedsOccupied?: number;
   phone: string;
   emergencyContact: string;
   program: ProgramType;
@@ -886,6 +1262,15 @@ export async function updateStudentRecord(
   const fullName = input.fullName.trim().slice(0, FIELD_LIMITS.fullName.max);
   const phone = input.phone.trim().slice(0, FIELD_LIMITS.phone.max);
   const emergencyContact = input.emergencyContact.trim().slice(0, FIELD_LIMITS.emergencyContact.max);
+  const resolvedOccupantType: OccupantType =
+    input.occupantType && OCCUPANT_TYPES.includes(input.occupantType)
+      ? input.occupantType
+      : resolveOccupantType({
+          occupantType: currentStudent.occupantType,
+          residentType: input.residentType || currentStudent.residentType,
+        });
+  const legacyResidentType = toLegacyResidentType(resolvedOccupantType);
+
   const standardRoomRate = clampNumber(
     input.standardRoomRate,
     FIELD_LIMITS.monthlyFee.min,
@@ -939,56 +1324,8 @@ export async function updateStudentRecord(
 
   const studentRef = doc(db, 'students', currentStudent.studentId);
   const batch = writeBatch(db);
-  const exclusiveNote = `Exclusive Unit: ${fullName}`.slice(0, FIELD_LIMITS.statusNote.max);
-
-  const releaseUnitExclusiveBlocks = (anchorRoom: Room | undefined) => {
-    for (const r of allRooms) {
-      if (r.status !== 'Reserved / Blocked') continue;
-      const matchesResident = r.exclusiveResidentId === currentStudent.studentId;
-      const matchesUnit =
-        anchorRoom &&
-        r.location === anchorRoom.location &&
-        r.block === anchorRoom.block &&
-        r.unitNo === anchorRoom.unitNo;
-      if (matchesResident || matchesUnit) {
-        batch.update(doc(db, 'rooms', r.roomId), {
-          status: 'Vacant',
-          currentStudentId: null,
-          currentStudentName: null,
-          statusNote: null,
-          exclusiveResidentId: null,
-          updatedBy: email,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
-  };
-
-  const applyUnitExclusiveBlocks = async (targetRoom: Room) => {
-    const siblings = allRooms.filter(
-      (r) =>
-        r.roomId !== targetRoom.roomId &&
-        r.location === targetRoom.location &&
-        r.block === targetRoom.block &&
-        r.unitNo === targetRoom.unitNo &&
-        r.status === 'Vacant'
-    );
-    for (const sib of siblings) {
-      const sibRef = doc(db, 'rooms', sib.roomId);
-      const sibSnap = await getDoc(sibRef);
-      if (sibSnap.exists() && sibSnap.data()?.status === 'Vacant') {
-        batch.update(sibRef, {
-          status: 'Reserved / Blocked',
-          currentStudentId: null,
-          currentStudentName: null,
-          statusNote: exclusiveNote,
-          exclusiveResidentId: currentStudent.studentId,
-          updatedBy: email,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
-  };
+  const simStatus = buildSimulatedOccupancyMap(allRooms);
+  const roomUpdates = new Map<string, Record<string, unknown>>();
 
   try {
     const existingStayHistory: StayHistorySegment[] =
@@ -1003,24 +1340,16 @@ export async function updateStudentRecord(
       : undefined;
 
     if (currentStudent.status !== 'Checked-Out' && input.status === 'Checked-Out') {
-      if (currentStudent.assignedRoomId) {
-        const assignedRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
-        const roomSnap = await getDoc(assignedRoomRef);
-
-        if (roomSnap.exists() && roomSnap.data()?.currentStudentId === currentStudent.studentId) {
-          batch.update(assignedRoomRef, {
-            status: 'Vacant',
-            currentStudentId: null,
-            currentStudentName: null,
-            statusNote: null,
-            exclusiveResidentId: null,
-            updatedBy: email,
-            updatedAt: serverTimestamp(),
-          });
-        }
-      }
-
-      releaseUnitExclusiveBlocks(currentRoomObj);
+      queueReleaseForResident(
+        allRooms,
+        currentStudent.studentId,
+        currentRoomObj,
+        currentStudent.occupancyMode,
+        email,
+        roomUpdates,
+        simStatus
+      );
+      applyRoomUpdateMapToBatch(batch, roomUpdates);
 
       const closedHistory = existingStayHistory.map((seg, idx) => {
         if (!seg.endDate || idx === existingStayHistory.length - 1) {
@@ -1032,10 +1361,20 @@ export async function updateStudentRecord(
         return seg;
       });
 
+      const resolvedBeds = currentStudent.assignedRoomId
+        ? resolveBedsOccupiedCount(
+            input.occupancyMode,
+            input.bedsOccupied ?? currentStudent.bedsOccupied,
+            true
+          )
+        : 0;
+
       batch.update(studentRef, {
         fullName,
-        residentType: input.residentType,
-        occupancyMode: input.occupancyMode,
+        residentType: legacyResidentType,
+        occupantType: resolvedOccupantType,
+        occupancyMode: currentStudent.assignedRoomId ? input.occupancyMode : 'Unassigned',
+        bedsOccupied: resolvedBeds,
         phone,
         emergencyContact,
         program: input.program,
@@ -1069,19 +1408,19 @@ export async function updateStudentRecord(
         throw new Error(`Room "${input.newRoom.roomId}" is no longer Vacant.`);
       }
 
-      batch.update(newRoomRef, {
-        status: 'Occupied',
-        currentStudentId: currentStudent.studentId,
-        currentStudentName: fullName,
-        statusNote: null,
-        exclusiveResidentId: null,
-        updatedBy: email,
-        updatedAt: serverTimestamp(),
-      });
-
-      if (input.occupancyMode === 'Whole Unit Exclusive') {
-        await applyUnitExclusiveBlocks(input.newRoom);
-      }
+      const nextMode = normalizeAssignableOccupancyMode(input.occupancyMode);
+      const reserved = queueReserveForResident(
+        input.newRoom,
+        allRooms,
+        currentStudent.studentId,
+        fullName,
+        nextMode,
+        input.bedsOccupied,
+        email,
+        roomUpdates,
+        simStatus
+      );
+      applyRoomUpdateMapToBatch(batch, roomUpdates);
 
       const lastSeg = existingStayHistory[existingStayHistory.length - 1];
       const restartDate =
@@ -1092,7 +1431,8 @@ export async function updateStudentRecord(
         id: createStaySegmentId(),
         roomId: input.newRoom.roomId,
         hostelLocation: input.newRoom.location,
-        occupancyMode: input.occupancyMode,
+        occupancyMode: nextMode,
+        bedsOccupied: reserved.resolvedBedsOccupied,
         startDate: restartDate,
         endDate: null,
         standardRoomRate,
@@ -1110,8 +1450,10 @@ export async function updateStudentRecord(
 
       batch.update(studentRef, {
         fullName,
-        residentType: input.residentType,
-        occupancyMode: input.occupancyMode,
+        residentType: legacyResidentType,
+        occupantType: resolvedOccupantType,
+        occupancyMode: nextMode,
+        bedsOccupied: reserved.resolvedBedsOccupied,
         phone,
         emergencyContact,
         program: input.program,
@@ -1139,6 +1481,12 @@ export async function updateStudentRecord(
     let targetRoomId = currentStudent.assignedRoomId;
     let targetLocation = currentStudent.hostelLocation;
     let nextStayHistory = existingStayHistory;
+    let nextMode: OccupancyMode = !targetRoomId
+      ? 'Unassigned'
+      : normalizeAssignableOccupancyMode(input.occupancyMode);
+    let nextBedsOccupied = !targetRoomId
+      ? 0
+      : resolveBedsOccupiedCount(nextMode, input.bedsOccupied ?? currentStudent.bedsOccupied, true);
 
     if (input.status !== 'Checked-Out') {
       if (input.newRoom && input.newRoom.roomId !== currentStudent.assignedRoomId) {
@@ -1151,35 +1499,38 @@ export async function updateStudentRecord(
           throw new Error(`Room "${input.newRoom.roomId}" is no longer Vacant.`);
         }
 
-        if (currentStudent.assignedRoomId) {
-          const oldRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
-          const oldSnap = await getDoc(oldRoomRef);
-          if (oldSnap.exists() && oldSnap.data()?.currentStudentId === currentStudent.studentId) {
-            batch.update(oldRoomRef, {
-              status: 'Vacant',
-              currentStudentId: null,
-              currentStudentName: null,
-              statusNote: null,
-              exclusiveResidentId: null,
-              updatedBy: email,
-              updatedAt: serverTimestamp(),
-            });
-          }
-        }
-        releaseUnitExclusiveBlocks(currentRoomObj);
+        queueReleaseForResident(
+          allRooms,
+          currentStudent.studentId,
+          currentRoomObj,
+          currentStudent.occupancyMode,
+          email,
+          roomUpdates,
+          simStatus
+        );
 
-        batch.update(newRoomRef, {
-          status: 'Occupied',
-          currentStudentId: currentStudent.studentId,
-          currentStudentName: fullName,
-          statusNote: null,
-          exclusiveResidentId: null,
-          updatedBy: email,
-          updatedAt: serverTimestamp(),
-        });
+        const assignableMode = normalizeAssignableOccupancyMode(input.occupancyMode);
+        nextMode = assignableMode;
 
-        if (input.status === 'Active' && input.occupancyMode === 'Whole Unit Exclusive') {
-          await applyUnitExclusiveBlocks(input.newRoom);
+        if (input.status === 'Active') {
+          const reserved = queueReserveForResident(
+            input.newRoom,
+            allRooms,
+            currentStudent.studentId,
+            fullName,
+            assignableMode,
+            input.bedsOccupied,
+            email,
+            roomUpdates,
+            simStatus
+          );
+          nextBedsOccupied = reserved.resolvedBedsOccupied;
+        } else {
+          nextBedsOccupied = resolveBedsOccupiedCount(
+            assignableMode,
+            input.bedsOccupied,
+            true
+          );
         }
 
         targetRoomId = input.newRoom.roomId;
@@ -1191,7 +1542,8 @@ export async function updateStudentRecord(
             id: createStaySegmentId(),
             roomId: input.newRoom.roomId,
             hostelLocation: input.newRoom.location,
-            occupancyMode: input.occupancyMode,
+            occupancyMode: assignableMode,
+            bedsOccupied: nextBedsOccupied,
             startDate: placementDate,
             endDate: null,
             standardRoomRate,
@@ -1227,7 +1579,8 @@ export async function updateStudentRecord(
               id: createStaySegmentId(),
               roomId: input.newRoom.roomId,
               hostelLocation: input.newRoom.location,
-              occupancyMode: input.occupancyMode,
+              occupancyMode: assignableMode,
+              bedsOccupied: nextBedsOccupied,
               startDate: today,
               endDate: null,
               standardRoomRate,
@@ -1244,33 +1597,44 @@ export async function updateStudentRecord(
           ];
         }
       } else if (currentRoomObj) {
-        if (currentRoomObj.currentStudentId === currentStudent.studentId) {
-          batch.update(doc(db, 'rooms', currentRoomObj.roomId), {
-            currentStudentName: fullName,
-            updatedBy: email,
-            updatedAt: serverTimestamp(),
-          });
-        }
-        if (input.status === 'Active' && input.occupancyMode === 'Whole Unit Exclusive') {
-          for (const r of allRooms) {
-            if (
-              r.status === 'Reserved / Blocked' &&
-              (r.exclusiveResidentId === currentStudent.studentId ||
-                (r.location === currentRoomObj.location &&
-                  r.block === currentRoomObj.block &&
-                  r.unitNo === currentRoomObj.unitNo))
-            ) {
-              batch.update(doc(db, 'rooms', r.roomId), {
-                statusNote: exclusiveNote,
-                exclusiveResidentId: currentStudent.studentId,
-                updatedBy: email,
-                updatedAt: serverTimestamp(),
-              });
-            }
-          }
-          await applyUnitExclusiveBlocks(currentRoomObj);
+        const assignableMode = normalizeAssignableOccupancyMode(input.occupancyMode);
+        nextMode = assignableMode;
+
+        if (input.status === 'Active') {
+          queueReleaseForResident(
+            allRooms,
+            currentStudent.studentId,
+            currentRoomObj,
+            currentStudent.occupancyMode,
+            email,
+            roomUpdates,
+            simStatus
+          );
+          const reserved = queueReserveForResident(
+            currentRoomObj,
+            allRooms,
+            currentStudent.studentId,
+            fullName,
+            assignableMode,
+            input.bedsOccupied ?? currentStudent.bedsOccupied,
+            email,
+            roomUpdates,
+            simStatus
+          );
+          nextBedsOccupied = reserved.resolvedBedsOccupied;
         } else {
-          releaseUnitExclusiveBlocks(currentRoomObj);
+          if (currentRoomObj.currentStudentId === currentStudent.studentId) {
+            roomUpdates.set(currentRoomObj.roomId, {
+              currentStudentName: fullName,
+              updatedBy: email,
+              updatedAt: serverTimestamp(),
+            });
+          }
+          nextBedsOccupied = resolveBedsOccupiedCount(
+            assignableMode,
+            input.bedsOccupied ?? currentStudent.bedsOccupied,
+            true
+          );
         }
 
         if (nextStayHistory.length > 0) {
@@ -1278,7 +1642,8 @@ export async function updateStudentRecord(
             if (seg.endDate !== null) return seg;
             return {
               ...seg,
-              occupancyMode: input.occupancyMode,
+              occupancyMode: assignableMode,
+              bedsOccupied: nextBedsOccupied,
               standardRoomRate,
               monthlyRebate,
               effectiveMonthlyFee,
@@ -1296,12 +1661,15 @@ export async function updateStudentRecord(
           });
         }
       }
+      applyRoomUpdateMapToBatch(batch, roomUpdates);
     }
 
     batch.update(studentRef, {
       fullName,
-      residentType: input.residentType,
-      occupancyMode: !targetRoomId ? 'Unassigned' : input.occupancyMode,
+      residentType: legacyResidentType,
+      occupantType: resolvedOccupantType,
+      occupancyMode: !targetRoomId ? 'Unassigned' : nextMode,
+      bedsOccupied: !targetRoomId ? 0 : nextBedsOccupied,
       phone,
       emergencyContact,
       program: input.program,
@@ -1327,7 +1695,10 @@ export async function updateStudentRecord(
   } catch (error) {
     if (
       error instanceof Error &&
-      (error.message.includes('Vacant') || error.message.includes('Check-Out'))
+      (error.message.includes('Vacant') ||
+        error.message.includes('Check-Out') ||
+        error.message.includes('available') ||
+        error.message.includes('Exclusive'))
     ) {
       throw error;
     }
@@ -1339,6 +1710,7 @@ export interface TransferStudentRoomInput {
   effectiveTransferDate: string;
   newRoom: Room;
   newOccupancyMode: OccupancyMode;
+  newBedsOccupied?: number;
   newStandardRate: number;
   keepExistingRebate: boolean;
   newMonthlyRebate: number;
@@ -1369,7 +1741,13 @@ export async function transferStudentRoom(
   if (input.newRoom.roomId === currentStudent.assignedRoomId) {
     throw new Error('Please choose a different Vacant bed to transfer this resident.');
   }
-  if (input.newRoom.status !== 'Vacant') {
+  if (
+    input.newRoom.status !== 'Vacant' &&
+    !(
+      input.newRoom.status === 'Reserved / Blocked' &&
+      input.newRoom.exclusiveResidentId === currentStudent.studentId
+    )
+  ) {
     throw new Error(`Target room "${input.newRoom.roomId}" is not Vacant.`);
   }
 
@@ -1404,11 +1782,14 @@ export async function transferStudentRoom(
 
   const studentRef = doc(db, 'students', currentStudent.studentId);
   const newRoomRef = doc(db, 'rooms', input.newRoom.roomId);
-  const blockedSiblings: string[] = [];
 
   try {
     const freshNewRoom = await getDoc(newRoomRef);
-    if (!freshNewRoom.exists() || freshNewRoom.data()?.status !== 'Vacant') {
+    const freshData = freshNewRoom.data();
+    const isReclaimableOwnBlock =
+      freshData?.status === 'Reserved / Blocked' &&
+      freshData?.exclusiveResidentId === currentStudent.studentId;
+    if (!freshNewRoom.exists() || (freshData?.status !== 'Vacant' && !isReclaimableOwnBlock)) {
       throw new Error(`Room "${input.newRoom.roomId}" is no longer Vacant.`);
     }
 
@@ -1417,89 +1798,32 @@ export async function transferStudentRoom(
       ? allRooms.find((r) => r.roomId === currentStudent.assignedRoomId)
       : undefined;
 
-    if (currentStudent.assignedRoomId) {
-      const oldRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
-      const oldSnap = await getDoc(oldRoomRef);
-      if (
-        oldSnap.exists() &&
-        oldSnap.data()?.currentStudentId === currentStudent.studentId
-      ) {
-        batch.update(oldRoomRef, {
-          status: 'Vacant',
-          currentStudentId: null,
-          currentStudentName: null,
-          statusNote: null,
-          exclusiveResidentId: null,
-          updatedBy: email,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
+    const simStatus = buildSimulatedOccupancyMap(allRooms);
+    const roomUpdates = new Map<string, Record<string, unknown>>();
 
-    // Release any old unit-exclusive blocks held by this resident
-    for (const r of allRooms) {
-      if (r.status !== 'Reserved / Blocked') continue;
-      const matchesResident = r.exclusiveResidentId === currentStudent.studentId;
-      const matchesOldUnit =
-        currentRoomObj &&
-        r.location === currentRoomObj.location &&
-        r.block === currentRoomObj.block &&
-        r.unitNo === currentRoomObj.unitNo;
-      if (matchesResident || matchesOldUnit) {
-        batch.update(doc(db, 'rooms', r.roomId), {
-          status: 'Vacant',
-          currentStudentId: null,
-          currentStudentName: null,
-          statusNote: null,
-          exclusiveResidentId: null,
-          updatedBy: email,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
+    queueReleaseForResident(
+      allRooms,
+      currentStudent.studentId,
+      currentRoomObj,
+      currentStudent.occupancyMode,
+      email,
+      roomUpdates,
+      simStatus
+    );
 
-    // Lock the newly selected room as Occupied
-    batch.update(newRoomRef, {
-      status: 'Occupied',
-      currentStudentId: currentStudent.studentId,
-      currentStudentName: currentStudent.fullName,
-      statusNote: null,
-      exclusiveResidentId: null,
-      updatedBy: email,
-      updatedAt: serverTimestamp(),
-    });
-
-    // Lock sibling vacant beds if Whole Unit Exclusive
-    if (input.newOccupancyMode === 'Whole Unit Exclusive') {
-      const exclusiveNote = `Exclusive Unit: ${currentStudent.fullName}`.slice(
-        0,
-        FIELD_LIMITS.statusNote.max
-      );
-      const siblings = allRooms.filter(
-        (r) =>
-          r.roomId !== input.newRoom.roomId &&
-          r.location === input.newRoom.location &&
-          r.block === input.newRoom.block &&
-          r.unitNo === input.newRoom.unitNo &&
-          r.status === 'Vacant'
-      );
-      for (const sib of siblings) {
-        const sibRef = doc(db, 'rooms', sib.roomId);
-        const sibSnap = await getDoc(sibRef);
-        if (sibSnap.exists() && sibSnap.data()?.status === 'Vacant') {
-          batch.update(sibRef, {
-            status: 'Reserved / Blocked',
-            currentStudentId: null,
-            currentStudentName: null,
-            statusNote: exclusiveNote,
-            exclusiveResidentId: currentStudent.studentId,
-            updatedBy: email,
-            updatedAt: serverTimestamp(),
-          });
-          blockedSiblings.push(sib.roomId);
-        }
-      }
-    }
+    const nextMode = normalizeAssignableOccupancyMode(input.newOccupancyMode);
+    const reserved = queueReserveForResident(
+      input.newRoom,
+      allRooms,
+      currentStudent.studentId,
+      currentStudent.fullName,
+      nextMode,
+      input.newBedsOccupied,
+      email,
+      roomUpdates,
+      simStatus
+    );
+    applyRoomUpdateMapToBatch(batch, roomUpdates);
 
     const existingStayHistory: StayHistorySegment[] =
       Array.isArray(currentStudent.stayHistory) && currentStudent.stayHistory.length > 0
@@ -1528,7 +1852,8 @@ export async function transferStudentRoom(
       id: createStaySegmentId(),
       roomId: input.newRoom.roomId,
       hostelLocation: input.newRoom.location,
-      occupancyMode: input.newOccupancyMode,
+      occupancyMode: nextMode,
+      bedsOccupied: reserved.resolvedBedsOccupied,
       startDate: segStartDate,
       endDate: null,
       standardRoomRate: newStandardRate,
@@ -1547,7 +1872,8 @@ export async function transferStudentRoom(
     batch.update(studentRef, {
       assignedRoomId: input.newRoom.roomId,
       hostelLocation: input.newRoom.location,
-      occupancyMode: input.newOccupancyMode,
+      occupancyMode: nextMode,
+      bedsOccupied: reserved.resolvedBedsOccupied,
       standardRoomRate: newStandardRate,
       monthlyRebate: newMonthlyRebate,
       rebateReason: newRebateReason,
@@ -1560,7 +1886,7 @@ export async function transferStudentRoom(
 
     await batch.commit();
     return {
-      blockedSiblings,
+      blockedSiblings: reserved.blockedSiblings,
       releasedRoomId: currentStudent.assignedRoomId || null,
     };
   } catch (error) {
@@ -1568,7 +1894,9 @@ export async function transferStudentRoom(
       error instanceof Error &&
       (error.message.includes('Vacant') ||
         error.message.includes('Transfer') ||
-        error.message.includes('Active'))
+        error.message.includes('Active') ||
+        error.message.includes('available') ||
+        error.message.includes('Exclusive'))
     ) {
       throw error;
     }
@@ -1579,6 +1907,7 @@ export async function transferStudentRoom(
 export interface AssignRoomToStudentInput {
   room: Room;
   occupancyMode: OccupancyMode;
+  bedsOccupied?: number;
   placementDate: string;
   standardRoomRate: number;
   monthlyRebate: number;
@@ -1620,7 +1949,6 @@ export async function assignRoomToStudent(
 
   const studentRef = doc(db, 'students', student.studentId);
   const roomRef = doc(db, 'rooms', input.room.roomId);
-  const blockedSiblings: string[] = [];
 
   try {
     const freshRoom = await getDoc(roomRef);
@@ -1629,64 +1957,35 @@ export async function assignRoomToStudent(
     }
 
     const batch = writeBatch(db);
+    const simStatus = buildSimulatedOccupancyMap(allRooms);
+    const roomUpdates = new Map<string, Record<string, unknown>>();
+    const prevRoomObj = student.assignedRoomId
+      ? allRooms.find((r) => r.roomId === student.assignedRoomId)
+      : undefined;
 
-    // Release old bed if student somehow held one
-    if (student.assignedRoomId && student.assignedRoomId !== input.room.roomId) {
-      const oldRef = doc(db, 'rooms', student.assignedRoomId);
-      const oldSnap = await getDoc(oldRef);
-      if (oldSnap.exists() && oldSnap.data()?.currentStudentId === student.studentId) {
-        batch.update(oldRef, {
-          status: 'Vacant',
-          currentStudentId: null,
-          currentStudentName: null,
-          statusNote: null,
-          exclusiveResidentId: null,
-          updatedBy: email,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
+    queueReleaseForResident(
+      allRooms,
+      student.studentId,
+      prevRoomObj,
+      student.occupancyMode,
+      email,
+      roomUpdates,
+      simStatus
+    );
 
-    batch.update(roomRef, {
-      status: 'Occupied',
-      currentStudentId: student.studentId,
-      currentStudentName: student.fullName,
-      statusNote: null,
-      exclusiveResidentId: null,
-      updatedBy: email,
-      updatedAt: serverTimestamp(),
-    });
-
-    if (input.occupancyMode === 'Whole Unit Exclusive') {
-      const exclusiveNote = `Exclusive Unit: ${student.fullName}`.slice(
-        0,
-        FIELD_LIMITS.statusNote.max
-      );
-      const siblings = allRooms.filter(
-        (r) =>
-          r.roomId !== input.room.roomId &&
-          r.location === input.room.location &&
-          r.block === input.room.block &&
-          r.unitNo === input.room.unitNo &&
-          r.status === 'Vacant'
-      );
-      for (const sib of siblings) {
-        const sibRef = doc(db, 'rooms', sib.roomId);
-        const sibSnap = await getDoc(sibRef);
-        if (sibSnap.exists() && sibSnap.data()?.status === 'Vacant') {
-          batch.update(sibRef, {
-            status: 'Reserved / Blocked',
-            currentStudentId: null,
-            currentStudentName: null,
-            statusNote: exclusiveNote,
-            exclusiveResidentId: student.studentId,
-            updatedBy: email,
-            updatedAt: serverTimestamp(),
-          });
-          blockedSiblings.push(sib.roomId);
-        }
-      }
-    }
+    const nextMode = normalizeAssignableOccupancyMode(input.occupancyMode);
+    const reserved = queueReserveForResident(
+      input.room,
+      allRooms,
+      student.studentId,
+      student.fullName,
+      nextMode,
+      input.bedsOccupied,
+      email,
+      roomUpdates,
+      simStatus
+    );
+    applyRoomUpdateMapToBatch(batch, roomUpdates);
 
     const existingStayHistory: StayHistorySegment[] = Array.isArray(student.stayHistory)
       ? student.stayHistory.map((seg) => ({ ...seg }))
@@ -1719,7 +2018,8 @@ export async function assignRoomToStudent(
       id: createStaySegmentId(),
       roomId: input.room.roomId,
       hostelLocation: input.room.location,
-      occupancyMode: input.occupancyMode,
+      occupancyMode: nextMode,
+      bedsOccupied: reserved.resolvedBedsOccupied,
       startDate: input.placementDate,
       endDate: null,
       standardRoomRate,
@@ -1739,7 +2039,8 @@ export async function assignRoomToStudent(
     const studentUpdate: Record<string, unknown> = {
       assignedRoomId: input.room.roomId,
       hostelLocation: input.room.location,
-      occupancyMode: input.occupancyMode,
+      occupancyMode: nextMode,
+      bedsOccupied: reserved.resolvedBedsOccupied,
       status: 'Active',
       checkOutDate: null,
       checkInDate: firstSeg ? firstSeg.startDate : input.placementDate,
@@ -1759,9 +2060,14 @@ export async function assignRoomToStudent(
 
     batch.update(studentRef, studentUpdate);
     await batch.commit();
-    return { blockedSiblings };
+    return { blockedSiblings: reserved.blockedSiblings };
   } catch (error) {
-    if (error instanceof Error && error.message.includes('Vacant')) {
+    if (
+      error instanceof Error &&
+      (error.message.includes('Vacant') ||
+        error.message.includes('available') ||
+        error.message.includes('Exclusive'))
+    ) {
       throw error;
     }
     handleFirestoreError(error, OperationType.UPDATE, `students/${student.studentId}`);
@@ -1777,6 +2083,7 @@ function areStaySegmentsEquivalent(
     a.roomId === b.roomId &&
     a.hostelLocation === b.hostelLocation &&
     a.occupancyMode === b.occupancyMode &&
+    (a.bedsOccupied ?? 1) === (b.bedsOccupied ?? 1) &&
     a.startDate === b.startDate &&
     (a.endDate ?? null) === (b.endDate ?? null) &&
     a.standardRoomRate === b.standardRoomRate &&
@@ -1831,12 +2138,15 @@ export async function saveStudentStayHistory(
             FIELD_LIMITS.monthlyFee.max
           )
         : calculateFirstMonthDefaults(seg.startDate, effFee).firstMonthCharge;
+    const segMode = normalizeAssignableOccupancyMode(seg.occupancyMode);
+    const segBeds = resolveBedsOccupiedCount(segMode, seg.bedsOccupied, true);
 
     return {
       id: seg.id || createStaySegmentId(),
       roomId: cleanRoomId,
       hostelLocation: seg.hostelLocation || 'Unassigned',
-      occupancyMode: seg.occupancyMode || 'Single Bed',
+      occupancyMode: segMode,
+      bedsOccupied: segBeds,
       startDate: seg.startDate,
       endDate: cleanEnd,
       standardRoomRate: stdRate,
@@ -1875,55 +2185,8 @@ export async function saveStudentStayHistory(
 
   const studentRef = doc(db, 'students', currentStudent.studentId);
   const batch = writeBatch(db);
-  const exclusiveNote = `Exclusive Unit: ${currentStudent.fullName}`.slice(
-    0,
-    FIELD_LIMITS.statusNote.max
-  );
-
-  const releaseOldRoomAndBlocks = async () => {
-    if (currentStudent.assignedRoomId) {
-      const oldRoomRef = doc(db, 'rooms', currentStudent.assignedRoomId);
-      const oldSnap = await getDoc(oldRoomRef);
-      if (
-        oldSnap.exists() &&
-        oldSnap.data()?.currentStudentId === currentStudent.studentId
-      ) {
-        batch.update(oldRoomRef, {
-          status: 'Vacant',
-          currentStudentId: null,
-          currentStudentName: null,
-          statusNote: null,
-          exclusiveResidentId: null,
-          updatedBy: email,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
-
-    const oldRoomObj = currentStudent.assignedRoomId
-      ? allRooms.find((r) => r.roomId === currentStudent.assignedRoomId)
-      : undefined;
-    for (const r of allRooms) {
-      if (r.status !== 'Reserved / Blocked') continue;
-      const matchesResident = r.exclusiveResidentId === currentStudent.studentId;
-      const matchesUnit =
-        oldRoomObj &&
-        r.location === oldRoomObj.location &&
-        r.block === oldRoomObj.block &&
-        r.unitNo === oldRoomObj.unitNo;
-      if (matchesResident || matchesUnit) {
-        batch.update(doc(db, 'rooms', r.roomId), {
-          status: 'Vacant',
-          currentStudentId: null,
-          currentStudentName: null,
-          statusNote: null,
-          exclusiveResidentId: null,
-          updatedBy: email,
-          updatedAt: serverTimestamp(),
-        });
-      }
-    }
-  };
+  const simStatus = buildSimulatedOccupancyMap(allRooms);
+  const roomUpdates = new Map<string, Record<string, unknown>>();
 
   try {
     const studentUpdate: Record<string, unknown> = {
@@ -1946,10 +2209,68 @@ export async function saveStudentStayHistory(
           !areStaySegmentsEquivalent(prevOpen, nextOpen)));
 
     if (activeOpenModified) {
+      const oldRoomObj = currentStudent.assignedRoomId
+        ? allRooms.find((r) => r.roomId === currentStudent.assignedRoomId)
+        : undefined;
+
       if (nextOpen) {
+        const nextOpenMode = normalizeAssignableOccupancyMode(nextOpen.occupancyMode);
+        let nextOpenBeds = resolveBedsOccupiedCount(nextOpenMode, nextOpen.bedsOccupied, true);
+
+        const roomChanged = nextOpen.roomId !== currentStudent.assignedRoomId;
+        const bedConfigChanged =
+          !prevOpen ||
+          prevOpen.occupancyMode !== nextOpenMode ||
+          (prevOpen.bedsOccupied ?? 1) !== nextOpenBeds;
+
+        if (roomChanged || bedConfigChanged) {
+          queueReleaseForResident(
+            allRooms,
+            currentStudent.studentId,
+            oldRoomObj,
+            currentStudent.occupancyMode,
+            email,
+            roomUpdates,
+            simStatus
+          );
+
+          const newRoomObj = allRooms.find((r) => r.roomId === nextOpen.roomId);
+          if (newRoomObj) {
+            const newRoomRef = doc(db, 'rooms', newRoomObj.roomId);
+            const freshSnap = await getDoc(newRoomRef);
+            const freshData = freshSnap.data();
+            const isOwnReclaimable =
+              freshData?.currentStudentId === currentStudent.studentId ||
+              (freshData?.status === 'Reserved / Blocked' &&
+                freshData?.exclusiveResidentId === currentStudent.studentId);
+            if (freshSnap.exists() && freshData?.status !== 'Vacant' && !isOwnReclaimable) {
+              throw new Error(
+                `Room "${newRoomObj.roomId}" is currently ${freshData?.status}. Set an End Date if recording a past stay, or pick a Vacant bed.`
+              );
+            }
+            if (freshSnap.exists()) {
+              const reserved = queueReserveForResident(
+                newRoomObj,
+                allRooms,
+                currentStudent.studentId,
+                currentStudent.fullName,
+                nextOpenMode,
+                nextOpenBeds,
+                email,
+                roomUpdates,
+                simStatus
+              );
+              nextOpenBeds = reserved.resolvedBedsOccupied;
+              nextOpen.bedsOccupied = nextOpenBeds;
+            }
+          }
+          applyRoomUpdateMapToBatch(batch, roomUpdates);
+        }
+
         studentUpdate.assignedRoomId = nextOpen.roomId;
         studentUpdate.hostelLocation = nextOpen.hostelLocation;
-        studentUpdate.occupancyMode = nextOpen.occupancyMode;
+        studentUpdate.occupancyMode = nextOpenMode;
+        studentUpdate.bedsOccupied = nextOpenBeds;
         studentUpdate.standardRoomRate = nextOpen.standardRoomRate;
         studentUpdate.monthlyRebate = nextOpen.monthlyRebate;
         studentUpdate.effectiveMonthlyFee = nextOpen.effectiveMonthlyFee;
@@ -1961,65 +2282,23 @@ export async function saveStudentStayHistory(
             studentUpdate.firstMonthCharge = nextOpen.firstMonthCharge;
           }
         }
-
-        if (nextOpen.roomId !== currentStudent.assignedRoomId) {
-          await releaseOldRoomAndBlocks();
-          const newRoomObj = allRooms.find((r) => r.roomId === nextOpen.roomId);
-          if (newRoomObj) {
-            const newRoomRef = doc(db, 'rooms', newRoomObj.roomId);
-            const freshSnap = await getDoc(newRoomRef);
-            const freshData = freshSnap.data();
-            if (
-              freshSnap.exists() &&
-              freshData?.status !== 'Vacant' &&
-              freshData?.currentStudentId !== currentStudent.studentId
-            ) {
-              throw new Error(
-                `Room "${newRoomObj.roomId}" is currently ${freshData?.status}. Set an End Date if recording a past stay, or pick a Vacant bed.`
-              );
-            }
-            if (freshSnap.exists()) {
-              batch.update(newRoomRef, {
-                status: 'Occupied',
-                currentStudentId: currentStudent.studentId,
-                currentStudentName: currentStudent.fullName,
-                statusNote: null,
-                exclusiveResidentId: null,
-                updatedBy: email,
-                updatedAt: serverTimestamp(),
-              });
-              if (nextOpen.occupancyMode === 'Whole Unit Exclusive') {
-                const siblings = allRooms.filter(
-                  (r) =>
-                    r.roomId !== newRoomObj.roomId &&
-                    r.location === newRoomObj.location &&
-                    r.block === newRoomObj.block &&
-                    r.unitNo === newRoomObj.unitNo &&
-                    r.status === 'Vacant'
-                );
-                for (const sib of siblings) {
-                  batch.update(doc(db, 'rooms', sib.roomId), {
-                    status: 'Reserved / Blocked',
-                    currentStudentId: null,
-                    currentStudentName: null,
-                    statusNote: exclusiveNote,
-                    exclusiveResidentId: currentStudent.studentId,
-                    updatedBy: email,
-                    updatedAt: serverTimestamp(),
-                  });
-                }
-              }
-            }
-          }
-        }
       } else {
         // The single active open segment (endDate === null) was closed or removed:
         // release live bed occupancy without overwriting top-level rates from any historical segment.
-        if (currentStudent.assignedRoomId) {
-          await releaseOldRoomAndBlocks();
-        }
+        queueReleaseForResident(
+          allRooms,
+          currentStudent.studentId,
+          oldRoomObj,
+          currentStudent.occupancyMode,
+          email,
+          roomUpdates,
+          simStatus
+        );
+        applyRoomUpdateMapToBatch(batch, roomUpdates);
         studentUpdate.assignedRoomId = '';
         studentUpdate.hostelLocation = 'Unassigned';
+        studentUpdate.occupancyMode = 'Unassigned';
+        studentUpdate.bedsOccupied = 0;
       }
     }
 
@@ -2030,7 +2309,9 @@ export async function saveStudentStayHistory(
       error instanceof Error &&
       (error.message.includes('currently') ||
         error.message.includes('Date') ||
-        error.message.includes('Room'))
+        error.message.includes('Room') ||
+        error.message.includes('available') ||
+        error.message.includes('Exclusive'))
     ) {
       throw error;
     }
@@ -2709,7 +2990,9 @@ export interface BulkImportStudentItem {
   emergencyContact: string;
   program: ProgramType;
   residentType: ResidentType;
+  occupantType?: OccupantType;
   occupancyMode: OccupancyMode;
+  bedsOccupied?: number;
   assignedRoomId: string;
   hostelLocation: ResidentHostelLocation;
   checkInDate: string;
@@ -2760,21 +3043,59 @@ export async function bulkImportStudents(
       const assignedRoom = item.assignedRoomId
         ? roomById.get(item.assignedRoomId)
         : undefined;
+      const resolvedOccupantType: OccupantType =
+        item.occupantType && OCCUPANT_TYPES.includes(item.occupantType)
+          ? item.occupantType
+          : resolveOccupantType({ residentType: item.residentType });
+      const legacyResidentType = toLegacyResidentType(resolvedOccupantType);
+      const resolvedMode: OccupancyMode = !assignedRoom
+        ? 'Unassigned'
+        : normalizeAssignableOccupancyMode(item.occupancyMode);
 
-      const siblingsToBlock =
-        item.status === 'Active' &&
-        item.occupancyMode === 'Whole Unit Exclusive' &&
-        assignedRoom
-          ? allRooms.filter(
-              (r) =>
-                r.roomId !== assignedRoom.roomId &&
-                r.location === assignedRoom.location &&
-                r.block === assignedRoom.block &&
-                r.unitNo === assignedRoom.unitNo &&
-                r.status === 'Vacant' &&
-                !claimedInImport.has(r.roomId)
-            )
+      const vacantSiblings =
+        item.status === 'Active' && assignedRoom
+          ? allRooms
+              .filter(
+                (r) =>
+                  r.roomId !== assignedRoom.roomId &&
+                  r.location === assignedRoom.location &&
+                  r.block === assignedRoom.block &&
+                  r.unitNo === assignedRoom.unitNo &&
+                  r.status === 'Vacant' &&
+                  !claimedInImport.has(r.roomId)
+              )
+              .sort((a, b) =>
+                a.bedSlot.localeCompare(b.bedSlot, undefined, { numeric: true })
+              )
           : [];
+
+      let siblingsToBlock: Room[] = [];
+      let resolvedBedsOccupied = 0;
+      if (assignedRoom) {
+        if (resolvedMode === 'Whole Unit Exclusive') {
+          siblingsToBlock = vacantSiblings;
+          const totalUnitBeds = allRooms.filter(
+            (r) =>
+              r.location === assignedRoom.location &&
+              r.block === assignedRoom.block &&
+              r.unitNo === assignedRoom.unitNo
+          ).length;
+          resolvedBedsOccupied = Math.max(1, totalUnitBeds);
+        } else if (resolvedMode === 'Custom Multi-Bed') {
+          const requestedBeds = Math.max(
+            1,
+            Math.floor(Number(item.bedsOccupied) || 2)
+          );
+          if (item.status === 'Active') {
+            siblingsToBlock = vacantSiblings.slice(0, requestedBeds - 1);
+            resolvedBedsOccupied = 1 + siblingsToBlock.length;
+          } else {
+            resolvedBedsOccupied = requestedBeds;
+          }
+        } else {
+          resolvedBedsOccupied = 1;
+        }
+      }
 
       const opsForThisResident =
         1 + (item.status === 'Active' && assignedRoom ? 1 + siblingsToBlock.length : 0);
@@ -2808,7 +3129,8 @@ export async function bulkImportStudents(
               id: createStaySegmentId(),
               roomId: item.assignedRoomId,
               hostelLocation: item.hostelLocation,
-              occupancyMode: item.occupancyMode,
+              occupancyMode: resolvedMode,
+              bedsOccupied: resolvedBedsOccupied,
               startDate: item.checkInDate,
               endDate: item.status === 'Checked-Out' ? item.checkOutDate : null,
               standardRoomRate: clampedStdRate,
@@ -2828,8 +3150,10 @@ export async function bulkImportStudents(
       batch.set(doc(db, 'students', studentId), {
         studentId,
         fullName,
-        residentType: item.residentType,
-        occupancyMode: item.occupancyMode,
+        residentType: legacyResidentType,
+        occupantType: resolvedOccupantType,
+        occupancyMode: resolvedMode,
+        bedsOccupied: resolvedBedsOccupied,
         phone: item.phone.trim().slice(0, FIELD_LIMITS.phone.max),
         emergencyContact: item.emergencyContact
           .trim()
@@ -2876,17 +3200,23 @@ export async function bulkImportStudents(
         opsInBatch += 1;
         occupiedCount += 1;
 
-        const exclusiveNote = `Exclusive Unit: ${fullName}`.slice(
-          0,
-          FIELD_LIMITS.statusNote.max
-        );
+        const blockNote =
+          resolvedMode === 'Custom Multi-Bed'
+            ? `Multi-Bed (${resolvedBedsOccupied} Beds): ${fullName}`.slice(
+                0,
+                FIELD_LIMITS.statusNote.max
+              )
+            : `Exclusive Unit: ${fullName}`.slice(
+                0,
+                FIELD_LIMITS.statusNote.max
+              );
         for (const sib of siblingsToBlock) {
           claimedInImport.add(sib.roomId);
           batch.update(doc(db, 'rooms', sib.roomId), {
             status: 'Reserved / Blocked',
             currentStudentId: null,
             currentStudentName: null,
-            statusNote: exclusiveNote,
+            statusNote: blockNote,
             exclusiveResidentId: studentId,
             updatedBy: email,
             updatedAt: serverTimestamp(),
@@ -3037,6 +3367,7 @@ export interface BulkImportTenancyHistoryItem {
   roomId: string;
   hostelLocation: ResidentHostelLocation;
   occupancyMode: OccupancyMode;
+  bedsOccupied?: number;
   startDate: string;
   endDate: string | null;
   standardRoomRate: number;
@@ -3141,12 +3472,15 @@ export async function bulkImportTenancyHistory(
           FIELD_LIMITS.monthlyFee.min,
           FIELD_LIMITS.monthlyFee.max
         );
+        const segMode = normalizeAssignableOccupancyMode(item.occupancyMode);
+        const segBeds = resolveBedsOccupiedCount(segMode, item.bedsOccupied, true);
 
         return {
           id: `${createStaySegmentId()}-${segCounter}`,
           roomId: cleanRoomId,
           hostelLocation: item.hostelLocation || 'Unassigned',
-          occupancyMode: item.occupancyMode || 'Single Bed',
+          occupancyMode: segMode,
+          bedsOccupied: segBeds,
           startDate: item.startDate,
           endDate: cleanEnd,
           standardRoomRate: clampedStdRate,
@@ -3201,6 +3535,7 @@ export async function bulkImportTenancyHistory(
         updatePayload.assignedRoomId = importedOpenSegment.roomId;
         updatePayload.hostelLocation = importedOpenSegment.hostelLocation;
         updatePayload.occupancyMode = importedOpenSegment.occupancyMode;
+        updatePayload.bedsOccupied = importedOpenSegment.bedsOccupied ?? 1;
         updatePayload.standardRoomRate = importedOpenSegment.standardRoomRate;
         updatePayload.monthlyRebate = importedOpenSegment.monthlyRebate;
         updatePayload.effectiveMonthlyFee = importedOpenSegment.effectiveMonthlyFee;
@@ -3213,6 +3548,7 @@ export async function bulkImportTenancyHistory(
           assignedRoomId: importedOpenSegment.roomId,
           hostelLocation: importedOpenSegment.hostelLocation,
           occupancyMode: importedOpenSegment.occupancyMode,
+          bedsOccupied: importedOpenSegment.bedsOccupied ?? 1,
           standardRoomRate: importedOpenSegment.standardRoomRate,
           monthlyRebate: importedOpenSegment.monthlyRebate,
           effectiveMonthlyFee: importedOpenSegment.effectiveMonthlyFee,

@@ -1,11 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Building2,
   FileSpreadsheet,
   History,
   Layers,
+  LayoutGrid,
   Pencil,
   Plus,
   Search,
+  Table2,
   Trash2,
   UserPlus,
   X,
@@ -20,25 +23,32 @@ import {
   getTodayISO,
   HOSTEL_LOCATIONS,
   HostelLocation,
+  normalizeAssignableOccupancyMode,
   OCCUPANCY_MODES,
   OccupancyMode,
+  OCCUPANT_TYPES,
+  OccupantType,
   PROGRAMS,
   ProgramType,
   REBATE_REASONS,
-  RESIDENT_TYPES,
-  ResidentType,
+  resolveBedsOccupiedCount,
+  resolveOccupantType,
   Room,
   ROOM_STATUSES,
   RoomStatus,
   StaffRole,
   StayHistorySegment,
   Student,
+  toLegacyResidentType,
 } from '../types/hostel';
 import {
   assignRoomToStudent,
   bulkCreateBeds,
+  computeUnitCapacities,
   createRoom,
   deleteVacantRoom,
+  getUnitAvailabilityForRoom,
+  getUnitKey,
   registerStudent,
   updateRoomDetails,
 } from '../lib/hostelService';
@@ -64,6 +74,7 @@ export function RoomInventoryTab({
   const [locationFilter, setLocationFilter] = useState<'All' | HostelLocation>('All');
   const [statusFilter, setStatusFilter] = useState<'All' | RoomStatus>('All');
   const [searchQuery, setSearchQuery] = useState('');
+  const [viewMode, setViewMode] = useState<'units' | 'table'>('units');
 
   // Modal states
   const [showAddModal, setShowAddModal] = useState(false);
@@ -80,15 +91,17 @@ export function RoomInventoryTab({
   const [assignPlacementDate, setAssignPlacementDate] = useState(getTodayISO());
   const [assignOccupancyMode, setAssignOccupancyMode] =
     useState<OccupancyMode>('Single Bed');
+  const [assignBedsOccupied, setAssignBedsOccupied] = useState('1');
   const [assignUseRoomRate, setAssignUseRoomRate] = useState(true);
   const [assignCustomRate, setAssignCustomRate] = useState('250');
 
   // Inline New Resident into Bed state
   const [newResId, setNewResId] = useState('');
   const [newResName, setNewResName] = useState('');
-  const [newResType, setNewResType] = useState<ResidentType>('Student');
+  const [newResType, setNewResType] = useState<OccupantType>('Student');
   const [newResOccupancy, setNewResOccupancy] =
     useState<OccupancyMode>('Single Bed');
+  const [newResBedsOccupied, setNewResBedsOccupied] = useState('1');
   const [newResProgram, setNewResProgram] = useState<ProgramType>('Diploma');
   const [newResPhone, setNewResPhone] = useState('');
   const [newResEmergency, setNewResEmergency] = useState('');
@@ -151,13 +164,53 @@ export function RoomInventoryTab({
       .sort((a, b) => a.roomId.localeCompare(b.roomId));
   }, [rooms, locationFilter, statusFilter, searchQuery]);
 
+  const studentById = useMemo(
+    () => new Map(students.map((s) => [s.studentId, s])),
+    [students]
+  );
+
+  const unitCapacityMap = useMemo(
+    () => computeUnitCapacities(rooms, students),
+    [rooms, students]
+  );
+
+  const filteredUnitGroups = useMemo(() => {
+    const keys = new Set(filteredRooms.map((r) => getUnitKey(r)));
+    const matchingRoomIds = new Set(filteredRooms.map((r) => r.roomId));
+    const list: Array<{
+      summary: ReturnType<typeof computeUnitCapacities> extends Map<string, infer V> ? V : never;
+      matchingRooms: Room[];
+    }> = [];
+    for (const [key, unitSummary] of unitCapacityMap.entries()) {
+      if (!keys.has(key)) continue;
+      list.push({
+        summary: unitSummary,
+        matchingRooms: unitSummary.rooms.filter((r) => matchingRoomIds.has(r.roomId)),
+      });
+    }
+    return list.sort((a, b) => {
+      const locCmp = a.summary.location.localeCompare(b.summary.location);
+      if (locCmp !== 0) return locCmp;
+      const blkCmp = a.summary.block.localeCompare(b.summary.block, undefined, { numeric: true });
+      if (blkCmp !== 0) return blkCmp;
+      return a.summary.unitNo.localeCompare(b.summary.unitNo, undefined, { numeric: true });
+    });
+  }, [filteredRooms, unitCapacityMap]);
+
   const summary = useMemo(() => {
     const vacant = filteredRooms.filter((r) => r.status === 'Vacant').length;
     const occupied = filteredRooms.filter((r) => r.status === 'Occupied').length;
     const reserved = filteredRooms.filter((r) => r.status === 'Reserved / Blocked').length;
     const maintenance = filteredRooms.filter((r) => r.status === 'Maintenance').length;
-    return { total: filteredRooms.length, vacant, occupied, reserved, maintenance };
-  }, [filteredRooms]);
+    return {
+      total: filteredRooms.length,
+      units: filteredUnitGroups.length,
+      vacant,
+      occupied,
+      reserved,
+      maintenance,
+    };
+  }, [filteredRooms, filteredUnitGroups]);
 
   const unassignedStudents = useMemo(() => {
     return students
@@ -169,11 +222,15 @@ export function RoomInventoryTab({
       });
   }, [students]);
 
+  const assigningUnitAvailability = useMemo(
+    () => getUnitAvailabilityForRoom(assigningRoom, rooms),
+    [assigningRoom, rooms]
+  );
+
   const assignSiblingVacantBeds = useMemo(() => {
     if (!assigningRoom) return [];
     const activeMode = assignMode === 'existing' ? assignOccupancyMode : newResOccupancy;
-    if (activeMode !== 'Whole Unit Exclusive') return [];
-    return rooms
+    const allVacantSiblings = rooms
       .filter(
         (r) =>
           r.roomId !== assigningRoom.roomId &&
@@ -182,8 +239,30 @@ export function RoomInventoryTab({
           r.unitNo === assigningRoom.unitNo &&
           r.status === 'Vacant'
       )
-      .sort((a, b) => a.roomId.localeCompare(b.roomId));
-  }, [assigningRoom, assignMode, assignOccupancyMode, newResOccupancy, rooms]);
+      .sort((a, b) => a.bedSlot.localeCompare(b.bedSlot, undefined, { numeric: true }));
+
+    if (activeMode === 'Whole Unit Exclusive') {
+      return allVacantSiblings;
+    }
+    if (activeMode === 'Custom Multi-Bed') {
+      const requested = Math.max(
+        1,
+        Math.floor(
+          Number(assignMode === 'existing' ? assignBedsOccupied : newResBedsOccupied) || 2
+        )
+      );
+      return allVacantSiblings.slice(0, Math.max(0, requested - 1));
+    }
+    return [];
+  }, [
+    assigningRoom,
+    assignMode,
+    assignOccupancyMode,
+    newResOccupancy,
+    assignBedsOccupied,
+    newResBedsOccupied,
+    rooms,
+  ]);
 
   const roomHistoryEntries = useMemo(() => {
     if (!historyRoom) return [];
@@ -364,13 +443,20 @@ export function RoomInventoryTab({
     setAssignPlacementDate(
       firstUnassigned?.checkInDate || getTodayISO()
     );
-    setAssignOccupancyMode(
-      firstUnassigned?.occupancyMode === 'Whole Unit Exclusive'
-        ? 'Whole Unit Exclusive'
-        : 'Single Bed'
-    );
+    const initialMode = firstUnassigned?.occupancyMode && firstUnassigned.occupancyMode !== 'Unassigned'
+      ? normalizeAssignableOccupancyMode(firstUnassigned.occupancyMode)
+      : 'Single Bed';
+    const unitAvail = getUnitAvailabilityForRoom(room, rooms);
+    const initialBeds =
+      initialMode === 'Whole Unit Exclusive'
+        ? Math.max(1, unitAvail.totalBeds)
+        : initialMode === 'Custom Multi-Bed'
+          ? Math.min(unitAvail.availableForResident, Math.max(1, firstUnassigned?.bedsOccupied || 2))
+          : 1;
+    setAssignOccupancyMode(initialMode);
+    setAssignBedsOccupied(String(initialBeds));
     setAssignUseRoomRate(true);
-    setAssignCustomRate(String(room.monthlyRate));
+    setAssignCustomRate(String(room.monthlyRate * initialBeds));
 
     const today = getTodayISO();
     const defaults = calculateFirstMonthDefaults(today, room.monthlyRate);
@@ -378,6 +464,7 @@ export function RoomInventoryTab({
     setNewResName('');
     setNewResType('Student');
     setNewResOccupancy('Single Bed');
+    setNewResBedsOccupied('1');
     setNewResProgram('Diploma');
     setNewResPhone('');
     setNewResEmergency('');
@@ -406,14 +493,21 @@ export function RoomInventoryTab({
           setSubmitting(false);
           return;
         }
+        const bedsNum =
+          assignOccupancyMode === 'Whole Unit Exclusive'
+            ? Math.max(1, assigningUnitAvailability.totalBeds)
+            : assignOccupancyMode === 'Custom Multi-Bed'
+              ? Math.max(1, Math.floor(Number(assignBedsOccupied) || 2))
+              : 1;
         const stdRate = assignUseRoomRate
-          ? assigningRoom.monthlyRate
-          : Number(assignCustomRate) || assigningRoom.monthlyRate;
+          ? assigningRoom.monthlyRate * bedsNum
+          : Number(assignCustomRate) || assigningRoom.monthlyRate * bedsNum;
         const result = await assignRoomToStudent(
           chosenStudent,
           {
             room: assigningRoom,
             occupancyMode: assignOccupancyMode,
+            bedsOccupied: bedsNum,
             placementDate: assignPlacementDate,
             standardRoomRate: stdRate,
             monthlyRebate: chosenStudent.monthlyRebate ?? 0,
@@ -425,16 +519,24 @@ export function RoomInventoryTab({
         setAssigningRoom(null);
         setFeedbackBanner(
           result.blockedSiblings.length > 0
-            ? `Assigned ${chosenStudent.fullName} to ${assigningRoom.roomId} (Whole Unit Exclusive) and blocked ${result.blockedSiblings.join(', ')}.`
+            ? `Assigned ${chosenStudent.fullName} to ${assigningRoom.roomId} (${bedsNum} beds · ${assignOccupancyMode}) and locked ${result.blockedSiblings.join(', ')}.`
             : `Assigned ${chosenStudent.fullName} (${chosenStudent.studentId}) to ${assigningRoom.roomId}.`
         );
       } else {
+        const bedsNum =
+          newResOccupancy === 'Whole Unit Exclusive'
+            ? Math.max(1, assigningUnitAvailability.totalBeds)
+            : newResOccupancy === 'Custom Multi-Bed'
+              ? Math.max(1, Math.floor(Number(newResBedsOccupied) || 2))
+              : 1;
         const result = await registerStudent(
           {
             studentId: newResId,
             fullName: newResName,
-            residentType: newResType,
+            residentType: toLegacyResidentType(newResType),
+            occupantType: newResType,
             occupancyMode: newResOccupancy,
+            bedsOccupied: bedsNum,
             phone: newResPhone,
             emergencyContact: newResEmergency,
             program: newResProgram,
@@ -456,7 +558,7 @@ export function RoomInventoryTab({
         setAssigningRoom(null);
         setFeedbackBanner(
           result.blockedSiblings.length > 0
-            ? `Registered ${newResName.trim()} into ${assigningRoom.roomId} (Whole Unit Exclusive) and blocked ${result.blockedSiblings.join(', ')}.`
+            ? `Registered ${newResName.trim()} into ${assigningRoom.roomId} (${bedsNum} beds · ${newResOccupancy}) and locked ${result.blockedSiblings.join(', ')}.`
             : `Registered ${newResName.trim()} into ${assigningRoom.roomId} and marked bed as Occupied.`
         );
       }
@@ -545,6 +647,32 @@ export function RoomInventoryTab({
               </option>
             ))}
           </select>
+          <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-lg border border-slate-200">
+            <button
+              type="button"
+              onClick={() => setViewMode('units')}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                viewMode === 'units'
+                  ? 'bg-white text-blue-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Unit Cards</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${
+                viewMode === 'table'
+                  ? 'bg-white text-blue-900 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Table2 className="w-3.5 h-3.5" />
+              <span>Bed Table</span>
+            </button>
+          </div>
         </div>
 
         {!isViewer && (
@@ -580,7 +708,7 @@ export function RoomInventoryTab({
       {/* Summary Bar */}
       <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600 px-1 tabular-nums">
         <span>
-          Showing <strong className="text-slate-900">{summary.total}</strong> bed slots
+          Showing <strong className="text-slate-900">{summary.units}</strong> units ({summary.total} bed slots)
         </span>
         <span aria-hidden="true">·</span>
         <span>
@@ -588,11 +716,11 @@ export function RoomInventoryTab({
         </span>
         <span aria-hidden="true">·</span>
         <span>
-          <strong className="text-blue-900">{summary.occupied}</strong> Occupied
+          <strong className="text-blue-900">{summary.occupied}</strong> Primary Occupied
         </span>
         <span aria-hidden="true">·</span>
         <span>
-          <strong className="text-indigo-900">{summary.reserved}</strong> Reserved / Blocked
+          <strong className="text-indigo-900">{summary.reserved}</strong> Multi-Bed / Exclusive Locked
         </span>
         <span aria-hidden="true">·</span>
         <span>
@@ -600,7 +728,7 @@ export function RoomInventoryTab({
         </span>
       </div>
 
-      {/* Inventory Table */}
+      {/* Inventory Display */}
       {loading ? (
         <div className="bg-white border border-slate-200 rounded-lg p-8 text-center text-sm text-slate-500">
           Loading hostel room inventory...
@@ -614,6 +742,212 @@ export function RoomInventoryTab({
             Adjust your filters or add beds using &ldquo;Add Room/Bed&rdquo; or &ldquo;Bulk Add Beds&rdquo;.
           </p>
         </div>
+      ) : viewMode === 'units' ? (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          {filteredUnitGroups.map(({ summary: unit, matchingRooms }) => (
+            <div
+              key={unit.unitKey}
+              className="bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col"
+            >
+              {/* Unit Card Header */}
+              <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-blue-900/10 text-blue-900 flex items-center justify-center shrink-0">
+                    <Building2 className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-semibold text-slate-900">
+                        Blk {unit.block} · Unit {unit.unitNo}
+                      </h3>
+                      <span className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-white border border-slate-200 text-slate-600">
+                        {unit.location}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 tabular-nums mt-0.5">
+                      {formatRM(unit.standardMonthlyRate)} / bed ·{' '}
+                      <span className="font-semibold text-slate-800">
+                        {unit.occupiedBeds} / {unit.totalBeds} Beds Occupied
+                      </span>
+                      {' · '}
+                      <span className="font-semibold text-emerald-700">
+                        {unit.availableBeds} Available
+                      </span>
+                      {unit.maintenanceBeds > 0 && (
+                        <>
+                          {' · '}
+                          <span className="font-semibold text-amber-700">
+                            {unit.maintenanceBeds} Maint.
+                          </span>
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Unit Occupants Strip */}
+              {unit.activeOccupants.length > 0 && (
+                <div className="px-4 py-2.5 bg-blue-50/40 border-b border-slate-100 flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 mr-1">
+                    Occupants:
+                  </span>
+                  {unit.activeOccupants.map((occ) => (
+                    <div
+                      key={occ.student.studentId}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white border border-slate-200 text-xs"
+                    >
+                      <span className="font-semibold text-slate-900">
+                        {occ.student.fullName}
+                      </span>
+                      {occ.occupantType === 'Lecturer / Staff' && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-50 text-amber-800 border border-amber-200">
+                          Lecturer
+                        </span>
+                      )}
+                      {occ.occupantType === 'Event Guest' && (
+                        <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-purple-50 text-purple-800 border border-purple-200">
+                          Event
+                        </span>
+                      )}
+                      <span
+                        className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border tabular-nums ${
+                          occ.occupancyMode === 'Whole Unit Exclusive'
+                            ? 'bg-indigo-50 text-indigo-900 border-indigo-200'
+                            : occ.bedsOccupied > 1
+                              ? 'bg-blue-50 text-blue-900 border-blue-200'
+                              : 'bg-slate-50 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {occ.bedsOccupied} {occ.bedsOccupied === 1 ? 'Bed' : 'Beds'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Bed Slots List */}
+              <div className="divide-y divide-slate-100">
+                {matchingRooms.map((room) => {
+                  const occStudent = room.currentStudentId
+                    ? studentById.get(room.currentStudentId)
+                    : undefined;
+                  const occType = occStudent ? resolveOccupantType(occStudent) : null;
+                  const occBeds = occStudent
+                    ? resolveBedsOccupiedCount(
+                        occStudent.occupancyMode,
+                        occStudent.bedsOccupied,
+                        true
+                      )
+                    : 1;
+                  return (
+                    <div
+                      key={room.roomId}
+                      className="px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 hover:bg-slate-50/70"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono text-xs font-semibold text-slate-900">
+                            {room.roomId}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            ({room.bedSlot})
+                          </span>
+                          <StatusBadge status={room.status} />
+                          <span className="font-mono text-xs text-slate-600 tabular-nums">
+                            {formatRM(room.monthlyRate)}
+                          </span>
+                        </div>
+                        {room.currentStudentName ? (
+                          <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                            <span className="text-xs font-medium text-slate-800">
+                              {room.currentStudentName}
+                            </span>
+                            <span className="text-[11px] font-mono text-slate-500">
+                              ({room.currentStudentId})
+                            </span>
+                            {occType === 'Lecturer / Staff' && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-50 text-amber-800 border border-amber-200">
+                                Lecturer
+                              </span>
+                            )}
+                            {occType === 'Event Guest' && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-purple-50 text-purple-800 border border-purple-200">
+                                Event
+                              </span>
+                            )}
+                            {occBeds > 1 && (
+                              <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-50 text-blue-900 border border-blue-200 tabular-nums">
+                                {occBeds} Beds
+                              </span>
+                            )}
+                          </div>
+                        ) : room.status === 'Reserved / Blocked' || room.statusNote ? (
+                          <p className="text-xs text-indigo-900 mt-1">
+                            {room.statusNote || 'Exclusive / Multi-Bed Blocked'}
+                            {room.exclusiveResidentId ? ` · ${room.exclusiveResidentId}` : ''}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-400 mt-1">Available bed slot</p>
+                        )}
+                      </div>
+
+                      <div className="inline-flex items-center gap-1 shrink-0">
+                        {!isViewer && room.status === 'Vacant' && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenAssignModal(room)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-md cursor-pointer"
+                            title="Assign resident to this bed"
+                          >
+                            <UserPlus className="w-3 h-3" />
+                            <span>Assign Resident</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setHistoryRoom(room)}
+                          className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md cursor-pointer"
+                          title="Room history"
+                          aria-label={`History for ${room.roomId}`}
+                        >
+                          <History className="w-3.5 h-3.5" />
+                        </button>
+                        {!isViewer && (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(room)}
+                            className="p-1.5 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-md cursor-pointer"
+                            title="Edit bed"
+                            aria-label={`Edit ${room.roomId}`}
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {!isViewer &&
+                          room.status !== 'Occupied' &&
+                          room.status !== 'Reserved / Blocked' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormError(null);
+                                setDeletingRoom(room);
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-red-700 hover:bg-red-50 rounded-md cursor-pointer"
+                              title="Delete unoccupied bed"
+                              aria-label={`Delete ${room.roomId}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="max-h-[72vh] overflow-auto border border-slate-200 rounded-lg bg-white">
           <table className="w-full text-left border-collapse">
@@ -626,7 +960,7 @@ export function RoomInventoryTab({
                 <th className="py-3 px-4 whitespace-nowrap">Block / Unit / Bed</th>
                 <th className="py-3 px-4 text-right whitespace-nowrap">Monthly Rate</th>
                 <th className="py-3 px-4 whitespace-nowrap">Status</th>
-                <th className="py-3 px-4 min-w-[170px] whitespace-nowrap">
+                <th className="py-3 px-4 min-w-[200px] whitespace-nowrap">
                   Assigned Resident
                 </th>
                 <th className="py-3 px-4 min-w-[150px] whitespace-nowrap">
@@ -638,7 +972,19 @@ export function RoomInventoryTab({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-sm">
-              {filteredRooms.map((room) => (
+              {filteredRooms.map((room) => {
+                const occStudent = room.currentStudentId
+                  ? studentById.get(room.currentStudentId)
+                  : undefined;
+                const occType = occStudent ? resolveOccupantType(occStudent) : null;
+                const occBeds = occStudent
+                  ? resolveBedsOccupiedCount(
+                      occStudent.occupancyMode,
+                      occStudent.bedsOccupied,
+                      true
+                    )
+                  : 1;
+                return (
                 <tr key={room.roomId} className="group hover:bg-slate-50">
                   <td className="py-3 px-4 font-mono text-xs font-semibold text-slate-900 whitespace-nowrap sticky left-0 z-10 bg-white group-hover:bg-slate-50 shadow-[4px_0_8px_-4px_rgba(15,23,42,0.08)] border-r border-slate-100">
                     {room.roomId}
@@ -658,9 +1004,26 @@ export function RoomInventoryTab({
                   <td className="py-3 px-4">
                     {room.currentStudentName ? (
                       <div>
-                        <p className="text-xs font-medium text-slate-900 whitespace-nowrap">
-                          {room.currentStudentName}
-                        </p>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs font-medium text-slate-900 whitespace-nowrap">
+                            {room.currentStudentName}
+                          </p>
+                          {occType === 'Lecturer / Staff' && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-50 text-amber-800 border border-amber-200">
+                              Lecturer
+                            </span>
+                          )}
+                          {occType === 'Event Guest' && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-purple-50 text-purple-800 border border-purple-200">
+                              Event
+                            </span>
+                          )}
+                          {occBeds > 1 && (
+                            <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-blue-50 text-blue-900 border border-blue-200 tabular-nums">
+                              {occBeds} Beds
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs font-mono text-slate-500 whitespace-nowrap">
                           {room.currentStudentId}
                         </p>
@@ -740,7 +1103,8 @@ export function RoomInventoryTab({
                     </div>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -1609,19 +1973,66 @@ export function RoomInventoryTab({
                           </label>
                           <select
                             value={assignOccupancyMode}
-                            onChange={(e) =>
-                              setAssignOccupancyMode(e.target.value as OccupancyMode)
-                            }
+                            onChange={(e) => {
+                              const mode = e.target.value as OccupancyMode;
+                              setAssignOccupancyMode(mode);
+                              const nextBeds =
+                                mode === 'Whole Unit Exclusive'
+                                  ? Math.max(1, assigningUnitAvailability.totalBeds)
+                                  : mode === 'Custom Multi-Bed'
+                                    ? Math.min(
+                                        Math.max(1, assigningUnitAvailability.availableForResident),
+                                        2
+                                      )
+                                    : 1;
+                              setAssignBedsOccupied(String(nextBeds));
+                              setAssignCustomRate(String(assigningRoom.monthlyRate * nextBeds));
+                            }}
                             className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                           >
                             {OCCUPANCY_MODES.map((om) => (
-                              <option key={om} value={om}>
+                              <option
+                                key={om}
+                                value={om}
+                                disabled={
+                                  om === 'Whole Unit Exclusive' &&
+                                  !assigningUnitAvailability.isUnitEmptyForExclusive
+                                }
+                              >
                                 {om}
+                                {om === 'Whole Unit Exclusive' &&
+                                !assigningUnitAvailability.isUnitEmptyForExclusive
+                                  ? ' (Unit has other occupied/blocked beds)'
+                                  : ''}
                               </option>
                             ))}
                           </select>
                         </div>
                       </div>
+
+                      {assignOccupancyMode === 'Custom Multi-Bed' && (
+                        <div>
+                          <label className="block text-xs font-medium text-slate-700 mb-1">
+                            Number of Beds Occupied (1–{Math.max(1, assigningUnitAvailability.availableForResident)} available in unit)
+                          </label>
+                          <input
+                            type="number"
+                            required
+                            min={1}
+                            max={Math.max(1, assigningUnitAvailability.availableForResident)}
+                            value={assignBedsOccupied}
+                            onChange={(e) => {
+                              const n = Math.min(
+                                Math.max(1, assigningUnitAvailability.availableForResident),
+                                Math.max(1, Math.floor(Number(e.target.value) || 1))
+                              );
+                              setAssignBedsOccupied(String(n));
+                              setAssignCustomRate(String(assigningRoom.monthlyRate * n));
+                            }}
+                            className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          />
+                        </div>
+                      )}
 
                       <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-2">
                         <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
@@ -1632,7 +2043,16 @@ export function RoomInventoryTab({
                             className="w-4 h-4 rounded border-slate-300 text-blue-900"
                           />
                           <span>
-                            Use bed standard rate ({formatRM(assigningRoom.monthlyRate)}/mo)
+                            Use suggested rate (
+                            {formatRM(
+                              assigningRoom.monthlyRate *
+                                (assignOccupancyMode === 'Whole Unit Exclusive'
+                                  ? Math.max(1, assigningUnitAvailability.totalBeds)
+                                  : assignOccupancyMode === 'Custom Multi-Bed'
+                                    ? Math.max(1, Math.floor(Number(assignBedsOccupied) || 2))
+                                    : 1)
+                            )}
+                            /mo)
                           </span>
                         </label>
                         {!assignUseRoomRate && (
@@ -1660,14 +2080,14 @@ export function RoomInventoryTab({
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Resident Type
+                          Occupant Type
                         </label>
                         <select
                           value={newResType}
-                          onChange={(e) => setNewResType(e.target.value as ResidentType)}
+                          onChange={(e) => setNewResType(e.target.value as OccupantType)}
                           className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                         >
-                          {RESIDENT_TYPES.map((rt) => (
+                          {OCCUPANT_TYPES.map((rt) => (
                             <option key={rt} value={rt}>
                               {rt}
                             </option>
@@ -1680,16 +2100,74 @@ export function RoomInventoryTab({
                         </label>
                         <select
                           value={newResOccupancy}
-                          onChange={(e) => setNewResOccupancy(e.target.value as OccupancyMode)}
+                          onChange={(e) => {
+                            const mode = e.target.value as OccupancyMode;
+                            setNewResOccupancy(mode);
+                            const nextBeds =
+                              mode === 'Whole Unit Exclusive'
+                                ? Math.max(1, assigningUnitAvailability.totalBeds)
+                                : mode === 'Custom Multi-Bed'
+                                  ? Math.min(
+                                      Math.max(1, assigningUnitAvailability.availableForResident),
+                                      2
+                                    )
+                                  : 1;
+                            setNewResBedsOccupied(String(nextBeds));
+                            const suggestedStd = assigningRoom.monthlyRate * nextBeds;
+                            setNewResStdRate(String(suggestedStd));
+                            const eff = Math.max(0, suggestedStd - (Number(newResRebate) || 0));
+                            const fm = calculateFirstMonthDefaults(newResCheckIn, eff);
+                            setNewResFirstCharge(String(fm.firstMonthCharge));
+                            setNewResFirstNote(fm.firstMonthNote);
+                          }}
                           className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                         >
                           {OCCUPANCY_MODES.map((om) => (
-                            <option key={om} value={om}>
+                            <option
+                              key={om}
+                              value={om}
+                              disabled={
+                                om === 'Whole Unit Exclusive' &&
+                                !assigningUnitAvailability.isUnitEmptyForExclusive
+                              }
+                            >
                               {om}
+                              {om === 'Whole Unit Exclusive' &&
+                              !assigningUnitAvailability.isUnitEmptyForExclusive
+                                ? ' (Unit has other occupied/blocked beds)'
+                                : ''}
                             </option>
                           ))}
                         </select>
                       </div>
+                      {newResOccupancy === 'Custom Multi-Bed' && (
+                        <div className="sm:col-span-2">
+                          <label className="block text-xs font-medium text-slate-700 mb-1">
+                            Number of Beds Occupied (1–{Math.max(1, assigningUnitAvailability.availableForResident)} available in unit)
+                          </label>
+                          <input
+                            type="number"
+                            required
+                            min={1}
+                            max={Math.max(1, assigningUnitAvailability.availableForResident)}
+                            value={newResBedsOccupied}
+                            onChange={(e) => {
+                              const n = Math.min(
+                                Math.max(1, assigningUnitAvailability.availableForResident),
+                                Math.max(1, Math.floor(Number(e.target.value) || 1))
+                              );
+                              setNewResBedsOccupied(String(n));
+                              const suggestedStd = assigningRoom.monthlyRate * n;
+                              setNewResStdRate(String(suggestedStd));
+                              const eff = Math.max(0, suggestedStd - (Number(newResRebate) || 0));
+                              const fm = calculateFirstMonthDefaults(newResCheckIn, eff);
+                              setNewResFirstCharge(String(fm.firstMonthCharge));
+                              setNewResFirstNote(fm.firstMonthNote);
+                            }}
+                            className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          />
+                        </div>
+                      )}
                       <div className="sm:col-span-2">
                         <label className="block text-xs font-medium text-slate-700 mb-1">
                           Program
@@ -1838,9 +2316,27 @@ export function RoomInventoryTab({
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-slate-700 mb-1">
-                          Monthly Rebate (RM)
-                        </label>
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <label className="block text-xs font-medium text-slate-700">
+                            Monthly Rebate (RM)
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNewResRebate(newResStdRate);
+                              setNewResRebateReason(
+                                newResType === 'Lecturer / Staff'
+                                  ? 'Staff Housing'
+                                  : 'Management Rebate'
+                              );
+                              setNewResFirstCharge('0');
+                              setNewResFirstNote('100% Rebate (Complimentary)');
+                            }}
+                            className="text-[11px] font-semibold text-blue-900 hover:underline cursor-pointer"
+                          >
+                            100% Rebate (RM 0)
+                          </button>
+                        </div>
                         <input
                           type="number"
                           required
@@ -1897,14 +2393,25 @@ export function RoomInventoryTab({
                   </>
                 )}
 
-                {((assignMode === 'existing' && assignOccupancyMode === 'Whole Unit Exclusive') ||
-                  (assignMode === 'new' && newResOccupancy === 'Whole Unit Exclusive')) && (
+                {((assignMode === 'existing' &&
+                  (assignOccupancyMode === 'Whole Unit Exclusive' ||
+                    assignOccupancyMode === 'Custom Multi-Bed')) ||
+                  (assignMode === 'new' &&
+                    (newResOccupancy === 'Whole Unit Exclusive' ||
+                      newResOccupancy === 'Custom Multi-Bed'))) && (
                   <div className="p-3 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
                     {assignSiblingVacantBeds.length > 0 ? (
                       <p>
-                        <strong>Whole Unit Exclusive:</strong> Assigning{' '}
-                        <span className="font-mono">{assigningRoom.roomId}</span> will also
-                        block{' '}
+                        <strong>
+                          {(assignMode === 'existing'
+                            ? assignOccupancyMode
+                            : newResOccupancy) === 'Whole Unit Exclusive'
+                            ? 'Whole Unit Exclusive'
+                            : 'Custom Multi-Bed'}
+                          :
+                        </strong>{' '}
+                        Assigning <span className="font-mono">{assigningRoom.roomId}</span>{' '}
+                        will also lock{' '}
                         <strong className="font-mono">
                           {assignSiblingVacantBeds.map((b) => b.roomId).join(', ')}
                         </strong>{' '}
@@ -1912,8 +2419,14 @@ export function RoomInventoryTab({
                       </p>
                     ) : (
                       <p>
-                        <strong>Whole Unit Exclusive:</strong> No other Vacant beds remain in
-                        Block {assigningRoom.block} Unit {assigningRoom.unitNo}.
+                        <strong>
+                          {assignMode === 'existing'
+                            ? assignOccupancyMode
+                            : newResOccupancy}
+                          :
+                        </strong>{' '}
+                        Only primary bed <span className="font-mono">{assigningRoom.roomId}</span>{' '}
+                        will be occupied (no sibling beds locked).
                       </p>
                     )}
                   </div>

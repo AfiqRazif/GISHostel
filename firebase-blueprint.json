@@ -113,13 +113,23 @@
           "type": "string",
           "enum": ["Student", "Lecturer / Staff", "Guest"],
           "maxLength": 32,
-          "description": "Classification of hostel resident"
+          "description": "Legacy classification of hostel resident"
+        },
+        "occupantType": {
+          "type": "string",
+          "enum": ["Student", "Lecturer / Staff", "Event Guest"],
+          "maxLength": 32,
+          "description": "Classification of hostel occupant (Student, Lecturer / Staff, or Event Guest)"
         },
         "occupancyMode": {
           "type": "string",
-          "enum": ["Single Bed", "Whole Unit Exclusive", "Unassigned"],
+          "enum": ["Single Bed", "Custom Multi-Bed", "Whole Unit Exclusive", "Unassigned"],
           "maxLength": 32,
-          "description": "Single bed, whole-unit exclusive, or unassigned occupancy"
+          "description": "Single bed, custom multi-bed, whole-unit exclusive, or unassigned occupancy"
+        },
+        "bedsOccupied": {
+          "type": "number",
+          "description": "Number of beds occupied by this resident in the assigned unit (defaults to 1)"
         },
         "phone": {
           "type": "string",

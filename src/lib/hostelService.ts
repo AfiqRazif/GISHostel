@@ -10,6 +10,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 import {
@@ -29,6 +30,7 @@ import {
   generateBulkBedSlots,
   generateReceiptNumber,
   getCurrentMonthISO,
+  getDefaultUpfrontFees,
   getNormalizedStayHistory,
   getTodayISO,
   HostelLocation,
@@ -989,6 +991,13 @@ export interface RegisterStudentInput {
   checkInDate: string;
   checkOutDate: string | null;
   depositPaid: number;
+  expectedDeposit?: number;
+  depositPaidNow?: number;
+  expectedRegistrationFee?: number;
+  registrationFeePaidNow?: number;
+  upfrontFeeNotes?: string;
+  upfrontPaymentMethod?: PaymentMethod;
+  existingPayments?: Payment[];
   standardRoomRate: number;
   monthlyRebate: number;
   rebateReason: string;
@@ -1001,7 +1010,7 @@ export async function registerStudent(
   selectedRoom: Room | null,
   allRooms: Room[],
   staffEmail: string
-): Promise<{ blockedSiblings: string[] }> {
+): Promise<{ blockedSiblings: string[]; createdReceiptNumbers: string[] }> {
   const email = assertStaffEmail(staffEmail);
   const studentId = sanitizeIdSegment(input.studentId).slice(0, FIELD_LIMITS.studentId.max);
   const fullName = input.fullName.trim().slice(0, FIELD_LIMITS.fullName.max);
@@ -1015,6 +1024,7 @@ export async function registerStudent(
       ? input.occupantType
       : resolveOccupantType({ residentType: input.residentType });
   const legacyResidentType = toLegacyResidentType(resolvedOccupantType);
+  const defaultUpfront = getDefaultUpfrontFees(resolvedOccupantType);
 
   const standardRoomRate = isUnassigned
     ? 0
@@ -1053,11 +1063,40 @@ export async function registerStudent(
   const rebateReason = isUnassigned
     ? 'None'
     : (input.rebateReason || 'None').trim().slice(0, FIELD_LIMITS.rebateReason.max);
-  const depositPaid = clampNumber(
-    input.depositPaid,
+
+  const expectedDeposit = clampNumber(
+    typeof input.expectedDeposit === 'number' && !Number.isNaN(input.expectedDeposit)
+      ? input.expectedDeposit
+      : defaultUpfront.expectedDeposit,
     FIELD_LIMITS.depositPaid.min,
     FIELD_LIMITS.depositPaid.max
   );
+  const depositPaid = clampNumber(
+    typeof input.depositPaidNow === 'number' && !Number.isNaN(input.depositPaidNow)
+      ? input.depositPaidNow
+      : input.depositPaid,
+    FIELD_LIMITS.depositPaid.min,
+    FIELD_LIMITS.depositPaid.max
+  );
+  const expectedRegistrationFee = clampNumber(
+    typeof input.expectedRegistrationFee === 'number' &&
+      !Number.isNaN(input.expectedRegistrationFee)
+      ? input.expectedRegistrationFee
+      : defaultUpfront.expectedRegistrationFee,
+    FIELD_LIMITS.depositPaid.min,
+    FIELD_LIMITS.depositPaid.max
+  );
+  const registrationFeePaid = clampNumber(
+    typeof input.registrationFeePaidNow === 'number' &&
+      !Number.isNaN(input.registrationFeePaidNow)
+      ? input.registrationFeePaidNow
+      : 0,
+    FIELD_LIMITS.depositPaid.min,
+    FIELD_LIMITS.depositPaid.max
+  );
+  const upfrontFeeNotes = (input.upfrontFeeNotes || '')
+    .trim()
+    .slice(0, FIELD_LIMITS.upfrontFeeNotes.max);
 
   if (!ID_REGEX.test(studentId) || studentId.length < FIELD_LIMITS.studentId.min) {
     throw new Error('Resident ID (Matrix / IC) must be 3–64 characters (letters, numbers, hyphens, underscores).');
@@ -1084,6 +1123,94 @@ export async function registerStudent(
 
   const studentRef = doc(db, 'students', studentId);
   let blockedSiblings: string[] = [];
+  const createdReceiptNumbers: string[] = [];
+
+  const queueUpfrontPaymentRecords = (
+    batch: ReturnType<typeof writeBatch>,
+    roomIdForPayment: string,
+    hostelLocationForPayment: ResidentHostelLocation
+  ) => {
+    const entries: Array<{ type: 'Deposit' | 'Registration Fee'; amount: number; label: string }> = [];
+    if (depositPaid > 0) {
+      entries.push({
+        type: 'Deposit',
+        amount: depositPaid,
+        label: 'Hostel security deposit collected upon registration',
+      });
+    }
+    if (registrationFeePaid > 0) {
+      entries.push({
+        type: 'Registration Fee',
+        amount: registrationFeePaid,
+        label: 'Hostel registration fee collected upon registration',
+      });
+    }
+    if (entries.length === 0) return;
+
+    const billingMonth = MONTH_REGEX.test(input.checkInDate.slice(0, 7))
+      ? input.checkInDate.slice(0, 7)
+      : getCurrentMonthISO();
+    const ym = billingMonth.replace('-', '');
+    const virtualExisting: Payment[] = [...(input.existingPayments || [])];
+    const upfrontMethod: PaymentMethod = input.upfrontPaymentMethod || 'Cash';
+
+    entries.forEach((entry, idx) => {
+      const receiptNo = generateReceiptNumber(billingMonth, virtualExisting);
+      const stamp = Date.now().toString(36).toUpperCase();
+      const rand = Math.random().toString(36).substring(2, 5).toUpperCase();
+      const paymentId = `PAY-${ym}-${stamp}${idx}${rand}`.slice(0, FIELD_LIMITS.paymentId.max);
+      const noteText = (upfrontFeeNotes ? `${entry.label} — ${upfrontFeeNotes}` : entry.label).slice(
+        0,
+        FIELD_LIMITS.notes.max
+      );
+
+      batch.set(doc(db, 'payments', paymentId), {
+        paymentId,
+        receiptNo,
+        studentId,
+        studentName: fullName,
+        roomId: roomIdForPayment,
+        hostelLocation: hostelLocationForPayment,
+        billingMonth,
+        paymentType: entry.type,
+        amount: entry.amount,
+        paymentMethod: upfrontMethod,
+        bankRefNo: '',
+        referenceNo: '',
+        paymentDate: input.checkInDate,
+        status: 'Paid' as PaymentStatus,
+        notes: noteText,
+        proofImageData: null,
+        physicalReceiptStatus: 'Pending Issuance' as PhysicalReceiptStatus,
+        physicalReceiptNo: '',
+        receiptIssuedBy: null,
+        receiptIssuedAt: null,
+        recordedBy: email,
+        recordedAt: serverTimestamp(),
+        updatedBy: email,
+        updatedAt: serverTimestamp(),
+      });
+
+      createdReceiptNumbers.push(receiptNo);
+      virtualExisting.push({
+        paymentId,
+        receiptNo,
+        studentId,
+        studentName: fullName,
+        roomId: roomIdForPayment,
+        hostelLocation: hostelLocationForPayment,
+        billingMonth,
+        paymentType: entry.type,
+        amount: entry.amount,
+        paymentMethod: upfrontMethod,
+        paymentDate: input.checkInDate,
+        status: 'Paid',
+        notes: noteText,
+        updatedBy: email,
+        updatedAt: null,
+      });
+    });
+  };
 
   try {
     const existingStudent = await getDoc(studentRef);
@@ -1108,7 +1235,11 @@ export async function registerStudent(
         hostelLocation: 'Unassigned',
         checkInDate: input.checkInDate,
         checkOutDate: input.status === 'Checked-Out' ? input.checkOutDate : null,
+        expectedDeposit,
         depositPaid,
+        expectedRegistrationFee,
+        registrationFeePaid,
+        upfrontFeeNotes,
         standardRoomRate: 0,
         monthlyRebate: 0,
         rebateReason: 'None',
@@ -1122,8 +1253,9 @@ export async function registerStudent(
         updatedAt: serverTimestamp(),
       });
 
+      queueUpfrontPaymentRecords(batch, '', 'Unassigned');
       await batch.commit();
-      return { blockedSiblings };
+      return { blockedSiblings, createdReceiptNumbers };
     }
 
     const resolvedOccupancyMode = normalizeAssignableOccupancyMode(input.occupancyMode);
@@ -1200,7 +1332,11 @@ export async function registerStudent(
       hostelLocation: selectedRoom.location,
       checkInDate: input.checkInDate,
       checkOutDate: input.status === 'Checked-Out' ? input.checkOutDate : null,
+      expectedDeposit,
       depositPaid,
+      expectedRegistrationFee,
+      registrationFeePaid,
+      upfrontFeeNotes,
       standardRoomRate,
       monthlyRebate,
       rebateReason,
@@ -1214,8 +1350,9 @@ export async function registerStudent(
       updatedAt: serverTimestamp(),
     });
 
+    queueUpfrontPaymentRecords(batch, selectedRoom.roomId, selectedRoom.location);
     await batch.commit();
-    return { blockedSiblings };
+    return { blockedSiblings, createdReceiptNumbers };
   } catch (error) {
     if (
       error instanceof Error &&
@@ -1244,6 +1381,9 @@ export interface UpdateStudentInput {
   checkInDate: string;
   checkOutDate: string | null;
   depositPaid: number;
+  expectedDeposit?: number;
+  expectedRegistrationFee?: number;
+  upfrontFeeNotes?: string;
   standardRoomRate: number;
   monthlyRebate: number;
   rebateReason: string;
@@ -1270,6 +1410,7 @@ export async function updateStudentRecord(
           residentType: input.residentType || currentStudent.residentType,
         });
   const legacyResidentType = toLegacyResidentType(resolvedOccupantType);
+  const defaultUpfront = getDefaultUpfrontFees(resolvedOccupantType);
 
   const standardRoomRate = clampNumber(
     input.standardRoomRate,
@@ -1306,6 +1447,32 @@ export async function updateStudentRecord(
     FIELD_LIMITS.depositPaid.min,
     FIELD_LIMITS.depositPaid.max
   );
+  const expectedDeposit = clampNumber(
+    typeof input.expectedDeposit === 'number' && !Number.isNaN(input.expectedDeposit)
+      ? input.expectedDeposit
+      : typeof currentStudent.expectedDeposit === 'number'
+        ? currentStudent.expectedDeposit
+        : defaultUpfront.expectedDeposit,
+    FIELD_LIMITS.depositPaid.min,
+    FIELD_LIMITS.depositPaid.max
+  );
+  const expectedRegistrationFee = clampNumber(
+    typeof input.expectedRegistrationFee === 'number' &&
+      !Number.isNaN(input.expectedRegistrationFee)
+      ? input.expectedRegistrationFee
+      : typeof currentStudent.expectedRegistrationFee === 'number'
+        ? currentStudent.expectedRegistrationFee
+        : defaultUpfront.expectedRegistrationFee,
+    FIELD_LIMITS.depositPaid.min,
+    FIELD_LIMITS.depositPaid.max
+  );
+  const upfrontFeeNotes = (
+    input.upfrontFeeNotes !== undefined
+      ? input.upfrontFeeNotes
+      : currentStudent.upfrontFeeNotes || ''
+  )
+    .trim()
+    .slice(0, FIELD_LIMITS.upfrontFeeNotes.max);
 
   if (fullName.length < FIELD_LIMITS.fullName.min) {
     throw new Error('Full Name must be at least 2 characters.');
@@ -1381,7 +1548,10 @@ export async function updateStudentRecord(
         status: 'Checked-Out',
         checkInDate: input.checkInDate,
         checkOutDate: input.checkOutDate,
+        expectedDeposit,
         depositPaid,
+        expectedRegistrationFee,
+        upfrontFeeNotes,
         standardRoomRate,
         monthlyRebate,
         rebateReason,
@@ -1462,7 +1632,10 @@ export async function updateStudentRecord(
         checkInDate: input.checkInDate,
         assignedRoomId: input.newRoom.roomId,
         hostelLocation: input.newRoom.location,
+        expectedDeposit,
         depositPaid,
+        expectedRegistrationFee,
+        upfrontFeeNotes,
         standardRoomRate,
         monthlyRebate,
         rebateReason,
@@ -1678,7 +1851,10 @@ export async function updateStudentRecord(
       checkOutDate: input.status === 'Checked-Out' ? input.checkOutDate : null,
       assignedRoomId: targetRoomId,
       hostelLocation: targetLocation,
+      expectedDeposit,
       depositPaid,
+      expectedRegistrationFee,
+      upfrontFeeNotes,
       standardRoomRate,
       monthlyRebate,
       rebateReason,
@@ -2323,6 +2499,98 @@ export async function saveStudentStayHistory(
   }
 }
 
+export async function updateStudentUpfrontFees(
+  studentId: string,
+  input: {
+    expectedDeposit: number;
+    expectedRegistrationFee: number;
+    upfrontFeeNotes: string;
+  },
+  staffEmail: string
+): Promise<void> {
+  const email = assertStaffEmail(staffEmail);
+  const path = `students/${studentId}`;
+  try {
+    await updateDoc(doc(db, 'students', studentId), {
+      expectedDeposit: clampNumber(
+        input.expectedDeposit,
+        FIELD_LIMITS.depositPaid.min,
+        FIELD_LIMITS.depositPaid.max
+      ),
+      expectedRegistrationFee: clampNumber(
+        input.expectedRegistrationFee,
+        FIELD_LIMITS.depositPaid.min,
+        FIELD_LIMITS.depositPaid.max
+      ),
+      upfrontFeeNotes: (input.upfrontFeeNotes || '')
+        .trim()
+        .slice(0, FIELD_LIMITS.upfrontFeeNotes.max),
+      updatedBy: email,
+      updatedAt: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export async function syncStudentUpfrontFeeTotals(
+  studentId: string,
+  staffEmail: string,
+  options?: { forceSyncDeposit?: boolean; forceSyncRegFee?: boolean }
+): Promise<void> {
+  const cleanId = studentId.trim();
+  if (!cleanId) return;
+  const email = assertStaffEmail(staffEmail);
+
+  const q = query(collection(db, 'payments'), where('studentId', '==', cleanId));
+  const snap = await getDocs(q);
+
+  let hasDepositDocs = false;
+  let hasRegFeeDocs = false;
+  let settledDepositSum = 0;
+  let settledRegFeeSum = 0;
+
+  snap.forEach((docSnap) => {
+    const p = docSnap.data() as Payment;
+    if (p.paymentType === 'Deposit') {
+      hasDepositDocs = true;
+      if (p.status === 'Paid') {
+        settledDepositSum += Number(p.amount) || 0;
+      }
+    } else if (p.paymentType === 'Registration Fee') {
+      hasRegFeeDocs = true;
+      if (p.status === 'Paid') {
+        settledRegFeeSum += Number(p.amount) || 0;
+      }
+    }
+  });
+
+  const updatePayload: Record<string, unknown> = {};
+  if (options?.forceSyncDeposit || hasDepositDocs) {
+    updatePayload.depositPaid = clampNumber(
+      Math.round(settledDepositSum * 100) / 100,
+      FIELD_LIMITS.depositPaid.min,
+      FIELD_LIMITS.depositPaid.max
+    );
+  }
+  if (options?.forceSyncRegFee || hasRegFeeDocs) {
+    updatePayload.registrationFeePaid = clampNumber(
+      Math.round(settledRegFeeSum * 100) / 100,
+      FIELD_LIMITS.depositPaid.min,
+      FIELD_LIMITS.depositPaid.max
+    );
+  }
+
+  if (Object.keys(updatePayload).length === 0) return;
+  updatePayload.updatedBy = email;
+  updatePayload.updatedAt = serverTimestamp();
+
+  const studentRef = doc(db, 'students', cleanId);
+  const studentSnap = await getDoc(studentRef);
+  if (!studentSnap.exists()) return;
+  await updateDoc(studentRef, updatePayload);
+}
+
 export interface CreatePaymentInput {
   student: Student;
   billingMonth: string;
@@ -2391,6 +2659,17 @@ export async function createPayment(
       updatedBy: email,
       updatedAt: serverTimestamp(),
     });
+
+    if (
+      input.paymentType === 'Deposit' ||
+      input.paymentType === 'Registration Fee'
+    ) {
+      await syncStudentUpfrontFeeTotals(input.student.studentId, email, {
+        forceSyncDeposit: input.paymentType === 'Deposit',
+        forceSyncRegFee: input.paymentType === 'Registration Fee',
+      });
+    }
+
     return { receiptNo };
   } catch (error) {
     handleFirestoreError(error, OperationType.CREATE, path);
@@ -2427,6 +2706,10 @@ export async function updatePayment(
   const bankRefNo = input.bankRefNo.trim().slice(0, FIELD_LIMITS.bankRefNo.max);
   const path = `payments/${paymentId}`;
   try {
+    const paymentRef = doc(db, 'payments', paymentId);
+    const prevSnap = await getDoc(paymentRef);
+    const prevData = prevSnap.exists() ? (prevSnap.data() as Payment) : null;
+
     const payload: Record<string, unknown> = {
       billingMonth: input.billingMonth,
       paymentType: input.paymentType,
@@ -2454,16 +2737,48 @@ export async function updatePayment(
         payload.receiptIssuedAt = null;
       }
     }
-    await updateDoc(doc(db, 'payments', paymentId), payload);
+    await updateDoc(paymentRef, payload);
+
+    const prevType = prevData?.paymentType;
+    const touchesDeposit =
+      prevType === 'Deposit' || input.paymentType === 'Deposit';
+    const touchesRegFee =
+      prevType === 'Registration Fee' || input.paymentType === 'Registration Fee';
+    if (prevData?.studentId && (touchesDeposit || touchesRegFee)) {
+      await syncStudentUpfrontFeeTotals(prevData.studentId, email, {
+        forceSyncDeposit: touchesDeposit,
+        forceSyncRegFee: touchesRegFee,
+      });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 
-export async function deletePayment(paymentId: string): Promise<void> {
+export async function deletePayment(
+  paymentId: string,
+  staffEmail?: string
+): Promise<void> {
   const path = `payments/${paymentId}`;
   try {
-    await deleteDoc(doc(db, 'payments', paymentId));
+    const paymentRef = doc(db, 'payments', paymentId);
+    const prevSnap = await getDoc(paymentRef);
+    const prevData = prevSnap.exists() ? (prevSnap.data() as Payment) : null;
+
+    await deleteDoc(paymentRef);
+
+    if (
+      prevData?.studentId &&
+      (prevData.paymentType === 'Deposit' ||
+        prevData.paymentType === 'Registration Fee')
+    ) {
+      const syncActor =
+        staffEmail?.trim() || prevData.updatedBy || 'system@gis-hostel.local';
+      await syncStudentUpfrontFeeTotals(prevData.studentId, syncActor, {
+        forceSyncDeposit: prevData.paymentType === 'Deposit',
+        forceSyncRegFee: prevData.paymentType === 'Registration Fee',
+      });
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.DELETE, path);
   }
@@ -2509,7 +2824,11 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       hostelLocation: 'Apartment Desa Jati 2' as HostelLocation,
       checkInDate: '2026-09-01',
       checkOutDate: null,
+      expectedDeposit: 300,
       depositPaid: 250,
+      expectedRegistrationFee: 50,
+      registrationFeePaid: 0,
+      upfrontFeeNotes: '',
       standardRoomRate: 250,
       monthlyRebate: 0,
       rebateReason: 'None',
@@ -2531,7 +2850,11 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       hostelLocation: 'Apartment Desa Jati 2' as HostelLocation,
       checkInDate: '2026-09-01',
       checkOutDate: null,
+      expectedDeposit: 300,
       depositPaid: 250,
+      expectedRegistrationFee: 50,
+      registrationFeePaid: 0,
+      upfrontFeeNotes: '',
       standardRoomRate: 250,
       monthlyRebate: 0,
       rebateReason: 'None',
@@ -2553,7 +2876,11 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       hostelLocation: 'Apartment Desa Jati 2' as HostelLocation,
       checkInDate: '2026-10-05',
       checkOutDate: null,
+      expectedDeposit: 300,
       depositPaid: 250,
+      expectedRegistrationFee: 50,
+      registrationFeePaid: 0,
+      upfrontFeeNotes: '',
       standardRoomRate: 250,
       monthlyRebate: 50,
       rebateReason: 'Management Rebate',
@@ -2575,7 +2902,11 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       hostelLocation: 'Nilai Square' as HostelLocation,
       checkInDate: '2026-08-15',
       checkOutDate: null,
+      expectedDeposit: 300,
       depositPaid: 280,
+      expectedRegistrationFee: 50,
+      registrationFeePaid: 0,
+      upfrontFeeNotes: '',
       standardRoomRate: 280,
       monthlyRebate: 0,
       rebateReason: 'None',
@@ -2597,7 +2928,11 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       hostelLocation: 'Nilai Square' as HostelLocation,
       checkInDate: '2026-09-18',
       checkOutDate: null,
+      expectedDeposit: 300,
       depositPaid: 280,
+      expectedRegistrationFee: 50,
+      registrationFeePaid: 0,
+      upfrontFeeNotes: '',
       standardRoomRate: 280,
       monthlyRebate: 0,
       rebateReason: 'None',
@@ -2619,7 +2954,11 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       hostelLocation: 'Nilai Square' as HostelLocation,
       checkInDate: '2026-09-01',
       checkOutDate: null,
+      expectedDeposit: 0,
       depositPaid: 300,
+      expectedRegistrationFee: 0,
+      registrationFeePaid: 0,
+      upfrontFeeNotes: 'Staff housing exemption',
       standardRoomRate: 300,
       monthlyRebate: 150,
       rebateReason: 'Staff Housing',
@@ -2641,7 +2980,11 @@ export async function loadSampleGisData(staffEmail: string): Promise<void> {
       hostelLocation: 'Apartment Desa Jati 2' as HostelLocation,
       checkInDate: '2026-02-01',
       checkOutDate: '2026-10-31',
+      expectedDeposit: 300,
       depositPaid: 250,
+      expectedRegistrationFee: 50,
+      registrationFeePaid: 0,
+      upfrontFeeNotes: '',
       standardRoomRate: 250,
       monthlyRebate: 0,
       rebateReason: 'None',
@@ -3163,11 +3506,15 @@ export async function bulkImportStudents(
         hostelLocation: item.hostelLocation,
         checkInDate: item.checkInDate,
         checkOutDate: item.status === 'Checked-Out' ? item.checkOutDate : null,
+        expectedDeposit: getDefaultUpfrontFees(resolvedOccupantType).expectedDeposit,
         depositPaid: clampNumber(
           item.depositPaid,
           FIELD_LIMITS.depositPaid.min,
           FIELD_LIMITS.depositPaid.max
         ),
+        expectedRegistrationFee: getDefaultUpfrontFees(resolvedOccupantType).expectedRegistrationFee,
+        registrationFeePaid: 0,
+        upfrontFeeNotes: '',
         standardRoomRate: clampedStdRate,
         monthlyRebate: clampedRebate,
         rebateReason: (item.rebateReason || 'None')
@@ -3349,9 +3696,31 @@ export async function bulkImportPayments(
       }
     }
 
-      if (opsInBatch > 0) {
+    if (opsInBatch > 0) {
       await batch.commit();
       onProgress?.(completed, items.length);
+    }
+
+    const upfrontSyncStudents = new Map<
+      string,
+      { deposit: boolean; regFee: boolean }
+    >();
+    for (const item of items) {
+      if (item.paymentType === 'Deposit' || item.paymentType === 'Registration Fee') {
+        const flags = upfrontSyncStudents.get(item.student.studentId) ?? {
+          deposit: false,
+          regFee: false,
+        };
+        if (item.paymentType === 'Deposit') flags.deposit = true;
+        if (item.paymentType === 'Registration Fee') flags.regFee = true;
+        upfrontSyncStudents.set(item.student.studentId, flags);
+      }
+    }
+    for (const [sid, flags] of upfrontSyncStudents.entries()) {
+      await syncStudentUpfrontFeeTotals(sid, email, {
+        forceSyncDeposit: flags.deposit,
+        forceSyncRegFee: flags.regFee,
+      });
     }
 
     return { importedCount: completed };
@@ -3744,6 +4113,13 @@ export async function batchCreatePastPayments(
 
     if (opsInBatch > 0) {
       await batch.commit();
+    }
+
+    if (paymentType === 'Deposit' || paymentType === 'Registration Fee') {
+      await syncStudentUpfrontFeeTotals(student.studentId, email, {
+        forceSyncDeposit: paymentType === 'Deposit',
+        forceSyncRegFee: paymentType === 'Registration Fee',
+      });
     }
 
     return {

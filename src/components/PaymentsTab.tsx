@@ -262,8 +262,23 @@ export function PaymentsTab({
   }, [activeModalStudent, paymentType, payments, billingMonth, amount, editingPayment]);
 
   const totals = useMemo(() => {
-    const cashCollected = filteredPayments
-      .filter((p) => p.status === 'Paid' && isCashPaymentType(p.paymentType))
+    const monthlyRentCollected = filteredPayments
+      .filter((p) => p.status === 'Paid' && p.paymentType === 'Monthly Rent')
+      .reduce((sum, p) => sum + p.amount, 0);
+    const depositsCollected = filteredPayments
+      .filter(
+        (p) =>
+          p.status === 'Paid' &&
+          (p.paymentType === 'Deposit' ||
+            p.paymentType === 'Registration/Deposit')
+      )
+      .reduce((sum, p) => sum + p.amount, 0);
+    const depositRefunds = filteredPayments
+      .filter((p) => p.status === 'Paid' && p.paymentType === 'Deposit Refund')
+      .reduce((sum, p) => sum + p.amount, 0);
+    const depositsHeld = Math.max(0, depositsCollected - depositRefunds);
+    const registrationFeesCollected = filteredPayments
+      .filter((p) => p.status === 'Paid' && p.paymentType === 'Registration Fee')
       .reduce((sum, p) => sum + p.amount, 0);
     const waiversGranted = filteredPayments
       .filter(
@@ -275,7 +290,14 @@ export function PaymentsTab({
     const pendingOrOverdue = filteredPayments
       .filter((p) => p.status === 'Pending' || p.status === 'Overdue')
       .reduce((sum, p) => sum + p.amount, 0);
-    return { cashCollected, waiversGranted, pendingOrOverdue };
+    return {
+      monthlyRentCollected,
+      depositsHeld,
+      depositRefunds,
+      registrationFeesCollected,
+      waiversGranted,
+      pendingOrOverdue,
+    };
   }, [filteredPayments]);
 
   const handleOpenAddModal = () => {
@@ -375,31 +397,65 @@ export function PaymentsTab({
   const handleStudentChange = (studentId: string) => {
     setSelectedStudentId(studentId);
     const st = students.find((s) => s.studentId === studentId);
-    if (st && paymentType === 'Monthly Rent') {
-      const billing = calculateResidentBilling(st, payments);
+    if (!st) return;
+    const billing = calculateResidentBilling(st, payments);
+    if (paymentType === 'Monthly Rent') {
       setAmount(String(billing.effectiveMonthlyFee));
+    } else if (paymentType === 'Deposit') {
+      setAmount(
+        String(
+          billing.depositPending > 0
+            ? billing.depositPending
+            : billing.expectedDeposit
+        )
+      );
+    } else if (paymentType === 'Registration Fee') {
+      setAmount(
+        String(
+          billing.registrationFeePending > 0
+            ? billing.registrationFeePending
+            : billing.expectedRegistrationFee
+        )
+      );
     }
   };
 
   const handlePaymentTypeChange = (nextType: PaymentType) => {
     setPaymentType(nextType);
+    const st = students.find((s) => s.studentId === selectedStudentId);
     if (nextType === 'Rebate / Fee Waiver') {
       setPaymentMethod('Internal Adjustment');
       setStatus('Waived');
-    } else if (nextType === 'Monthly Rent') {
-      if (paymentMethod === 'Internal Adjustment') {
-        setPaymentMethod('DuitNow QR');
-      }
-      if (status === 'Waived') {
-        setStatus('Paid');
-      }
-      const st = students.find((s) => s.studentId === selectedStudentId);
-      if (st) {
-        const billing = calculateResidentBilling(st, payments);
-        setAmount(String(billing.effectiveMonthlyFee));
-      }
-    } else if (status === 'Waived') {
+      return;
+    }
+
+    if (paymentMethod === 'Internal Adjustment') {
+      setPaymentMethod('DuitNow QR');
+    }
+    if (status === 'Waived') {
       setStatus('Paid');
+    }
+
+    if (!st) return;
+    const billing = calculateResidentBilling(st, payments);
+    if (nextType === 'Monthly Rent') {
+      setAmount(String(billing.effectiveMonthlyFee));
+    } else if (nextType === 'Deposit') {
+      setAmount(
+        String(
+          billing.depositPending > 0
+            ? billing.depositPending
+            : billing.expectedDeposit
+        )
+      );
+    } else if (nextType === 'Registration Fee') {
+      setAmount(
+        String(
+          billing.registrationFeePending > 0
+            ? billing.registrationFeePending
+            : billing.expectedRegistrationFee
+        )
+      );
     }
   };
 
@@ -508,7 +564,7 @@ export function PaymentsTab({
     setSubmitting(true);
     setFormError(null);
     try {
-      await deletePayment(deletingPayment.paymentId);
+      await deletePayment(deletingPayment.paymentId, staffEmail);
       setFeedbackBanner(
         `Deleted payment ${getPaymentReceiptNo(deletingPayment)} (${deletingPayment.studentName} · ${formatRM(deletingPayment.amount)}).`
       );
@@ -597,21 +653,51 @@ export function PaymentsTab({
         )}
 
         {/* Summary KPI Strip */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
           <div className="bg-white border border-slate-200 rounded-xl p-4">
             <p className="text-xs font-medium text-slate-500">
-              Cash / Bank Collected (Excl. Waivers)
+              Monthly Rent Collected
             </p>
             <p className="font-display text-xl font-bold text-emerald-700 mt-1 font-mono tabular-nums">
-              {formatRM(totals.cashCollected)}
+              {formatRM(totals.monthlyRentCollected)}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Settled rent receipts
             </p>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-4">
             <p className="text-xs font-medium text-slate-500">
-              Fee Waivers / Rebates Credited
+              Deposits Held
+            </p>
+            <p className="font-display text-xl font-bold text-blue-900 mt-1 font-mono tabular-nums">
+              {formatRM(totals.depositsHeld)}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {totals.depositRefunds > 0
+                ? `Net of ${formatRM(totals.depositRefunds)} refunded`
+                : 'Security deposits collected'}
+            </p>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <p className="text-xs font-medium text-slate-500">
+              Registration Fees Collected
+            </p>
+            <p className="font-display text-xl font-bold text-teal-700 mt-1 font-mono tabular-nums">
+              {formatRM(totals.registrationFeesCollected)}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Hostel registration receipts
+            </p>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <p className="text-xs font-medium text-slate-500">
+              Fee Waivers / Rebates
             </p>
             <p className="font-display text-xl font-bold text-indigo-900 mt-1 font-mono tabular-nums">
               {formatRM(totals.waiversGranted)}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Internal rent adjustments
             </p>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-4">
@@ -620,6 +706,9 @@ export function PaymentsTab({
             </p>
             <p className="font-display text-xl font-bold text-red-700 mt-1 font-mono tabular-nums">
               {formatRM(totals.pendingOrOverdue)}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Awaiting settlement
             </p>
           </div>
         </div>
@@ -679,7 +768,9 @@ export function PaymentsTab({
               <option value="All">All Types</option>
               {PAYMENT_TYPES.map((t) => (
                 <option key={t} value={t}>
-                  {t}
+                  {t === 'Registration/Deposit'
+                    ? 'Registration/Deposit (Legacy)'
+                    : t}
                 </option>
               ))}
             </select>
@@ -820,7 +911,13 @@ export function PaymentsTab({
                         </p>
                         <p
                           className={`text-xs whitespace-nowrap ${
-                            isWaiver ? 'text-indigo-800 font-medium' : 'text-slate-500'
+                            isWaiver
+                              ? 'text-indigo-800 font-medium'
+                              : p.paymentType === 'Deposit'
+                                ? 'text-blue-800 font-medium'
+                                : p.paymentType === 'Registration Fee'
+                                  ? 'text-teal-800 font-medium'
+                                  : 'text-slate-500'
                           }`}
                         >
                           {p.paymentType}
@@ -1108,7 +1205,9 @@ export function PaymentsTab({
                       >
                         {PAYMENT_TYPES.map((t) => (
                           <option key={t} value={t}>
-                            {t}
+                            {t === 'Registration/Deposit'
+                              ? 'Registration/Deposit (Legacy)'
+                              : t}
                           </option>
                         ))}
                       </select>
@@ -1118,6 +1217,13 @@ export function PaymentsTab({
                   {paymentType === 'Rebate / Fee Waiver' && (
                     <div className="p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-xs text-indigo-900">
                       One-time waiver credits the resident&apos;s rent balance without adding to Cash/Bank collected totals.
+                    </div>
+                  )}
+
+                  {(paymentType === 'Deposit' ||
+                    paymentType === 'Registration Fee') && (
+                    <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900">
+                      Settled <strong>{paymentType}</strong> receipts automatically update the resident&apos;s upfront fee balance without counting toward Monthly Rent arrears.
                     </div>
                   )}
 
@@ -1332,7 +1438,9 @@ export function PaymentsTab({
                     >
                       {PAYMENT_TYPES.map((t) => (
                         <option key={t} value={t}>
-                          {t}
+                          {t === 'Registration/Deposit'
+                            ? 'Registration/Deposit (Legacy)'
+                            : t}
                         </option>
                       ))}
                     </select>

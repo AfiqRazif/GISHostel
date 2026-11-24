@@ -8,6 +8,7 @@ import {
   FileSpreadsheet,
   Printer,
   ShieldAlert,
+  Wallet,
 } from 'lucide-react';
 import {
   calculateFirstMonthDefaults,
@@ -15,6 +16,7 @@ import {
   DATE_REGEX,
   formatRM,
   getLocationPrefix,
+  resolveOccupantType,
   getTodayISO,
   HOSTEL_LOCATIONS,
   HostelLocation,
@@ -26,6 +28,8 @@ import {
   sanitizeIdSegment,
   StaffRole,
   Student,
+  StudentStatus,
+  UpfrontFeeStatus,
 } from '../types/hostel';
 
 interface ReportsTabProps {
@@ -38,9 +42,10 @@ interface ReportsTabProps {
   loading: boolean;
 }
 
-type ReportSubView = 'collection' | 'defaulters';
+type ReportSubView = 'collection' | 'defaulters' | 'upfrontFees';
 type MonthRangeKey = 'FULL' | 'H1' | 'H2';
 type DefaulterStatusFilter = 'All' | 'Active' | 'Checked-Out';
+type UpfrontFeeFilterMode = 'all' | 'pending' | 'settled';
 type SeverityTier = 'Critical' | 'High' | 'Moderate';
 
 const MONTH_LABELS = [
@@ -235,6 +240,16 @@ export function ReportsTab({
   const [defaulterSeverity, setDefaulterSeverity] = useState<
     'All' | SeverityTier
   >('All');
+
+  // Sub-View 3 filters (Deposit & Registration Fee Summary)
+  const [upfrontLocation, setUpfrontLocation] = useState<
+    'All' | ResidentHostelLocation
+  >('All');
+  const [upfrontStatus, setUpfrontStatus] = useState<'All' | StudentStatus>(
+    'All'
+  );
+  const [upfrontFeeFilter, setUpfrontFeeFilter] =
+    useState<UpfrontFeeFilterMode>('all');
 
   const availableYears = useMemo(() => {
     const yearSet = new Set<number>([
@@ -807,6 +822,101 @@ export function ReportsTab({
     };
   }, [filteredDefaulters]);
 
+  // Sub-View 3: Deposit & Hostel Registration Fee Summary
+  const upfrontFeeReport = useMemo(() => {
+    const allRows = students.map((student) => {
+      const billing = calculateResidentBilling(student, payments);
+      const lastSeg =
+        billing.segments.length > 0
+          ? billing.segments[billing.segments.length - 1].segment
+          : null;
+      const unitCode =
+        (student.assignedRoomId || '').trim() ||
+        (lastSeg?.roomId || '').trim() ||
+        'Unassigned';
+      const hostelLocation: ResidentHostelLocation =
+        student.hostelLocation || 'Unassigned';
+      const occupantType = resolveOccupantType(student);
+      const totalUpfrontPending = roundMoney(
+        billing.depositPending + billing.registrationFeePending
+      );
+
+      return {
+        student,
+        unitCode,
+        hostelLocation,
+        occupantType,
+        expectedDeposit: billing.expectedDeposit,
+        depositPaid: billing.depositPaid,
+        depositPending: billing.depositPending,
+        depositStatus: billing.depositStatus,
+        expectedRegFee: billing.expectedRegistrationFee,
+        regFeePaid: billing.registrationFeePaid,
+        regFeePending: billing.registrationFeePending,
+        regFeeStatus: billing.registrationFeeStatus,
+        totalUpfrontPending,
+        hasPending: billing.hasPendingUpfrontFee,
+        upfrontFeeNotes: billing.upfrontFeeNotes,
+      };
+    });
+
+    const allPendingCount = allRows.filter((r) => r.hasPending).length;
+
+    const filteredRows = allRows
+      .filter((r) =>
+        upfrontLocation === 'All' ? true : r.hostelLocation === upfrontLocation
+      )
+      .filter((r) =>
+        upfrontStatus === 'All' ? true : r.student.status === upfrontStatus
+      )
+      .filter((r) => {
+        if (upfrontFeeFilter === 'pending') return r.hasPending;
+        if (upfrontFeeFilter === 'settled') return !r.hasPending;
+        return true;
+      })
+      .sort((a, b) => {
+        const pendingDiff = b.totalUpfrontPending - a.totalUpfrontPending;
+        if (Math.abs(pendingDiff) > 0.005) return pendingDiff;
+        return a.student.fullName.localeCompare(b.student.fullName);
+      });
+
+    let totalExpectedDeposit = 0;
+    let totalDepositPaid = 0;
+    let totalDepositPending = 0;
+    let totalExpectedRegFee = 0;
+    let totalRegFeePaid = 0;
+    let totalRegFeePending = 0;
+    let pendingResidentsCount = 0;
+
+    for (const r of filteredRows) {
+      totalExpectedDeposit += r.expectedDeposit;
+      totalDepositPaid += r.depositPaid;
+      totalDepositPending += r.depositPending;
+      totalExpectedRegFee += r.expectedRegFee;
+      totalRegFeePaid += r.regFeePaid;
+      totalRegFeePending += r.regFeePending;
+      if (r.hasPending) pendingResidentsCount += 1;
+    }
+
+    return {
+      allPendingCount,
+      rows: filteredRows,
+      totals: {
+        residentCount: filteredRows.length,
+        pendingResidentsCount,
+        totalExpectedDeposit: roundMoney(totalExpectedDeposit),
+        totalDepositPaid: roundMoney(totalDepositPaid),
+        totalDepositPending: roundMoney(totalDepositPending),
+        totalExpectedRegFee: roundMoney(totalExpectedRegFee),
+        totalRegFeePaid: roundMoney(totalRegFeePaid),
+        totalRegFeePending: roundMoney(totalRegFeePending),
+        totalCombinedPending: roundMoney(
+          totalDepositPending + totalRegFeePending
+        ),
+      },
+    };
+  }, [students, payments, upfrontLocation, upfrontStatus, upfrontFeeFilter]);
+
   const handleExportCollectionExcel = () => {
     const wb = XLSX.utils.book_new();
     const monthRangeLabel =
@@ -1061,6 +1171,70 @@ export function ReportsTab({
     XLSX.utils.book_append_sheet(wb, summaryWs, 'Defaulters Summary');
 
     XLSX.writeFile(wb, `gis-hostel-defaulters-report-${todayISO}.xlsx`);
+  };
+
+  const handleExportUpfrontFeesExcel = () => {
+    const wb = XLSX.utils.book_new();
+    const detailRows = upfrontFeeReport.rows.map((r) => ({
+      'Student / Resident ID': r.student.studentId,
+      'Full Name': r.student.fullName,
+      'Occupant Type': r.occupantType,
+      Status: r.student.status,
+      'Unit / Bed': r.unitCode,
+      'Hostel Location': r.hostelLocation,
+      'Expected Deposit (RM)': r.expectedDeposit,
+      'Deposit Paid (RM)': r.depositPaid,
+      'Deposit Pending (RM)': r.depositPending,
+      'Deposit Status': r.depositStatus,
+      'Expected Reg. Fee (RM)': r.expectedRegFee,
+      'Reg. Fee Paid (RM)': r.regFeePaid,
+      'Reg. Fee Pending (RM)': r.regFeePending,
+      'Reg. Fee Status': r.regFeeStatus,
+      'Total Upfront Pending (RM)': r.totalUpfrontPending,
+      'Notes / Remarks': r.upfrontFeeNotes || '-',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(detailRows);
+    ws['!cols'] = [
+      { wch: 18 },
+      { wch: 28 },
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 18 },
+      { wch: 24 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 18 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 14 },
+      { wch: 20 },
+      { wch: 34 },
+    ];
+    XLSX.utils.book_append_sheet(wb, ws, 'Deposit & Reg Fee Details');
+
+    const t = upfrontFeeReport.totals;
+    const summaryWs = XLSX.utils.json_to_sheet([
+      { Metric: 'Generated Date', Value: todayISO },
+      { Metric: 'Location Filter', Value: upfrontLocation },
+      { Metric: 'Resident Status Filter', Value: upfrontStatus },
+      { Metric: 'Fee Filter', Value: upfrontFeeFilter },
+      { Metric: 'Residents Listed', Value: t.residentCount },
+      { Metric: 'Residents with Pending Fees', Value: t.pendingResidentsCount },
+      { Metric: 'Total Expected Deposits (RM)', Value: t.totalExpectedDeposit },
+      { Metric: 'Total Deposits Paid (RM)', Value: t.totalDepositPaid },
+      { Metric: 'Total Deposits Pending (RM)', Value: t.totalDepositPending },
+      { Metric: 'Total Expected Reg. Fees (RM)', Value: t.totalExpectedRegFee },
+      { Metric: 'Total Reg. Fees Paid (RM)', Value: t.totalRegFeePaid },
+      { Metric: 'Total Reg. Fees Pending (RM)', Value: t.totalRegFeePending },
+      { Metric: 'Combined Upfront Pending (RM)', Value: t.totalCombinedPending },
+    ]);
+    summaryWs['!cols'] = [{ wch: 34 }, { wch: 24 }];
+    XLSX.utils.book_append_sheet(wb, summaryWs, 'Upfront Fee Summary');
+
+    XLSX.writeFile(wb, `gis-deposit-regfee-summary-${todayISO}.xlsx`);
   };
 
   const renderCollectionSection = (
@@ -1369,7 +1543,7 @@ export function ReportsTab({
       <style>{`
         @media print {
           @page {
-            size: ${subView === 'collection' ? 'A4 landscape' : 'A4 portrait'};
+            size: ${subView === 'defaulters' ? 'A4 portrait' : 'A4 landscape'};
             margin: 10mm;
           }
         }
@@ -1396,7 +1570,9 @@ export function ReportsTab({
                         ? 'H1 JAN–JUN'
                         : 'H2 JUL–DEC'
                   })`
-                : 'STUDENT OUTSTANDING DEFAULTERS REPORT'}
+                : subView === 'defaulters'
+                  ? 'STUDENT OUTSTANDING DEFAULTERS REPORT'
+                  : 'DEPOSIT & HOSTEL REGISTRATION FEE SUMMARY'}
             </p>
             <p>Printed: {todayISO}</p>
             <p>Generated by: {staffName || staffEmail}</p>
@@ -1406,13 +1582,13 @@ export function ReportsTab({
 
       {/* Top Report Mode Switcher & Header Bar (screen-only) */}
       <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 space-y-4 print:hidden">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+        <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
           <div>
             <h2 className="font-display text-lg font-semibold text-slate-900">
               Official GIS Nilai Hostel Reports
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Annual unit-level rent collection matrix and severity-ranked student arrears statements
+              Annual rent collection matrix, severity-ranked arrears, and Deposit &amp; Registration Fee tracking
               {staffRole === 'Viewer' ? ' · Read-Only Access' : ''}
             </p>
           </div>
@@ -1420,7 +1596,7 @@ export function ReportsTab({
           <div
             role="tablist"
             aria-label="Report sub-views"
-            className="inline-flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 self-start lg:self-auto"
+            className="inline-flex flex-wrap items-center p-1 bg-slate-100 rounded-lg border border-slate-200 self-start xl:self-auto gap-1"
           >
             <button
               type="button"
@@ -1449,6 +1625,22 @@ export function ReportsTab({
             >
               <ShieldAlert className="w-3.5 h-3.5" />
               <span>Outstanding Defaulters ({allDefaulters.length})</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={subView === 'upfrontFees'}
+              onClick={() => setSubView('upfrontFees')}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                subView === 'upfrontFees'
+                  ? 'bg-blue-900 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Wallet className="w-3.5 h-3.5" />
+              <span>
+                Deposit &amp; Reg. Fees ({upfrontFeeReport.allPendingCount} pending)
+              </span>
             </button>
           </div>
         </div>
@@ -1536,7 +1728,7 @@ export function ReportsTab({
               </button>
             </div>
           </div>
-        ) : (
+        ) : subView === 'defaulters' ? (
           <div className="pt-3 border-t border-slate-100 flex flex-col xl:flex-row xl:items-end justify-between gap-3">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 max-w-3xl">
               <div>
@@ -1614,6 +1806,88 @@ export function ReportsTab({
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Print Defaulters List</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="pt-3 border-t border-slate-100 flex flex-col xl:flex-row xl:items-end justify-between gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 max-w-3xl">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Hostel Location
+                </label>
+                <select
+                  value={upfrontLocation}
+                  onChange={(e) =>
+                    setUpfrontLocation(
+                      e.target.value as 'All' | ResidentHostelLocation
+                    )
+                  }
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                >
+                  <option value="All">All Locations</option>
+                  {HOSTEL_LOCATIONS.map((loc) => (
+                    <option key={loc} value={loc}>
+                      {loc === 'Nilai Square' ? 'Nilai Square (NSQ)' : loc}
+                    </option>
+                  ))}
+                  <option value="Unassigned">Unassigned</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Resident Status
+                </label>
+                <select
+                  value={upfrontStatus}
+                  onChange={(e) =>
+                    setUpfrontStatus(e.target.value as 'All' | StudentStatus)
+                  }
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                >
+                  <option value="All">All Statuses</option>
+                  <option value="Active">Active Only</option>
+                  <option value="Checked-Out">Checked-Out Only</option>
+                  <option value="Suspended">Suspended Only</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Upfront Fee Filter
+                </label>
+                <select
+                  value={upfrontFeeFilter}
+                  onChange={(e) =>
+                    setUpfrontFeeFilter(e.target.value as UpfrontFeeFilterMode)
+                  }
+                  className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                >
+                  <option value="all">All Residents</option>
+                  <option value="pending">Pending Deposit / Reg. Fee Only</option>
+                  <option value="settled">Settled / Waived Only</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <button
+                type="button"
+                onClick={handleExportUpfrontFeesExcel}
+                disabled={upfrontFeeReport.rows.length === 0}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 disabled:opacity-50 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Export Upfront Fees (.xlsx)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg transition-colors cursor-pointer whitespace-nowrap shrink-0"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print Fee Summary</span>
               </button>
             </div>
           </div>
@@ -1984,6 +2258,268 @@ export function ReportsTab({
                       <td className="px-3 py-2.5 print:px-1.5 print:py-1.5" />
                       <td className="px-3 py-2.5 text-right font-mono tabular-nums font-bold text-red-700 whitespace-nowrap print:px-1.5 print:py-1.5">
                         {formatRM(defaulterStats.totalRecoverableArrears)}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
+      {/* SUB-VIEW 3: DEPOSIT & HOSTEL REGISTRATION FEE SUMMARY */}
+      {subView === 'upfrontFees' && (
+        <div className="space-y-5 print:space-y-3">
+          {/* Summary KPI Strip */}
+          <section className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 print:border-slate-400 print:rounded-none print:p-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 print:grid-cols-4 print:gap-2">
+              <div className="border border-slate-200 rounded-lg p-3.5 bg-slate-50/70 print:p-2">
+                <p className="text-xs font-medium text-slate-500">
+                  Residents Listed
+                </p>
+                <p className="text-xl font-bold font-mono tabular-nums text-slate-900 mt-1 print:text-sm">
+                  {upfrontFeeReport.totals.residentCount}
+                </p>
+                <p className="text-[11px] text-amber-800 font-medium mt-0.5 print:text-[9px]">
+                  {upfrontFeeReport.totals.pendingResidentsCount} with pending upfront fees
+                </p>
+              </div>
+
+              <div className="border border-blue-200 rounded-lg p-3.5 bg-blue-50/40 print:p-2">
+                <p className="text-xs font-medium text-blue-900">
+                  Deposits Collected / Expected
+                </p>
+                <p className="text-xl font-bold font-mono tabular-nums text-blue-900 mt-1 print:text-sm">
+                  {formatRM(upfrontFeeReport.totals.totalDepositPaid)}
+                </p>
+                <p className="text-[11px] text-slate-600 font-mono tabular-nums mt-0.5 print:text-[9px]">
+                  of {formatRM(upfrontFeeReport.totals.totalExpectedDeposit)} · Pending:{' '}
+                  <span className="font-semibold text-red-700">
+                    {formatRM(upfrontFeeReport.totals.totalDepositPending)}
+                  </span>
+                </p>
+              </div>
+
+              <div className="border border-teal-200 rounded-lg p-3.5 bg-teal-50/40 print:p-2">
+                <p className="text-xs font-medium text-teal-900">
+                  Reg. Fees Collected / Expected
+                </p>
+                <p className="text-xl font-bold font-mono tabular-nums text-teal-800 mt-1 print:text-sm">
+                  {formatRM(upfrontFeeReport.totals.totalRegFeePaid)}
+                </p>
+                <p className="text-[11px] text-slate-600 font-mono tabular-nums mt-0.5 print:text-[9px]">
+                  of {formatRM(upfrontFeeReport.totals.totalExpectedRegFee)} · Pending:{' '}
+                  <span className="font-semibold text-red-700">
+                    {formatRM(upfrontFeeReport.totals.totalRegFeePending)}
+                  </span>
+                </p>
+              </div>
+
+              <div className="border border-red-200 rounded-lg p-3.5 bg-red-50/40 print:p-2">
+                <p className="text-xs font-medium text-red-900">
+                  Total Pending Upfront Fees
+                </p>
+                <p
+                  className={`text-xl font-bold font-mono tabular-nums mt-1 print:text-sm ${
+                    upfrontFeeReport.totals.totalCombinedPending > 0.01
+                      ? 'text-red-700'
+                      : 'text-emerald-700'
+                  }`}
+                >
+                  {formatRM(upfrontFeeReport.totals.totalCombinedPending)}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5 print:text-[9px]">
+                  Deposit + Registration Fee balance
+                </p>
+              </div>
+            </div>
+          </section>
+
+          {/* Upfront Fees Table */}
+          <section className="bg-white border border-slate-200 rounded-xl overflow-hidden print:border-slate-400 print:rounded-none">
+            {upfrontFeeReport.rows.length === 0 ? (
+              <div className="p-10 text-center space-y-2">
+                <Wallet className="w-7 h-7 text-slate-400 mx-auto" />
+                <p className="text-sm font-semibold text-slate-900">
+                  No Residents Match Current Upfront Fee Filters
+                </p>
+                <p className="text-xs text-slate-500">
+                  Adjust Hostel Location, Resident Status, or Upfront Fee Filter above.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto print:overflow-visible">
+                <table className="w-full text-left border-collapse text-xs print:text-[8.5px]">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase print:bg-slate-100">
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1.5">
+                        Resident Name &amp; ID
+                      </th>
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1.5">
+                        Unit / Hostel
+                      </th>
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1.5">
+                        Status
+                      </th>
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
+                        Exp. Deposit
+                      </th>
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
+                        Deposit Paid
+                      </th>
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
+                        Deposit Bal / Status
+                      </th>
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
+                        Exp. Reg. Fee
+                      </th>
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
+                        Reg. Fee Paid
+                      </th>
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
+                        Reg. Bal / Status
+                      </th>
+                      <th className="px-3 py-3 font-semibold min-w-[180px] print:px-1.5 print:py-1.5">
+                        Upfront Fee Notes
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {upfrontFeeReport.rows.map((row) => {
+                      const renderStatusBadge = (
+                        feeStatus: UpfrontFeeStatus,
+                        pending: number
+                      ) => {
+                        const badgeClass =
+                          feeStatus === 'Paid'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : feeStatus === 'Waived'
+                              ? 'bg-slate-100 text-slate-600 border-slate-200'
+                              : feeStatus === 'Partial'
+                                ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                : 'bg-red-50 text-red-800 border-red-200';
+                        return (
+                          <div className="flex flex-col items-end gap-0.5">
+                            {pending > 0.009 && (
+                              <span className="font-mono font-semibold text-red-700 tabular-nums">
+                                {formatRM(pending)}
+                              </span>
+                            )}
+                            <span
+                              className={`inline-block px-1.5 py-0.5 text-[10px] font-semibold rounded border print:text-[7.5px] print:px-1 ${badgeClass}`}
+                            >
+                              {feeStatus}
+                            </span>
+                          </div>
+                        );
+                      };
+
+                      return (
+                        <tr
+                          key={row.student.studentId}
+                          className="hover:bg-slate-50/80 transition-colors"
+                        >
+                          <td className="px-3 py-2.5 print:px-1.5 print:py-1.5">
+                            <div className="font-semibold text-slate-900">
+                              {row.student.fullName}
+                            </div>
+                            <div className="font-mono text-[11px] text-slate-500 print:text-[7.5px]">
+                              {row.student.studentId} · {row.occupantType}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap print:px-1.5 print:py-1.5">
+                            <div className="font-mono font-medium text-slate-900">
+                              {row.unitCode}
+                            </div>
+                            <div className="text-[11px] text-slate-500 print:text-[7.5px]">
+                              {row.hostelLocation === 'Nilai Square'
+                                ? 'Nilai Square (NSQ)'
+                                : row.hostelLocation}
+                            </div>
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap print:px-1.5 print:py-1.5">
+                            <span
+                              className={`font-medium ${
+                                row.student.status === 'Active'
+                                  ? 'text-emerald-700'
+                                  : row.student.status === 'Checked-Out'
+                                    ? 'text-slate-600'
+                                    : 'text-red-700'
+                              }`}
+                            >
+                              {row.student.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap print:px-1.5 print:py-1.5">
+                            {formatRM(row.expectedDeposit)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono tabular-nums text-blue-900 font-medium whitespace-nowrap print:px-1.5 print:py-1.5">
+                            {formatRM(row.depositPaid)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right whitespace-nowrap print:px-1.5 print:py-1.5">
+                            {renderStatusBadge(
+                              row.depositStatus,
+                              row.depositPending
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap print:px-1.5 print:py-1.5">
+                            {formatRM(row.expectedRegFee)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right font-mono tabular-nums text-teal-800 font-medium whitespace-nowrap print:px-1.5 print:py-1.5">
+                            {formatRM(row.regFeePaid)}
+                          </td>
+                          <td className="px-3 py-2.5 text-right whitespace-nowrap print:px-1.5 print:py-1.5">
+                            {renderStatusBadge(
+                              row.regFeeStatus,
+                              row.regFeePending
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-slate-600 print:px-1.5 print:py-1.5">
+                            {row.upfrontFeeNotes ? (
+                              <span className="text-xs text-slate-700 print:text-[8px]">
+                                {row.upfrontFeeNotes}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">—</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-50 border-t-2 border-slate-300 font-semibold text-slate-900 print:bg-slate-100">
+                      <td
+                        colSpan={3}
+                        className="px-3 py-2.5 text-right uppercase text-xs print:px-1.5 print:py-1.5"
+                      >
+                        Totals ({upfrontFeeReport.totals.residentCount} resident
+                        {upfrontFeeReport.totals.residentCount === 1 ? '' : 's'})
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums whitespace-nowrap print:px-1.5 print:py-1.5">
+                        {formatRM(upfrontFeeReport.totals.totalExpectedDeposit)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-blue-900 whitespace-nowrap print:px-1.5 print:py-1.5">
+                        {formatRM(upfrontFeeReport.totals.totalDepositPaid)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-red-700 whitespace-nowrap print:px-1.5 print:py-1.5">
+                        {formatRM(upfrontFeeReport.totals.totalDepositPending)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums whitespace-nowrap print:px-1.5 print:py-1.5">
+                        {formatRM(upfrontFeeReport.totals.totalExpectedRegFee)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-teal-800 whitespace-nowrap print:px-1.5 print:py-1.5">
+                        {formatRM(upfrontFeeReport.totals.totalRegFeePaid)}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-red-700 whitespace-nowrap print:px-1.5 print:py-1.5">
+                        {formatRM(upfrontFeeReport.totals.totalRegFeePending)}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs font-mono text-slate-600 print:px-1.5 print:py-1.5">
+                        Pending Total:{' '}
+                        <span className="font-bold text-red-700">
+                          {formatRM(upfrontFeeReport.totals.totalCombinedPending)}
+                        </span>
                       </td>
                     </tr>
                   </tfoot>

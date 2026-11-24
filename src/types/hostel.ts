@@ -25,10 +25,12 @@ export type ProgramType = 'Diploma' | 'SKM' | 'DiFFER' | 'Other';
 export type StudentStatus = 'Active' | 'Checked-Out' | 'Suspended';
 export type PaymentType =
   | 'Monthly Rent'
-  | 'Registration/Deposit'
+  | 'Deposit'
+  | 'Registration Fee'
   | 'Utility/Penalty'
   | 'Rebate / Fee Waiver'
-  | 'Deposit Refund';
+  | 'Deposit Refund'
+  | 'Registration/Deposit';
 export type PaymentMethod =
   | 'DuitNow QR'
   | 'Online Transfer'
@@ -94,10 +96,12 @@ export const STUDENT_STATUSES: StudentStatus[] = [
 ];
 export const PAYMENT_TYPES: PaymentType[] = [
   'Monthly Rent',
-  'Registration/Deposit',
+  'Deposit',
+  'Registration Fee',
   'Utility/Penalty',
   'Rebate / Fee Waiver',
   'Deposit Refund',
+  'Registration/Deposit',
 ];
 export const PAYMENT_METHODS: PaymentMethod[] = [
   'DuitNow QR',
@@ -146,6 +150,7 @@ export const FIELD_LIMITS = {
   email: { min: 3, max: 160 },
   statusNote: { min: 0, max: 160 },
   rebateReason: { min: 0, max: 64 },
+  upfrontFeeNotes: { min: 0, max: 240 },
 } as const;
 
 export interface Room {
@@ -195,7 +200,11 @@ export interface Student {
   hostelLocation: ResidentHostelLocation;
   checkInDate: string;
   checkOutDate: string | null;
+  expectedDeposit?: number;
   depositPaid: number;
+  expectedRegistrationFee?: number;
+  registrationFeePaid?: number;
+  upfrontFeeNotes?: string;
   standardRoomRate?: number;
   monthlyRebate?: number;
   rebateReason?: string;
@@ -256,6 +265,8 @@ export interface SegmentBillingBreakdown {
   expectedRent: number;
 }
 
+export type UpfrontFeeStatus = 'Paid' | 'Partial' | 'Pending' | 'Waived';
+
 export interface ResidentBillingSummary {
   residentType: ResidentType;
   occupantType: OccupantType;
@@ -269,9 +280,58 @@ export interface ResidentBillingSummary {
   firstMonthNote: string;
   monthsBilled: number;
   totalExpectedRent: number;
+  totalRentPaid: number;
   totalRentCredited: number;
   outstandingBalance: number;
+  expectedDeposit: number;
+  depositPaid: number;
+  depositPending: number;
+  depositStatus: UpfrontFeeStatus;
+  expectedRegistrationFee: number;
+  registrationFeePaid: number;
+  registrationFeePending: number;
+  registrationFeeStatus: UpfrontFeeStatus;
+  upfrontFeeNotes: string;
+  hasPendingUpfrontFee: boolean;
   segments: SegmentBillingBreakdown[];
+}
+
+export function getDefaultUpfrontFees(occupantType: OccupantType): {
+  expectedDeposit: number;
+  expectedRegistrationFee: number;
+} {
+  if (occupantType === 'Student') {
+    return { expectedDeposit: 300, expectedRegistrationFee: 50 };
+  }
+  return { expectedDeposit: 0, expectedRegistrationFee: 0 };
+}
+
+export function resolveUpfrontFeeStatus(
+  expected: number,
+  paid: number,
+  waivedAmount = 0
+): { status: UpfrontFeeStatus; pending: number } {
+  const cleanExp = Math.max(0, Math.round((expected || 0) * 100) / 100);
+  const cleanPaid = Math.max(0, Math.round((paid || 0) * 100) / 100);
+  const cleanWaived = Math.max(0, Math.round((waivedAmount || 0) * 100) / 100);
+
+  if (cleanExp <= 0.009) {
+    return {
+      status: cleanPaid > 0.009 ? 'Paid' : 'Waived',
+      pending: 0,
+    };
+  }
+  if (cleanPaid >= cleanExp - 0.009) {
+    return { status: 'Paid', pending: 0 };
+  }
+  if (cleanWaived > 0.009 && cleanPaid + cleanWaived >= cleanExp - 0.009) {
+    return { status: 'Waived', pending: 0 };
+  }
+  const pending = Math.max(0, Math.round((cleanExp - cleanPaid - cleanWaived) * 100) / 100);
+  if (cleanPaid > 0.009) {
+    return { status: 'Partial', pending };
+  }
+  return { status: 'Pending', pending };
 }
 
 export function resolveOccupantType(
@@ -762,6 +822,18 @@ export function calculateResidentBilling(
     }
   }
 
+  const totalRentPaid =
+    Math.round(
+      payments
+        .filter(
+          (p) =>
+            p.studentId === student.studentId &&
+            p.paymentType === 'Monthly Rent' &&
+            isSettledPaymentStatus(p.status)
+        )
+        .reduce((sum, p) => sum + p.amount, 0) * 100
+    ) / 100;
+
   const totalRentCredited =
     Math.round(
       payments
@@ -779,6 +851,67 @@ export function calculateResidentBilling(
     Math.round((totalExpectedRent - totalRentCredited) * 100) / 100
   );
 
+  // Separate Deposit & Hostel Registration Fee tracking (strictly isolated from Monthly Rent)
+  const defaultUpfront = getDefaultUpfrontFees(occupantType);
+  const expectedDeposit =
+    typeof student.expectedDeposit === 'number' && !Number.isNaN(student.expectedDeposit)
+      ? Math.max(0, Math.round(student.expectedDeposit * 100) / 100)
+      : defaultUpfront.expectedDeposit;
+  const expectedRegistrationFee =
+    typeof student.expectedRegistrationFee === 'number' &&
+    !Number.isNaN(student.expectedRegistrationFee)
+      ? Math.max(0, Math.round(student.expectedRegistrationFee * 100) / 100)
+      : defaultUpfront.expectedRegistrationFee;
+
+  const studentDepositPayments = payments.filter(
+    (p) => p.studentId === student.studentId && p.paymentType === 'Deposit'
+  );
+  const depositPaid =
+    studentDepositPayments.length > 0
+      ? Math.round(
+          studentDepositPayments
+            .filter((p) => p.status === 'Paid')
+            .reduce((sum, p) => sum + p.amount, 0) * 100
+        ) / 100
+      : Math.max(0, Math.round((student.depositPaid || 0) * 100) / 100);
+  const depositWaivedAmount =
+    Math.round(
+      studentDepositPayments
+        .filter((p) => p.status === 'Waived')
+        .reduce((sum, p) => sum + p.amount, 0) * 100
+    ) / 100;
+  const depositResolved = resolveUpfrontFeeStatus(
+    expectedDeposit,
+    depositPaid,
+    depositWaivedAmount
+  );
+
+  const studentRegFeePayments = payments.filter(
+    (p) => p.studentId === student.studentId && p.paymentType === 'Registration Fee'
+  );
+  const registrationFeePaid =
+    studentRegFeePayments.length > 0
+      ? Math.round(
+          studentRegFeePayments
+            .filter((p) => p.status === 'Paid')
+            .reduce((sum, p) => sum + p.amount, 0) * 100
+        ) / 100
+      : Math.max(0, Math.round((student.registrationFeePaid || 0) * 100) / 100);
+  const regFeeWaivedAmount =
+    Math.round(
+      studentRegFeePayments
+        .filter((p) => p.status === 'Waived')
+        .reduce((sum, p) => sum + p.amount, 0) * 100
+    ) / 100;
+  const regFeeResolved = resolveUpfrontFeeStatus(
+    expectedRegistrationFee,
+    registrationFeePaid,
+    regFeeWaivedAmount
+  );
+  const upfrontFeeNotes = (student.upfrontFeeNotes || '').trim();
+  const hasPendingUpfrontFee =
+    depositResolved.pending > 0.009 || regFeeResolved.pending > 0.009;
+
   return {
     residentType,
     occupantType,
@@ -792,8 +925,19 @@ export function calculateResidentBilling(
     firstMonthNote,
     monthsBilled,
     totalExpectedRent,
+    totalRentPaid,
     totalRentCredited,
     outstandingBalance,
+    expectedDeposit,
+    depositPaid,
+    depositPending: depositResolved.pending,
+    depositStatus: depositResolved.status,
+    expectedRegistrationFee,
+    registrationFeePaid,
+    registrationFeePending: regFeeResolved.pending,
+    registrationFeeStatus: regFeeResolved.status,
+    upfrontFeeNotes,
+    hasPendingUpfrontFee,
     segments: segmentBreakdowns,
   };
 }

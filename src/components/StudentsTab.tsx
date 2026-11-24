@@ -26,6 +26,7 @@ import {
   formatRM,
   formatTimestamp,
   getCurrentMonthISO,
+  getDefaultUpfrontFees,
   getNormalizedStayHistory,
   getPaymentBankRef,
   getPaymentReceiptNo,
@@ -59,6 +60,7 @@ import {
   Student,
   StudentStatus,
   toLegacyResidentType,
+  UpfrontFeeStatus,
 } from '../types/hostel';
 import {
   assignRoomToStudent,
@@ -71,6 +73,7 @@ import {
   transferStudentRoom,
   updatePayment,
   updateStudentRecord,
+  updateStudentUpfrontFees,
 } from '../lib/hostelService';
 import { BulkImportModal } from './BulkImportModal';
 import { StatusBadge } from './StatusBadge';
@@ -104,7 +107,9 @@ export function StudentsTab({
   const [searchQuery, setSearchQuery] = useState('');
   const [locationFilter, setLocationFilter] = useState<'All' | ResidentHostelLocation>('All');
   const [occupantTypeFilter, setOccupantTypeFilter] = useState<'All' | OccupantType>('All');
-  const [statusFilter, setStatusFilter] = useState<'All' | StudentStatus | 'Room Unassigned'>('All');
+  const [statusFilter, setStatusFilter] = useState<
+    'All' | StudentStatus | 'Room Unassigned' | 'Pending Upfront Fees'
+  >('All');
 
   // Register modal state
   const [showRegisterModal, setShowRegisterModal] = useState(false);
@@ -122,7 +127,12 @@ export function StudentsTab({
   const [regRoomId, setRegRoomId] = useState('');
   const [regCheckInDate, setRegCheckInDate] = useState(getTodayISO());
   const [regCheckOutDate, setRegCheckOutDate] = useState(getTodayISO());
-  const [regDepositPaid, setRegDepositPaid] = useState('250');
+  const [regExpectedDeposit, setRegExpectedDeposit] = useState('300');
+  const [regDepositPaid, setRegDepositPaid] = useState('0');
+  const [regExpectedRegFee, setRegExpectedRegFee] = useState('50');
+  const [regRegFeePaidNow, setRegRegFeePaidNow] = useState('0');
+  const [regUpfrontFeeNotes, setRegUpfrontFeeNotes] = useState('');
+  const [regExpectedUpfrontManual, setRegExpectedUpfrontManual] = useState(false);
   const [regStandardRate, setRegStandardRate] = useState('250');
   const [regMonthlyRebate, setRegMonthlyRebate] = useState('0');
   const [regRebateReason, setRegRebateReason] = useState('None');
@@ -142,7 +152,10 @@ export function StudentsTab({
   const [editStatus, setEditStatus] = useState<StudentStatus>('Active');
   const [editCheckInDate, setEditCheckInDate] = useState('');
   const [editCheckOutDate, setEditCheckOutDate] = useState('');
+  const [editExpectedDeposit, setEditExpectedDeposit] = useState('300');
   const [editDepositPaid, setEditDepositPaid] = useState('0');
+  const [editExpectedRegFee, setEditExpectedRegFee] = useState('50');
+  const [editUpfrontFeeNotes, setEditUpfrontFeeNotes] = useState('');
   const [editStandardRate, setEditStandardRate] = useState('250');
   const [editMonthlyRebate, setEditMonthlyRebate] = useState('0');
   const [editRebateReason, setEditRebateReason] = useState('None');
@@ -167,6 +180,10 @@ export function StudentsTab({
 
   // View Statement modal state
   const [statementStudent, setStatementStudent] = useState<Student | null>(null);
+  const [editingStmtUpfront, setEditingStmtUpfront] = useState(false);
+  const [stmtExpectedDeposit, setStmtExpectedDeposit] = useState('300');
+  const [stmtExpectedRegFee, setStmtExpectedRegFee] = useState('50');
+  const [stmtUpfrontNotes, setStmtUpfrontNotes] = useState('');
 
   // Direct Assign Room modal state (for unassigned students)
   const [assigningStudent, setAssigningStudent] = useState<Student | null>(null);
@@ -407,6 +424,13 @@ export function StudentsTab({
     ).length;
   }, [students]);
 
+  const pendingUpfrontFeesCount = useMemo(() => {
+    return students.filter((s) => {
+      const b = billingByStudentId.get(s.studentId);
+      return Boolean(b?.hasPendingUpfrontFee);
+    }).length;
+  }, [students, billingByStudentId]);
+
   const filteredStudents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return students
@@ -423,6 +447,10 @@ export function StudentsTab({
         if (statusFilter === 'Room Unassigned') {
           return s.status === 'Active' && !(s.assignedRoomId || '').trim();
         }
+        if (statusFilter === 'Pending Upfront Fees') {
+          const b = billingByStudentId.get(s.studentId);
+          return Boolean(b?.hasPendingUpfrontFee);
+        }
         return s.status === statusFilter;
       })
       .filter((s) => {
@@ -435,7 +463,14 @@ export function StudentsTab({
         );
       })
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
-  }, [students, locationFilter, occupantTypeFilter, statusFilter, searchQuery]);
+  }, [
+    students,
+    billingByStudentId,
+    locationFilter,
+    occupantTypeFilter,
+    statusFilter,
+    searchQuery,
+  ]);
 
   const totalFilteredArrears = useMemo(() => {
     return filteredStudents.reduce((sum, s) => {
@@ -561,17 +596,22 @@ export function StudentsTab({
     const today = getTodayISO();
     setRegCheckInDate(today);
     setRegCheckOutDate(today);
+    const defaultUpfront = getDefaultUpfrontFees('Student');
+    setRegExpectedDeposit(String(defaultUpfront.expectedDeposit));
+    setRegDepositPaid('0');
+    setRegExpectedRegFee(String(defaultUpfront.expectedRegistrationFee));
+    setRegRegFeePaidNow('0');
+    setRegUpfrontFeeNotes('');
+    setRegExpectedUpfrontManual(false);
     if (initialRoom) {
       const initialRate = initialRoom.monthlyRate;
       const fmDefaults = calculateFirstMonthDefaults(today, initialRate);
-      setRegDepositPaid(String(initialRate));
       setRegStandardRate(String(initialRate));
       setRegMonthlyRebate('0');
       setRegRebateReason('None');
       setRegFirstMonthCharge(String(fmDefaults.firstMonthCharge));
       setRegFirstMonthNote(fmDefaults.firstMonthNote);
     } else {
-      setRegDepositPaid('0');
       setRegStandardRate('0');
       setRegMonthlyRebate('0');
       setRegRebateReason('None');
@@ -584,6 +624,11 @@ export function StudentsTab({
 
   const handleRegOccupantTypeChange = (nextType: OccupantType) => {
     setRegOccupantType(nextType);
+    if (!regExpectedUpfrontManual) {
+      const defaults = getDefaultUpfrontFees(nextType);
+      setRegExpectedDeposit(String(defaults.expectedDeposit));
+      setRegExpectedRegFee(String(defaults.expectedRegistrationFee));
+    }
     if (nextType === 'Lecturer / Staff') {
       setRegProgram('Other');
       if (regRebateReason === 'None') {
@@ -610,7 +655,6 @@ export function StudentsTab({
               : 1;
         const nextStd = String(fallback.monthlyRate * bedsNum);
         setRegStandardRate(nextStd);
-        setRegDepositPaid(String(fallback.monthlyRate));
         syncRegFirstMonth(regCheckInDate, nextStd, regMonthlyRebate);
       } else {
         setRegStandardRate('0');
@@ -653,7 +697,6 @@ export function StudentsTab({
       setRegBedsOccupied(String(nextBeds));
       const nextStd = String(room.monthlyRate * nextBeds);
       setRegStandardRate(nextStd);
-      setRegDepositPaid(String(room.monthlyRate));
       syncRegFirstMonth(regCheckInDate, nextStd, regMonthlyRebate, wasUnassigned);
     }
   };
@@ -676,6 +719,8 @@ export function StudentsTab({
     setSubmitting(true);
     setFormError(null);
     try {
+      const depositNow = Number(regDepositPaid) || 0;
+      const regFeeNow = Number(regRegFeePaidNow) || 0;
       const result = await registerStudent(
         {
           studentId: regStudentId,
@@ -691,7 +736,13 @@ export function StudentsTab({
           status: regStatus,
           checkInDate: regCheckInDate,
           checkOutDate: regStatus === 'Checked-Out' ? regCheckOutDate : null,
-          depositPaid: Number(regDepositPaid),
+          expectedDeposit: Number(regExpectedDeposit) || 0,
+          depositPaid: depositNow,
+          depositPaidNow: depositNow,
+          expectedRegistrationFee: Number(regExpectedRegFee) || 0,
+          registrationFeePaidNow: regFeeNow,
+          upfrontFeeNotes: regUpfrontFeeNotes,
+          existingPayments: payments,
           standardRoomRate: selectedRegisterRoom ? Number(regStandardRate) : 0,
           monthlyRebate: selectedRegisterRoom ? Number(regMonthlyRebate) : 0,
           rebateReason: selectedRegisterRoom ? regRebateReason : 'None',
@@ -705,23 +756,31 @@ export function StudentsTab({
         staffEmail
       );
       setShowRegisterModal(false);
+      const receiptSuffix =
+        result.createdReceiptNumbers.length > 0
+          ? ` Auto-logged upfront payment receipt(s): ${result.createdReceiptNumbers.join(', ')}.`
+          : '';
       if (!selectedRegisterRoom) {
         setFeedbackBanner(
-          regStatus === 'Checked-Out'
+          (regStatus === 'Checked-Out'
             ? `Imported past resident ${regFullName.trim()} (Checked-Out, Room Unassigned).`
-            : `Registered ${regFullName.trim()} as Room Unassigned (RM 0.00/mo until a room is assigned).`
+            : `Registered ${regFullName.trim()} as Room Unassigned (RM 0.00/mo until a room is assigned).`) +
+            receiptSuffix
         );
       } else if (regStatus === 'Checked-Out') {
         setFeedbackBanner(
-          `Imported past resident ${regFullName.trim()} (Checked-Out). Room ${selectedRegisterRoom.roomId} remains unchanged.`
+          `Imported past resident ${regFullName.trim()} (Checked-Out). Room ${selectedRegisterRoom.roomId} remains unchanged.` +
+            receiptSuffix
         );
       } else if (result.blockedSiblings.length > 0) {
         setFeedbackBanner(
-          `Registered ${regFullName.trim()} in ${selectedRegisterRoom.roomId} (${resolvedBeds} beds · ${regOccupancyMode}) and locked ${result.blockedSiblings.length} sibling bed(s): ${result.blockedSiblings.join(', ')}.`
+          `Registered ${regFullName.trim()} in ${selectedRegisterRoom.roomId} (${resolvedBeds} beds · ${regOccupancyMode}) and locked ${result.blockedSiblings.length} sibling bed(s): ${result.blockedSiblings.join(', ')}.` +
+            receiptSuffix
         );
       } else {
         setFeedbackBanner(
-          `Registered ${regFullName.trim()} and marked room ${selectedRegisterRoom.roomId} as Occupied.`
+          `Registered ${regFullName.trim()} and marked room ${selectedRegisterRoom.roomId} as Occupied.` +
+            receiptSuffix
         );
       }
     } catch (err) {
@@ -763,7 +822,10 @@ export function StudentsTab({
     setEditCheckOutDate(
       presetCheckOut ? getTodayISO() : student.checkOutDate || ''
     );
-    setEditDepositPaid(String(student.depositPaid));
+    setEditExpectedDeposit(String(billing.expectedDeposit));
+    setEditDepositPaid(String(billing.depositPaid));
+    setEditExpectedRegFee(String(billing.expectedRegistrationFee));
+    setEditUpfrontFeeNotes(billing.upfrontFeeNotes);
     setEditStandardRate(String(billing.standardRoomRate));
     setEditMonthlyRebate(String(billing.monthlyRebate));
     setEditRebateReason(billing.rebateReason || 'None');
@@ -874,7 +936,10 @@ export function StudentsTab({
           status: editStatus,
           checkInDate: editCheckInDate,
           checkOutDate: editStatus === 'Checked-Out' ? editCheckOutDate : null,
-          depositPaid: Number(editDepositPaid),
+          expectedDeposit: Number(editExpectedDeposit) || 0,
+          depositPaid: Number(editDepositPaid) || 0,
+          expectedRegistrationFee: Number(editExpectedRegFee) || 0,
+          upfrontFeeNotes: editUpfrontFeeNotes,
           standardRoomRate: Number(editStandardRate),
           monthlyRebate: Number(editMonthlyRebate),
           rebateReason: editRebateReason,
@@ -1330,32 +1395,87 @@ export function StudentsTab({
     }
   };
 
-  const openStmtRecordPaymentModal = () => {
+  const openStmtRecordPaymentModal = (presetType: PaymentType = 'Monthly Rent') => {
     if (!liveStatementStudent || !statementBilling) return;
     setFormError(null);
     setStmtEditingPayment(null);
-    const defaultMonth = getCurrentMonthISO();
+    const defaultMonth =
+      presetType === 'Deposit' || presetType === 'Registration Fee'
+        ? (liveStatementStudent.checkInDate || getTodayISO()).slice(0, 7)
+        : getCurrentMonthISO();
     setStmtBillingMonth(defaultMonth);
-    setStmtPaymentType('Monthly Rent');
-    const monthStatus = calculateMonthInstallmentStatus(
-      liveStatementStudent,
-      payments,
-      defaultMonth,
-      0
-    );
-    const suggestedAmt =
-      monthStatus.remainingBeforeEntry > 0
-        ? monthStatus.remainingBeforeEntry
-        : statementBilling.effectiveMonthlyFee;
-    setStmtAmount(suggestedAmt.toFixed(2));
+    setStmtPaymentType(presetType);
+    if (presetType === 'Deposit') {
+      const amt =
+        statementBilling.depositPending > 0
+          ? statementBilling.depositPending
+          : statementBilling.expectedDeposit;
+      setStmtAmount(amt.toFixed(2));
+      setStmtNotes('Hostel security deposit payment');
+    } else if (presetType === 'Registration Fee') {
+      const amt =
+        statementBilling.registrationFeePending > 0
+          ? statementBilling.registrationFeePending
+          : statementBilling.expectedRegistrationFee;
+      setStmtAmount(amt.toFixed(2));
+      setStmtNotes('Hostel registration fee payment');
+    } else {
+      const monthStatus = calculateMonthInstallmentStatus(
+        liveStatementStudent,
+        payments,
+        defaultMonth,
+        0
+      );
+      const suggestedAmt =
+        monthStatus.remainingBeforeEntry > 0
+          ? monthStatus.remainingBeforeEntry
+          : statementBilling.effectiveMonthlyFee;
+      setStmtAmount(suggestedAmt.toFixed(2));
+      setStmtNotes('');
+    }
     setStmtMethod('Online Transfer');
     setStmtBankRefNo('');
     setStmtPaymentDate(getTodayISO());
     setStmtStatus('Paid');
     setStmtPhysStatus('Issued');
     setStmtPhysNo('');
-    setStmtNotes('');
     setStmtPaymentModalOpen(true);
+  };
+
+  const openStmtUpfrontFeeEditor = () => {
+    if (!liveStatementStudent || !statementBilling) return;
+    setStmtExpectedDeposit(String(statementBilling.expectedDeposit));
+    setStmtExpectedRegFee(String(statementBilling.expectedRegistrationFee));
+    setStmtUpfrontNotes(statementBilling.upfrontFeeNotes);
+    setEditingStmtUpfront(true);
+  };
+
+  const handleSaveStmtUpfrontFees = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!liveStatementStudent) return;
+    setSubmitting(true);
+    setFormError(null);
+    try {
+      await updateStudentUpfrontFees(
+        liveStatementStudent.studentId,
+        {
+          expectedDeposit: Number(stmtExpectedDeposit) || 0,
+          expectedRegistrationFee: Number(stmtExpectedRegFee) || 0,
+          upfrontFeeNotes: stmtUpfrontNotes,
+        },
+        staffEmail
+      );
+      setEditingStmtUpfront(false);
+      setFeedbackBanner(
+        `Updated Deposit / Registration Fee expectations & notes for ${liveStatementStudent.fullName}.`
+      );
+    } catch (err) {
+      setFormError(
+        err instanceof Error ? err.message : 'Failed to update upfront fees.'
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const openStmtEditPaymentModal = (p: Payment) => {
@@ -1446,7 +1566,7 @@ export function StudentsTab({
     setSubmitting(true);
     setFormError(null);
     try {
-      await deletePayment(stmtDeletingPayment.paymentId);
+      await deletePayment(stmtDeletingPayment.paymentId, staffEmail);
       setFeedbackBanner(
         `Deleted payment ${getPaymentReceiptNo(stmtDeletingPayment)} (${formatRM(stmtDeletingPayment.amount)}).`
       );
@@ -1744,7 +1864,11 @@ export function StudentsTab({
             value={statusFilter}
             onChange={(e) =>
               setStatusFilter(
-                e.target.value as 'All' | StudentStatus | 'Room Unassigned'
+                e.target.value as
+                  | 'All'
+                  | StudentStatus
+                  | 'Room Unassigned'
+                  | 'Pending Upfront Fees'
               )
             }
             aria-label="Filter residents by residency status"
@@ -1752,6 +1876,7 @@ export function StudentsTab({
           >
             <option value="All">All Statuses</option>
             <option value="Room Unassigned">Room Unassigned</option>
+            <option value="Pending Upfront Fees">Pending Deposit / Reg. Fee</option>
             {STUDENT_STATUSES.map((st) => (
               <option key={st} value={st}>
                 {st}
@@ -1826,9 +1951,30 @@ export function StudentsTab({
             </button>
           </>
         )}
+        {pendingUpfrontFeesCount > 0 && (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              onClick={() =>
+                setStatusFilter(
+                  statusFilter === 'Pending Upfront Fees'
+                    ? 'All'
+                    : 'Pending Upfront Fees'
+                )
+              }
+              className="inline-flex items-center gap-1.5 text-amber-800 hover:text-amber-950 font-semibold cursor-pointer"
+            >
+              <span>{pendingUpfrontFeesCount} pending deposit / reg. fee</span>
+              <span className="underline font-normal">
+                {statusFilter === 'Pending Upfront Fees' ? '(Show all)' : '(Filter)'}
+              </span>
+            </button>
+          </>
+        )}
         <span aria-hidden="true">·</span>
         <span>
-          Cumulative Arrears:{' '}
+          Cumulative Rent Arrears:{' '}
           <strong className={totalFilteredArrears > 0 ? 'text-red-700' : 'text-slate-900'}>
             {formatRM(totalFilteredArrears)}
           </strong>
@@ -1987,9 +2133,62 @@ export function StudentsTab({
                               {billing.firstMonthNote})
                             </p>
                           )}
-                          <p className="text-slate-500">
-                            Dep: {formatRM(st.depositPaid)}
-                          </p>
+                          <div className="mt-1.5 flex flex-col items-end gap-1 font-sans">
+                            {(() => {
+                              const pillColor = (st: UpfrontFeeStatus) =>
+                                st === 'Paid'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : st === 'Partial'
+                                    ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                    : st === 'Pending'
+                                      ? 'bg-red-50 text-red-700 border-red-200'
+                                      : 'bg-slate-100 text-slate-600 border-slate-200';
+                              const depLabel =
+                                billing.depositStatus === 'Paid'
+                                  ? 'Paid'
+                                  : billing.depositStatus === 'Partial'
+                                    ? `Partial: RM ${billing.depositPaid.toFixed(0)}/${billing.expectedDeposit.toFixed(0)}`
+                                    : billing.depositStatus === 'Pending'
+                                      ? `Pending: RM ${billing.depositPending.toFixed(0)}`
+                                      : 'Waived';
+                              const regLabel =
+                                billing.registrationFeeStatus === 'Paid'
+                                  ? 'Paid'
+                                  : billing.registrationFeeStatus === 'Partial'
+                                    ? `Partial: RM ${billing.registrationFeePaid.toFixed(0)}/${billing.expectedRegistrationFee.toFixed(0)}`
+                                    : billing.registrationFeeStatus === 'Pending'
+                                      ? `Pending: RM ${billing.registrationFeePending.toFixed(0)}`
+                                      : 'Waived';
+                              return (
+                                <>
+                                  <span
+                                    className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-semibold ${pillColor(
+                                      billing.depositStatus
+                                    )}`}
+                                    title={`Deposit: ${formatRM(billing.depositPaid)} paid of ${formatRM(billing.expectedDeposit)}`}
+                                  >
+                                    Deposit: {depLabel}
+                                  </span>
+                                  <span
+                                    className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-semibold ${pillColor(
+                                      billing.registrationFeeStatus
+                                    )}`}
+                                    title={`Registration Fee: ${formatRM(billing.registrationFeePaid)} paid of ${formatRM(billing.expectedRegistrationFee)}`}
+                                  >
+                                    Reg. Fee: {regLabel}
+                                  </span>
+                                  {billing.upfrontFeeNotes && (
+                                    <span
+                                      className="text-[10px] text-slate-500 max-w-[165px] truncate"
+                                      title={billing.upfrontFeeNotes}
+                                    >
+                                      Note: {billing.upfrontFeeNotes}
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-right font-mono text-xs tabular-nums whitespace-nowrap">
                           <p
@@ -2000,8 +2199,8 @@ export function StudentsTab({
                             }`}
                           >
                             {billing.outstandingBalance > 0
-                              ? `Due ${formatRM(billing.outstandingBalance)}`
-                              : 'Settled'}
+                              ? `Rent Due ${formatRM(billing.outstandingBalance)}`
+                              : 'Rent Settled'}
                           </p>
                           <p className="text-slate-500">
                             Paid {formatRM(billing.totalRentCredited)} /{' '}
@@ -2034,7 +2233,10 @@ export function StudentsTab({
                             )}
                             <button
                               type="button"
-                              onClick={() => setStatementStudent(st)}
+                              onClick={() => {
+                                setEditingStmtUpfront(false);
+                                setStatementStudent(st);
+                              }}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
                               title={
                                 isViewer
@@ -2433,20 +2635,98 @@ export function StudentsTab({
                       />
                     </div>
                   )}
-                  <div className={regStatus === 'Checked-Out' ? 'sm:col-span-2' : ''}>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Deposit Paid (RM)
-                    </label>
-                    <input
-                      type="number"
-                      required
-                      min={0}
-                      max={50000}
-                      step="0.01"
-                      value={regDepositPaid}
-                      onChange={(e) => setRegDepositPaid(e.target.value)}
-                      className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    />
+                </div>
+
+                {/* Upfront Fees: Hostel Deposit & Registration Fee (Isolated from Monthly Rent) */}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Hostel Deposit &amp; Registration Fee (Tracked Separately from Rent)
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Any paid now auto-issues receipt(s)
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Expected Deposit (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={50000}
+                        step="0.01"
+                        value={regExpectedDeposit}
+                        onChange={(e) => {
+                          setRegExpectedDeposit(e.target.value);
+                          setRegExpectedUpfrontManual(true);
+                        }}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Deposit Paid Now (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={50000}
+                        step="0.01"
+                        value={regDepositPaid}
+                        onChange={(e) => setRegDepositPaid(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Expected Registration Fee (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={50000}
+                        step="0.01"
+                        value={regExpectedRegFee}
+                        onChange={(e) => {
+                          setRegExpectedRegFee(e.target.value);
+                          setRegExpectedUpfrontManual(true);
+                        }}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Registration Fee Paid Now (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={50000}
+                        step="0.01"
+                        value={regRegFeePaidNow}
+                        onChange={(e) => setRegRegFeePaidNow(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Upfront Fee Notes (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={240}
+                        value={regUpfrontFeeNotes}
+                        onChange={(e) => setRegUpfrontFeeNotes(e.target.value)}
+                        placeholder="e.g. Waived by management, installment RM 150 next month, PTPTN sponsor..."
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -3023,7 +3303,7 @@ export function StudentsTab({
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Deposit Paid (RM)
+                      Deposit Paid Fallback (RM)
                     </label>
                     <input
                       type="number"
@@ -3035,6 +3315,63 @@ export function StudentsTab({
                       onChange={(e) => setEditDepositPaid(e.target.value)}
                       className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     />
+                  </div>
+                </div>
+
+                {/* Expected Deposit & Registration Fee Settings */}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-xs font-semibold text-slate-700">
+                      Expected Deposit, Registration Fee &amp; Upfront Notes
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Set to 0 if waived
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Expected Deposit (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={50000}
+                        step="0.01"
+                        value={editExpectedDeposit}
+                        onChange={(e) => setEditExpectedDeposit(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Expected Registration Fee (RM)
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        max={50000}
+                        step="0.01"
+                        value={editExpectedRegFee}
+                        onChange={(e) => setEditExpectedRegFee(e.target.value)}
+                        className="w-full px-3 py-2 text-sm font-mono tabular-nums bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                        Upfront Fee Notes (Waivers / Installments / Remarks)
+                      </label>
+                      <input
+                        type="text"
+                        maxLength={240}
+                        value={editUpfrontFeeNotes}
+                        onChange={(e) => setEditUpfrontFeeNotes(e.target.value)}
+                        placeholder="Optional remarks for deposit or registration fee"
+                        className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -4053,15 +4390,15 @@ export function StudentsTab({
                 </div>
               )}
 
-              {/* Financial KPI Strip */}
+              {/* Financial KPI Strip (Monthly Rent Isolated) */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                  <p className="text-xs text-slate-500">Current Rate</p>
+                  <p className="text-xs text-slate-500">Current Monthly Rate</p>
                   <p className="font-mono text-base font-bold text-slate-900 tabular-nums mt-0.5">
                     {formatRM(statementBilling.effectiveMonthlyFee)}/mo
                   </p>
                   <p className="text-xs text-slate-500 font-mono mt-0.5">
-                    Dep: {formatRM(liveStatementStudent.depositPaid)}
+                    Std {formatRM(statementBilling.standardRoomRate)}
                   </p>
                 </div>
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
@@ -4081,10 +4418,10 @@ export function StudentsTab({
                   <p className="font-mono text-base font-bold text-emerald-700 tabular-nums mt-0.5">
                     {formatRM(statementBilling.totalRentCredited)}
                   </p>
-                  <p className="text-xs text-slate-500 mt-0.5">Settled entries</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Rent &amp; waivers only</p>
                 </div>
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
-                  <p className="text-xs text-slate-500">Outstanding Balance</p>
+                  <p className="text-xs text-slate-500">Monthly Rent Balance</p>
                   <p
                     className={`font-mono text-base font-bold tabular-nums mt-0.5 ${
                       statementBilling.outstandingBalance > 0
@@ -4098,6 +4435,213 @@ export function StudentsTab({
                     <StatusBadge status={liveStatementStudent.status} />
                   </div>
                 </div>
+              </div>
+
+              {/* Separate Upfront Fees Card: Deposit & Registration Fee */}
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <h3 className="font-display text-sm font-semibold text-slate-900">
+                      Deposit &amp; Hostel Registration Fee Tracking
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Tracked separately from monthly room rent &amp; rental arrears
+                    </p>
+                  </div>
+                  {!isViewer && (
+                    <div className="flex flex-wrap items-center gap-2 print:hidden">
+                      {!editingStmtUpfront && (
+                        <button
+                          type="button"
+                          onClick={openStmtUpfrontFeeEditor}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer whitespace-nowrap"
+                        >
+                          <Pencil className="w-3 h-3" />
+                          <span>Edit Upfront Fees / Notes</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openStmtRecordPaymentModal(
+                            statementBilling.depositPending > 0.009
+                              ? 'Deposit'
+                              : statementBilling.registrationFeePending > 0.009
+                                ? 'Registration Fee'
+                                : 'Deposit'
+                          )
+                        }
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Record Deposit / Reg. Fee</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="bg-white border border-slate-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">
+                        Security Deposit
+                      </p>
+                      <p className="font-mono text-sm font-bold text-slate-900 tabular-nums mt-0.5">
+                        Paid {formatRM(statementBilling.depositPaid)} /{' '}
+                        {formatRM(statementBilling.expectedDeposit)}
+                      </p>
+                      {statementBilling.depositPending > 0.009 && (
+                        <p className="text-xs font-mono text-red-700 mt-0.5">
+                          Pending: {formatRM(statementBilling.depositPending)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-semibold ${
+                          statementBilling.depositStatus === 'Paid'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : statementBilling.depositStatus === 'Partial'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : statementBilling.depositStatus === 'Pending'
+                                ? 'bg-red-50 text-red-700 border-red-200'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        {statementBilling.depositStatus}
+                      </span>
+                      {!isViewer && statementBilling.depositPending > 0.009 && (
+                        <button
+                          type="button"
+                          onClick={() => openStmtRecordPaymentModal('Deposit')}
+                          className="text-[11px] font-semibold text-blue-900 hover:underline cursor-pointer print:hidden"
+                        >
+                          Pay Deposit
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-white border border-slate-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-medium text-slate-500">
+                        Hostel Registration Fee
+                      </p>
+                      <p className="font-mono text-sm font-bold text-slate-900 tabular-nums mt-0.5">
+                        Paid {formatRM(statementBilling.registrationFeePaid)} /{' '}
+                        {formatRM(statementBilling.expectedRegistrationFee)}
+                      </p>
+                      {statementBilling.registrationFeePending > 0.009 && (
+                        <p className="text-xs font-mono text-red-700 mt-0.5">
+                          Pending: {formatRM(statementBilling.registrationFeePending)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <span
+                        className={`inline-flex items-center px-2 py-0.5 rounded border text-xs font-semibold ${
+                          statementBilling.registrationFeeStatus === 'Paid'
+                            ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : statementBilling.registrationFeeStatus === 'Partial'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : statementBilling.registrationFeeStatus === 'Pending'
+                                ? 'bg-red-50 text-red-700 border-red-200'
+                                : 'bg-slate-100 text-slate-600 border-slate-200'
+                        }`}
+                      >
+                        {statementBilling.registrationFeeStatus}
+                      </span>
+                      {!isViewer &&
+                        statementBilling.registrationFeePending > 0.009 && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openStmtRecordPaymentModal('Registration Fee')
+                            }
+                            className="text-[11px] font-semibold text-blue-900 hover:underline cursor-pointer print:hidden"
+                          >
+                            Pay Reg. Fee
+                          </button>
+                        )}
+                    </div>
+                  </div>
+                </div>
+
+                {statementBilling.upfrontFeeNotes && !editingStmtUpfront && (
+                  <p className="text-xs text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                    <span className="font-semibold text-slate-800">Upfront Fee Notes:</span>{' '}
+                    {statementBilling.upfrontFeeNotes}
+                  </p>
+                )}
+
+                {!isViewer && editingStmtUpfront && (
+                  <form
+                    onSubmit={handleSaveStmtUpfrontFees}
+                    className="bg-white border border-blue-200 rounded-lg p-3 space-y-3 print:hidden"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Expected Deposit (RM)
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          max={50000}
+                          step="0.01"
+                          value={stmtExpectedDeposit}
+                          onChange={(e) => setStmtExpectedDeposit(e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Expected Registration Fee (RM)
+                        </label>
+                        <input
+                          type="number"
+                          required
+                          min={0}
+                          max={50000}
+                          step="0.01"
+                          value={stmtExpectedRegFee}
+                          onChange={(e) => setStmtExpectedRegFee(e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm font-mono tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="block text-xs font-medium text-slate-700 mb-1">
+                          Upfront Fee Notes
+                        </label>
+                        <input
+                          type="text"
+                          maxLength={240}
+                          value={stmtUpfrontNotes}
+                          onChange={(e) => setStmtUpfrontNotes(e.target.value)}
+                          placeholder="e.g. Waived, installment agreement, or remarks"
+                          className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingStmtUpfront(false)}
+                        className="px-3 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={submitting}
+                        className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
+                      >
+                        {submitting ? 'Saving...' : 'Save Upfront Fees'}
+                      </button>
+                    </div>
+                  </form>
+                )}
               </div>
 
               {/* Editable Room & Tenancy History */}
@@ -4291,7 +4835,7 @@ export function StudentsTab({
                       )}
                       <button
                         type="button"
-                        onClick={openStmtRecordPaymentModal}
+                        onClick={() => openStmtRecordPaymentModal('Monthly Rent')}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
                       >
                         <Plus className="w-3.5 h-3.5" />
@@ -4931,12 +5475,42 @@ export function StudentsTab({
                         } else if (stmtStatus === 'Waived') {
                           setStmtStatus('Paid');
                         }
+                        if (!stmtEditingPayment && statementBilling) {
+                          if (next === 'Deposit') {
+                            const amt =
+                              statementBilling.depositPending > 0
+                                ? statementBilling.depositPending
+                                : statementBilling.expectedDeposit;
+                            setStmtAmount(amt.toFixed(2));
+                          } else if (next === 'Registration Fee') {
+                            const amt =
+                              statementBilling.registrationFeePending > 0
+                                ? statementBilling.registrationFeePending
+                                : statementBilling.expectedRegistrationFee;
+                            setStmtAmount(amt.toFixed(2));
+                          } else if (next === 'Monthly Rent') {
+                            const info = calculateMonthInstallmentStatus(
+                              liveStatementStudent,
+                              payments,
+                              stmtBillingMonth,
+                              0
+                            );
+                            setStmtAmount(
+                              (info.remainingBeforeEntry > 0
+                                ? info.remainingBeforeEntry
+                                : info.monthTargetCharge
+                              ).toFixed(2)
+                            );
+                          }
+                        }
                       }}
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     >
                       {PAYMENT_TYPES.map((t) => (
                         <option key={t} value={t}>
-                          {t}
+                          {t === 'Registration/Deposit'
+                            ? 'Registration/Deposit (Legacy)'
+                            : t}
                         </option>
                       ))}
                     </select>

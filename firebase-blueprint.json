@@ -173,9 +173,26 @@
           "maxLength": 10,
           "description": "Nullable check-out date YYYY-MM-DD"
         },
+        "expectedDeposit": {
+          "type": "number",
+          "description": "Expected hostel security deposit in RM (defaults to 300 for Students, 0 for Staff/Event Guests)"
+        },
         "depositPaid": {
           "type": "number",
           "description": "Hostel security deposit paid in RM"
+        },
+        "expectedRegistrationFee": {
+          "type": "number",
+          "description": "Expected hostel registration fee in RM (defaults to 50 for Students, 0 for Staff/Event Guests)"
+        },
+        "registrationFeePaid": {
+          "type": "number",
+          "description": "Hostel registration fee paid in RM"
+        },
+        "upfrontFeeNotes": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "Optional notes for deposit/registration fee waivers, installments, or remarks"
         },
         "standardRoomRate": {
           "type": "number",
@@ -302,10 +319,12 @@
           "type": "string",
           "enum": [
             "Monthly Rent",
-            "Registration/Deposit",
+            "Deposit",
+            "Registration Fee",
             "Utility/Penalty",
             "Rebate / Fee Waiver",
-            "Deposit Refund"
+            "Deposit Refund",
+            "Registration/Deposit"
           ],
           "maxLength": 48,
           "description": "Category of transaction"

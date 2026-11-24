@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   BedDouble,
   Building2,
   CreditCard,
@@ -39,6 +40,7 @@ const NAV_ITEMS: Array<{
   { key: 'students', label: 'Students', icon: Users },
   { key: 'payments', label: 'Payments', icon: CreditCard },
   { key: 'rooms', label: 'Room Inventory', icon: BedDouble },
+  { key: 'reports', label: 'Reports', icon: BarChart3 },
 ];
 
 export function Sidebar({

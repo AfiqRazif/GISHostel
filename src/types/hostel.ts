@@ -34,7 +34,7 @@ export type PaymentMethod =
 export type PaymentStatus = 'Paid' | 'Pending' | 'Overdue' | 'Waived';
 export type PhysicalReceiptStatus = 'Pending Issuance' | 'Issued';
 export type StaffRole = 'Master Admin' | 'Admin' | 'Staff' | 'Viewer';
-export type TabKey = 'dashboard' | 'students' | 'payments' | 'rooms' | 'users';
+export type TabKey = 'dashboard' | 'students' | 'payments' | 'rooms' | 'reports' | 'users';
 
 export const STAFF_ROLES: StaffRole[] = [
   'Master Admin',

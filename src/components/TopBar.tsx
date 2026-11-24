@@ -29,6 +29,7 @@ const TAB_TITLES: Record<TabKey, string> = {
   students: 'Student Residency',
   payments: 'Payments & Fee Ledger',
   rooms: 'Room Inventory',
+  reports: 'Hostel Reports & Summaries',
   users: 'Staff User Accounts',
 };
 

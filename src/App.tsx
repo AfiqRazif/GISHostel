@@ -23,6 +23,7 @@ import { DashboardTab } from './components/DashboardTab';
 import { StudentsTab } from './components/StudentsTab';
 import { PaymentsTab, type PaymentPrefillRequest } from './components/PaymentsTab';
 import { RoomInventoryTab } from './components/RoomInventoryTab';
+import { ReportsTab } from './components/ReportsTab';
 import { UserManagementTab } from './components/UserManagementTab';
 
 const SIDEBAR_MODE_STORAGE_KEY = 'gis_hostel_sidebar_mode';
@@ -429,6 +430,18 @@ function HostelPortal() {
               students={students}
               staffEmail={staffEmail}
               staffRole={currentStaffUser.role}
+              loading={dataLoading}
+            />
+          )}
+
+          {effectiveTab === 'reports' && (
+            <ReportsTab
+              rooms={rooms}
+              students={students}
+              payments={payments}
+              staffRole={currentStaffUser.role}
+              staffName={currentStaffUser.fullName}
+              staffEmail={staffEmail}
               loading={dataLoading}
             />
           )}

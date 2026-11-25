@@ -352,7 +352,7 @@ function HostelPortal() {
       : activeTab;
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
+    <div className="min-h-screen bg-slate-50 flex app-print-shell print:block print:min-h-0 print:h-auto print:overflow-visible print:bg-white">
       <Sidebar
         activeTab={effectiveTab}
         onSelectTab={setActiveTab}
@@ -364,7 +364,7 @@ function HostelPortal() {
         onToggleCollapse={handleToggleCollapse}
       />
 
-      <div className="flex-1 flex flex-col min-w-0 transition-all duration-200 ease-in-out">
+      <div className="flex-1 flex flex-col min-w-0 transition-all duration-200 ease-in-out app-print-col print:block print:h-auto print:overflow-visible">
         <TopBar
           activeTab={effectiveTab}
           user={user}
@@ -381,7 +381,7 @@ function HostelPortal() {
           onCycleDesktopSidebar={handleCycleDesktopSidebar}
         />
 
-        <main className="flex-1 min-w-0 w-full p-4 sm:p-6 lg:p-8 print:p-0">
+        <main className="flex-1 min-w-0 w-full p-4 sm:p-6 lg:p-8 print:p-0 print:h-auto print:max-h-none print:overflow-visible">
           {seedError && (
             <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-700 print:hidden">
               {seedError}

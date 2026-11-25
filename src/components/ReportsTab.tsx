@@ -1539,28 +1539,28 @@ export function ReportsTab({
 
   return (
     <div className="space-y-6">
-      {/* Dynamic @page print orientation per active sub-view */}
+      {/* Dynamic @page print orientation across report sub-views */}
       <style>{`
         @media print {
           @page {
-            size: ${subView === 'defaulters' ? 'A4 portrait' : 'A4 landscape'};
+            size: A4 landscape;
             margin: 10mm;
           }
         }
       `}</style>
 
       {/* Official Print Letterhead (shown only on print) */}
-      <div className="hidden print:block border-b-2 border-slate-900 pb-3 mb-4">
+      <div className="hidden print:block border-b-2 border-slate-900 pb-2.5 mb-3">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="font-display text-base font-bold text-slate-900 uppercase tracking-wide">
+          <div className="min-w-0">
+            <p className="font-display text-sm font-bold text-slate-900 uppercase tracking-wide">
               GLOBAL INSTITUTE OF STUDIES (GIS) NILAI
             </p>
-            <p className="text-xs text-slate-700 font-medium mt-0.5">
+            <p className="text-[11px] text-slate-700 font-medium mt-0.5">
               Student Affairs &amp; Hostel Administration Department · Apartment Desa Jati 2 &amp; Nilai Square
             </p>
           </div>
-          <div className="text-right text-[11px] text-slate-700 font-mono tabular-nums">
+          <div className="text-right text-[10px] text-slate-700 font-mono tabular-nums shrink-0">
             <p className="font-semibold text-slate-900">
               {subView === 'collection'
                 ? `HOSTEL COLLECTION SUMMARY (${selectedYear} · ${
@@ -2025,58 +2025,64 @@ export function ReportsTab({
       {subView === 'defaulters' && (
         <div className="space-y-5 print:space-y-3">
           {/* Summary Header */}
-          <section className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 print:border-slate-400 print:rounded-none print:p-3">
+          <section className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 print:border-slate-400 print:rounded-none print:p-2.5 print:break-inside-avoid">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 print:grid-cols-5 print:gap-2">
               <div className="border border-slate-200 rounded-lg p-3 bg-slate-50/60 print:p-2">
-                <p className="text-xs font-medium text-slate-500">
+                <p className="text-xs font-medium text-slate-500 print:text-[10px]">
                   Total Defaulters
                 </p>
                 <p className="text-xl font-bold font-mono tabular-nums text-slate-900 mt-1 print:text-sm">
                   {defaulterStats.totalCount}
                 </p>
-                <p className="text-[11px] text-slate-500 mt-0.5">
+                <p className="text-[11px] text-slate-500 mt-0.5 print:text-[9px]">
                   Sorted highest arrears first
                 </p>
               </div>
 
               <div className="border border-red-200 rounded-lg p-3 bg-red-50/50 print:p-2">
-                <p className="text-xs font-semibold text-red-800">CRITICAL</p>
+                <p className="text-xs font-semibold text-red-800 print:text-[10px]">
+                  CRITICAL
+                </p>
                 <p className="text-xl font-bold font-mono tabular-nums text-red-700 mt-1 print:text-sm">
                   {defaulterStats.criticalCount}
                 </p>
-                <p className="text-[11px] text-red-700/80 mt-0.5">
+                <p className="text-[11px] text-red-700/80 mt-0.5 print:text-[9px]">
                   ≥ RM 1,000 or ≥ 4 mos
                 </p>
               </div>
 
               <div className="border border-orange-200 rounded-lg p-3 bg-orange-50/50 print:p-2">
-                <p className="text-xs font-semibold text-orange-800">HIGH</p>
+                <p className="text-xs font-semibold text-orange-800 print:text-[10px]">
+                  HIGH
+                </p>
                 <p className="text-xl font-bold font-mono tabular-nums text-orange-700 mt-1 print:text-sm">
                   {defaulterStats.highCount}
                 </p>
-                <p className="text-[11px] text-orange-700/80 mt-0.5">
+                <p className="text-[11px] text-orange-700/80 mt-0.5 print:text-[9px]">
                   RM 500–999 or 2–3 mos
                 </p>
               </div>
 
               <div className="border border-amber-200 rounded-lg p-3 bg-amber-50/50 print:p-2">
-                <p className="text-xs font-semibold text-amber-800">MODERATE</p>
+                <p className="text-xs font-semibold text-amber-800 print:text-[10px]">
+                  MODERATE
+                </p>
                 <p className="text-xl font-bold font-mono tabular-nums text-amber-700 mt-1 print:text-sm">
                   {defaulterStats.moderateCount}
                 </p>
-                <p className="text-[11px] text-amber-700/80 mt-0.5">
+                <p className="text-[11px] text-amber-700/80 mt-0.5 print:text-[9px]">
                   &gt; RM 0 and &lt; RM 500
                 </p>
               </div>
 
               <div className="border border-slate-200 rounded-lg p-3 bg-red-50/40 print:p-2">
-                <p className="text-xs font-medium text-red-800">
+                <p className="text-xs font-medium text-red-800 print:text-[10px]">
                   Total Recoverable Arrears
                 </p>
                 <p className="text-xl font-bold font-mono tabular-nums text-red-700 mt-1 print:text-sm">
                   {formatRM(defaulterStats.totalRecoverableArrears)}
                 </p>
-                <p className="text-[11px] text-slate-500 mt-0.5">
+                <p className="text-[11px] text-slate-500 mt-0.5 print:text-[9px]">
                   Filtered scope total
                 </p>
               </div>
@@ -2084,7 +2090,7 @@ export function ReportsTab({
           </section>
 
           {/* Defaulters Table */}
-          <section className="bg-white border border-slate-200 rounded-xl overflow-hidden print:border-slate-400 print:rounded-none">
+          <section className="bg-white border border-slate-200 rounded-xl overflow-hidden print:border-slate-400 print:rounded-none print:overflow-visible">
             {filteredDefaulters.length === 0 ? (
               <div className="p-10 text-center space-y-2">
                 <AlertTriangle className="w-7 h-7 text-emerald-600 mx-auto" />
@@ -2097,41 +2103,38 @@ export function ReportsTab({
               </div>
             ) : (
               <div className="overflow-x-auto print:overflow-visible">
-                <table className="w-full text-left border-collapse text-xs print:text-[9px]">
+                <table className="w-full text-left border-collapse text-xs print:text-[10px] print:leading-tight">
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase print:bg-slate-100">
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1.5">
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
                         Rank (#)
                       </th>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1.5">
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
                         Severity
                       </th>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1.5">
-                        Student Name &amp; ID
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1 print:whitespace-normal">
+                        Student Name &amp; ID / IC
                       </th>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1.5">
-                        Phone / Contact
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
+                        Phone
                       </th>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1.5">
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
                         Status
                       </th>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1.5">
-                        Current / Last Unit
+                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
+                        Unit
                       </th>
-                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1">
                         Monthly Rate
                       </th>
-                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
-                        Total Expected
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1">
+                        Expected
                       </th>
-                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
-                        Total Paid
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1">
+                        Paid / Last Date
                       </th>
-                      <th className="px-3 py-3 font-semibold whitespace-nowrap print:px-1.5 print:py-1.5">
-                        Last Payment
-                      </th>
-                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
-                        Outstanding
+                      <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1">
+                        Outstanding Balance
                       </th>
                     </tr>
                   </thead>
@@ -2149,38 +2152,42 @@ export function ReportsTab({
                           key={row.student.studentId}
                           className="hover:bg-slate-50/80 transition-colors"
                         >
-                          <td className="px-3 py-2.5 font-mono font-bold tabular-nums text-slate-700 print:px-1.5 print:py-1.5">
+                          <td className="px-3 py-2.5 font-mono font-bold tabular-nums text-slate-700 whitespace-nowrap print:px-1.5 print:py-1">
                             #{row.rank}
                           </td>
-                          <td className="px-3 py-2.5 whitespace-nowrap print:px-1.5 print:py-1.5">
+                          <td className="px-3 py-2.5 whitespace-nowrap print:px-1.5 print:py-1">
                             <span
-                              className={`inline-block px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide rounded border print:text-[8px] print:px-1 ${severityClass}`}
+                              className={`inline-block px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide rounded border print:text-[9px] print:px-1 ${severityClass}`}
                             >
                               {row.severity}
                             </span>
-                            <span className="block text-[10px] font-mono tabular-nums text-slate-500 mt-0.5 print:text-[7.5px]">
+                            <span className="block text-[10px] font-mono tabular-nums text-slate-500 mt-0.5 print:text-[9px]">
                               ~{row.monthsOverdue} mo(s)
                             </span>
                           </td>
-                          <td className="px-3 py-2.5 print:px-1.5 print:py-1.5">
-                            <div className="font-semibold text-slate-900">
+                          <td className="px-3 py-2.5 print:px-1.5 print:py-1 print:whitespace-normal print:max-w-[180px]">
+                            <div className="font-semibold text-slate-900 print:whitespace-normal print:break-words">
                               {row.student.fullName}
                             </div>
-                            <div className="font-mono text-[11px] text-slate-500 print:text-[8px]">
-                              {row.student.studentId} · {row.student.program}
+                            <div className="font-mono text-[11px] text-slate-500 print:text-[9px] print:whitespace-normal print:break-words">
+                              {row.student.studentId}
+                              {row.student.icNumber
+                                ? ` · ${row.student.icNumber}`
+                                : ''}{' '}
+                              · {row.student.program}
                             </div>
                           </td>
-                          <td className="px-3 py-2.5 print:px-1.5 print:py-1.5">
+                          <td className="px-3 py-2.5 print:px-1.5 print:py-1 print:max-w-[135px]">
                             <div className="font-mono text-slate-800 whitespace-nowrap">
                               {row.student.phone || '—'}
                             </div>
                             {row.student.emergencyContact && (
-                              <div className="text-[11px] text-slate-500 truncate max-w-[180px] print:max-w-[110px] print:text-[7.5px]">
+                              <div className="text-[11px] text-slate-500 truncate max-w-[180px] print:max-w-[130px] print:whitespace-normal print:text-[9px]">
                                 {row.student.emergencyContact}
                               </div>
                             )}
                           </td>
-                          <td className="px-3 py-2.5 whitespace-nowrap print:px-1.5 print:py-1.5">
+                          <td className="px-3 py-2.5 whitespace-nowrap print:px-1.5 print:py-1">
                             <span
                               className={`font-medium ${
                                 row.student.status === 'Active'
@@ -2193,37 +2200,39 @@ export function ReportsTab({
                               {row.student.status}
                             </span>
                           </td>
-                          <td className="px-3 py-2.5 whitespace-nowrap print:px-1.5 print:py-1.5">
+                          <td className="px-3 py-2.5 whitespace-nowrap print:px-1.5 print:py-1 print:whitespace-normal">
                             <div className="font-mono font-medium text-slate-900">
                               {row.currentOrLastUnit}
                             </div>
-                            <div className="text-[11px] text-slate-500 print:text-[7.5px]">
+                            <div className="text-[11px] text-slate-500 print:text-[9px]">
                               {row.hostelLocation === 'Nilai Square'
                                 ? 'Nilai Square (NSQ)'
                                 : row.hostelLocation}
                             </div>
                           </td>
-                          <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap print:px-1.5 print:py-1.5">
+                          <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap print:px-1.5 print:py-1">
                             {formatRM(row.monthlyRate)}
                           </td>
-                          <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap print:px-1.5 print:py-1.5">
+                          <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap print:px-1.5 print:py-1">
                             {formatRM(row.totalExpected)}
                           </td>
-                          <td className="px-3 py-2.5 text-right font-mono tabular-nums text-emerald-700 whitespace-nowrap print:px-1.5 print:py-1.5">
-                            {formatRM(row.totalPaid)}
+                          <td className="px-3 py-2.5 text-right font-mono tabular-nums whitespace-nowrap print:px-1.5 print:py-1">
+                            <div className="text-emerald-700 font-medium">
+                              {formatRM(row.totalPaid)}
+                            </div>
+                            <div
+                              className={`text-[11px] print:text-[9px] mt-0.5 ${
+                                row.lastPaymentDate
+                                  ? 'text-slate-500'
+                                  : 'text-red-700 font-medium'
+                              }`}
+                            >
+                              {row.lastPaymentDate
+                                ? row.lastPaymentDate
+                                : 'Never Paid'}
+                            </div>
                           </td>
-                          <td className="px-3 py-2.5 font-mono tabular-nums whitespace-nowrap print:px-1.5 print:py-1.5">
-                            {row.lastPaymentDate ? (
-                              <span className="text-slate-800">
-                                {row.lastPaymentDate}
-                              </span>
-                            ) : (
-                              <span className="text-red-700 font-medium">
-                                Never Paid
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2.5 text-right font-mono tabular-nums font-bold text-red-700 whitespace-nowrap print:px-1.5 print:py-1.5">
+                          <td className="px-3 py-2.5 text-right font-mono tabular-nums font-bold text-red-700 whitespace-nowrap print:px-1.5 print:py-1">
                             {formatRM(row.outstandingBalance)}
                           </td>
                         </tr>
@@ -2234,12 +2243,12 @@ export function ReportsTab({
                     <tr className="bg-slate-50 border-t-2 border-slate-300 font-semibold text-slate-900 print:bg-slate-100">
                       <td
                         colSpan={7}
-                        className="px-3 py-2.5 text-right uppercase text-xs print:px-1.5 print:py-1.5"
+                        className="px-3 py-2.5 text-right uppercase text-xs print:text-[10px] print:px-1.5 print:py-1"
                       >
                         Totals ({defaulterStats.totalCount} resident
                         {defaulterStats.totalCount === 1 ? '' : 's'})
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono tabular-nums whitespace-nowrap print:px-1.5 print:py-1.5">
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums whitespace-nowrap print:px-1.5 print:py-1">
                         {formatRM(
                           filteredDefaulters.reduce(
                             (sum, r) => sum + r.totalExpected,
@@ -2247,7 +2256,7 @@ export function ReportsTab({
                           )
                         )}
                       </td>
-                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-emerald-700 whitespace-nowrap print:px-1.5 print:py-1.5">
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums text-emerald-700 whitespace-nowrap print:px-1.5 print:py-1">
                         {formatRM(
                           filteredDefaulters.reduce(
                             (sum, r) => sum + r.totalPaid,
@@ -2255,8 +2264,7 @@ export function ReportsTab({
                           )
                         )}
                       </td>
-                      <td className="px-3 py-2.5 print:px-1.5 print:py-1.5" />
-                      <td className="px-3 py-2.5 text-right font-mono tabular-nums font-bold text-red-700 whitespace-nowrap print:px-1.5 print:py-1.5">
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums font-bold text-red-700 whitespace-nowrap print:px-1.5 print:py-1">
                         {formatRM(defaulterStats.totalRecoverableArrears)}
                       </td>
                     </tr>
@@ -2531,9 +2539,9 @@ export function ReportsTab({
       )}
 
       {/* Official Print Signature Footer (shown only on print) */}
-      <div className="hidden print:grid grid-cols-3 gap-8 pt-10 mt-6 border-t border-slate-300 break-inside-avoid">
+      <div className="hidden print:grid grid-cols-3 gap-6 pt-6 mt-5 border-t border-slate-300 break-inside-avoid">
         <div>
-          <p className="text-[10px] font-semibold uppercase text-slate-600 mb-10">
+          <p className="text-[10px] font-semibold uppercase text-slate-600 mb-8">
             Prepared By:
           </p>
           <div className="border-t border-slate-700 pt-1 text-[10px] text-slate-800">
@@ -2543,7 +2551,7 @@ export function ReportsTab({
           </div>
         </div>
         <div>
-          <p className="text-[10px] font-semibold uppercase text-slate-600 mb-10">
+          <p className="text-[10px] font-semibold uppercase text-slate-600 mb-8">
             Reviewed By:
           </p>
           <div className="border-t border-slate-700 pt-1 text-[10px] text-slate-800">
@@ -2553,7 +2561,7 @@ export function ReportsTab({
           </div>
         </div>
         <div>
-          <p className="text-[10px] font-semibold uppercase text-slate-600 mb-10">
+          <p className="text-[10px] font-semibold uppercase text-slate-600 mb-8">
             Approved By:
           </p>
           <div className="border-t border-slate-700 pt-1 text-[10px] text-slate-800">

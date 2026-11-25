@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2,
   Check,
@@ -13,6 +13,7 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  UserCheck,
   X,
 } from 'lucide-react';
 import {
@@ -124,9 +125,13 @@ export function PaymentsTab({
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [residentSearchQuery, setResidentSearchQuery] = useState('');
+  const [residentDropdownOpen, setResidentDropdownOpen] = useState(false);
+  const residentSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const residentComboboxRef = useRef<HTMLDivElement | null>(null);
   const [billingMonth, setBillingMonth] = useState(getCurrentMonthISO());
   const [paymentType, setPaymentType] = useState<PaymentType>('Monthly Rent');
-  const [amount, setAmount] = useState('250');
+  const [amount, setAmount] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('DuitNow QR');
   const [bankRefNo, setBankRefNo] = useState('');
   const [paymentDate, setPaymentDate] = useState(getTodayISO());
@@ -171,6 +176,53 @@ export function PaymentsTab({
     });
   }, [students]);
 
+  const studentBillingMap = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof calculateResidentBilling>>();
+    for (const s of sortedStudents) {
+      map.set(s.studentId, calculateResidentBilling(s, payments));
+    }
+    return map;
+  }, [sortedStudents, payments]);
+
+  const filteredResidentsForModal = useMemo(() => {
+    const q = residentSearchQuery.trim().toLowerCase();
+    if (!q) return sortedStudents;
+    return sortedStudents.filter((s) => {
+      const name = s.fullName.toLowerCase();
+      const id = s.studentId.toLowerCase();
+      const ic = (s.icNumber || '').toLowerCase();
+      const room = (s.assignedRoomId || 'unassigned').toLowerCase();
+      return (
+        name.includes(q) ||
+        id.includes(q) ||
+        ic.includes(q) ||
+        room.includes(q)
+      );
+    });
+  }, [sortedStudents, residentSearchQuery]);
+
+  useEffect(() => {
+    if (!showAddModal || selectedStudentId) return;
+    const timer = window.setTimeout(() => {
+      residentSearchInputRef.current?.focus();
+    }, 20);
+    return () => window.clearTimeout(timer);
+  }, [showAddModal, selectedStudentId]);
+
+  useEffect(() => {
+    if (!residentDropdownOpen) return;
+    const handleMouseDownOutside = (e: MouseEvent) => {
+      if (
+        residentComboboxRef.current &&
+        !residentComboboxRef.current.contains(e.target as Node)
+      ) {
+        setResidentDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleMouseDownOutside);
+    return () => document.removeEventListener('mousedown', handleMouseDownOutside);
+  }, [residentDropdownOpen]);
+
   useEffect(() => {
     if (!prefillRequest) return;
     const st = students.find((s) => s.studentId === prefillRequest.studentId);
@@ -178,6 +230,8 @@ export function PaymentsTab({
     setEditingPayment(null);
     setPrintingPayment(null);
     setSelectedStudentId(prefillRequest.studentId);
+    setResidentSearchQuery('');
+    setResidentDropdownOpen(false);
     setBillingMonth(getCurrentMonthISO());
     setPaymentType('Monthly Rent');
     setAmount(
@@ -302,15 +356,12 @@ export function PaymentsTab({
 
   const handleOpenAddModal = () => {
     setFormError(null);
-    const first = sortedStudents[0];
-    setSelectedStudentId(first ? first.studentId : '');
+    setSelectedStudentId('');
+    setResidentSearchQuery('');
+    setResidentDropdownOpen(true);
     setBillingMonth(getCurrentMonthISO());
     setPaymentType('Monthly Rent');
-    setAmount(
-      first
-        ? String(calculateResidentBilling(first, payments).effectiveMonthlyFee)
-        : '250'
-    );
+    setAmount('');
     setPaymentMethod('DuitNow QR');
     setBankRefNo('');
     setPaymentDate(getTodayISO());
@@ -394,30 +445,54 @@ export function PaymentsTab({
     }
   };
 
-  const handleStudentChange = (studentId: string) => {
-    setSelectedStudentId(studentId);
-    const st = students.find((s) => s.studentId === studentId);
-    if (!st) return;
-    const billing = calculateResidentBilling(st, payments);
-    if (paymentType === 'Monthly Rent') {
-      setAmount(String(billing.effectiveMonthlyFee));
-    } else if (paymentType === 'Deposit') {
-      setAmount(
-        String(
-          billing.depositPending > 0
-            ? billing.depositPending
-            : billing.expectedDeposit
-        )
-      );
-    } else if (paymentType === 'Registration Fee') {
-      setAmount(
-        String(
-          billing.registrationFeePending > 0
-            ? billing.registrationFeePending
-            : billing.expectedRegistrationFee
-        )
-      );
+  const getSuggestedAmountForResident = (
+    st: Student,
+    targetType: PaymentType
+  ): string | null => {
+    const billing =
+      studentBillingMap.get(st.studentId) || calculateResidentBilling(st, payments);
+    if (targetType === 'Monthly Rent') {
+      return billing.effectiveMonthlyFee > 0
+        ? String(billing.effectiveMonthlyFee)
+        : '';
     }
+    if (targetType === 'Deposit') {
+      const remaining = Math.max(
+        0,
+        Math.round((billing.expectedDeposit - billing.depositPaid) * 100) / 100
+      );
+      return String(remaining);
+    }
+    if (targetType === 'Registration Fee') {
+      const remaining = Math.max(
+        0,
+        Math.round(
+          (billing.expectedRegistrationFee - billing.registrationFeePaid) * 100
+        ) / 100
+      );
+      return String(remaining);
+    }
+    return null;
+  };
+
+  const handleSelectResident = (st: Student) => {
+    setSelectedStudentId(st.studentId);
+    setResidentSearchQuery('');
+    setResidentDropdownOpen(false);
+    setFormError(null);
+    const suggested = getSuggestedAmountForResident(st, paymentType);
+    if (suggested !== null) {
+      setAmount(suggested);
+    }
+  };
+
+  const handleClearSelectedResident = () => {
+    setSelectedStudentId('');
+    setResidentSearchQuery('');
+    setResidentDropdownOpen(true);
+    window.requestAnimationFrame(() => {
+      residentSearchInputRef.current?.focus();
+    });
   };
 
   const handlePaymentTypeChange = (nextType: PaymentType) => {
@@ -437,25 +512,9 @@ export function PaymentsTab({
     }
 
     if (!st) return;
-    const billing = calculateResidentBilling(st, payments);
-    if (nextType === 'Monthly Rent') {
-      setAmount(String(billing.effectiveMonthlyFee));
-    } else if (nextType === 'Deposit') {
-      setAmount(
-        String(
-          billing.depositPending > 0
-            ? billing.depositPending
-            : billing.expectedDeposit
-        )
-      );
-    } else if (nextType === 'Registration Fee') {
-      setAmount(
-        String(
-          billing.registrationFeePending > 0
-            ? billing.registrationFeePending
-            : billing.expectedRegistrationFee
-        )
-      );
+    const suggested = getSuggestedAmountForResident(st, nextType);
+    if (suggested !== null) {
+      setAmount(suggested);
     }
   };
 
@@ -463,7 +522,9 @@ export function PaymentsTab({
     e.preventDefault();
     const st = students.find((s) => s.studentId === selectedStudentId);
     if (!st) {
-      setFormError('Please select a registered resident.');
+      setFormError('Please search and select a registered resident first.');
+      setResidentDropdownOpen(true);
+      residentSearchInputRef.current?.focus();
       return;
     }
     setSubmitting(true);
@@ -1163,20 +1224,279 @@ export function PaymentsTab({
 
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Resident
+                      Resident <span className="text-red-600">*</span>
                     </label>
-                    <select
-                      value={selectedStudentId}
-                      onChange={(e) => handleStudentChange(e.target.value)}
-                      required
-                      className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
-                    >
-                      {sortedStudents.map((s) => (
-                        <option key={s.studentId} value={s.studentId}>
-                          {s.fullName} ({s.studentId} · {s.assignedRoomId || 'Unassigned'}) [{s.status}]
-                        </option>
-                      ))}
-                    </select>
+
+                    {activeModalStudent ? (
+                      (() => {
+                        const selBilling =
+                          studentBillingMap.get(activeModalStudent.studentId) ||
+                          calculateResidentBilling(activeModalStudent, payments);
+                        const depRemaining = Math.max(
+                          0,
+                          Math.round(
+                            (selBilling.expectedDeposit - selBilling.depositPaid) *
+                              100
+                          ) / 100
+                        );
+                        const regRemaining = Math.max(
+                          0,
+                          Math.round(
+                            (selBilling.expectedRegistrationFee -
+                              selBilling.registrationFeePaid) *
+                              100
+                          ) / 100
+                        );
+
+                        return (
+                          <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-3.5 space-y-2.5">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex items-start gap-2.5 min-w-0">
+                                <div className="w-8 h-8 rounded-lg bg-blue-900 text-white flex items-center justify-center shrink-0 mt-0.5">
+                                  <UserCheck className="w-4 h-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <p className="text-sm font-semibold text-slate-900 truncate">
+                                      {activeModalStudent.fullName}
+                                    </p>
+                                    <span
+                                      className={`px-1.5 py-0.5 text-[10px] font-semibold rounded border ${
+                                        activeModalStudent.status === 'Active'
+                                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                          : activeModalStudent.status === 'Checked-Out'
+                                            ? 'bg-slate-100 text-slate-700 border-slate-200'
+                                            : 'bg-red-50 text-red-700 border-red-200'
+                                      }`}
+                                    >
+                                      {activeModalStudent.status}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-slate-600 font-mono mt-0.5">
+                                    {activeModalStudent.studentId}
+                                    {activeModalStudent.icNumber
+                                      ? ` · IC: ${activeModalStudent.icNumber}`
+                                      : ''}{' '}
+                                    ·{' '}
+                                    <span className="font-semibold text-blue-900">
+                                      {activeModalStudent.assignedRoomId || 'Unassigned'}
+                                    </span>
+                                  </p>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={handleClearSelectedResident}
+                                className="px-2.5 py-1 text-xs font-semibold text-blue-900 bg-white border border-blue-200 hover:bg-blue-50 rounded-md transition-colors cursor-pointer shrink-0"
+                              >
+                                Change
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-blue-200/70 text-xs">
+                              <div className="bg-white/80 rounded-lg px-2.5 py-1.5 border border-blue-100">
+                                <p className="text-[10px] font-medium text-slate-500 uppercase">
+                                  Monthly Rate
+                                </p>
+                                <p className="font-mono font-semibold text-slate-900 tabular-nums mt-0.5">
+                                  {formatRM(selBilling.effectiveMonthlyFee)}
+                                </p>
+                              </div>
+                              <div className="bg-white/80 rounded-lg px-2.5 py-1.5 border border-blue-100">
+                                <p className="text-[10px] font-medium text-slate-500 uppercase">
+                                  Rent O/S
+                                </p>
+                                <p
+                                  className={`font-mono font-semibold tabular-nums mt-0.5 ${
+                                    selBilling.outstandingBalance > 0.009
+                                      ? 'text-red-700'
+                                      : 'text-emerald-700'
+                                  }`}
+                                >
+                                  {formatRM(selBilling.outstandingBalance)}
+                                </p>
+                              </div>
+                              <div className="bg-white/80 rounded-lg px-2.5 py-1.5 border border-blue-100">
+                                <p className="text-[10px] font-medium text-slate-500 uppercase">
+                                  Deposit O/S
+                                </p>
+                                <p
+                                  className={`font-mono font-semibold tabular-nums mt-0.5 ${
+                                    depRemaining > 0.009
+                                      ? 'text-amber-800'
+                                      : 'text-emerald-700'
+                                  }`}
+                                >
+                                  {formatRM(depRemaining)}
+                                </p>
+                              </div>
+                              <div className="bg-white/80 rounded-lg px-2.5 py-1.5 border border-blue-100">
+                                <p className="text-[10px] font-medium text-slate-500 uppercase">
+                                  Reg. Fee O/S
+                                </p>
+                                <p
+                                  className={`font-mono font-semibold tabular-nums mt-0.5 ${
+                                    regRemaining > 0.009
+                                      ? 'text-amber-800'
+                                      : 'text-emerald-700'
+                                  }`}
+                                >
+                                  {formatRM(regRemaining)}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      <div ref={residentComboboxRef} className="relative z-30">
+                        <div className="relative">
+                          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            ref={residentSearchInputRef}
+                            type="text"
+                            value={residentSearchQuery}
+                            onFocus={() => setResidentDropdownOpen(true)}
+                            onChange={(e) => {
+                              setResidentSearchQuery(e.target.value);
+                              setResidentDropdownOpen(true);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Escape') {
+                                setResidentDropdownOpen(false);
+                              } else if (e.key === 'Enter') {
+                                e.preventDefault();
+                                if (filteredResidentsForModal.length > 0) {
+                                  handleSelectResident(filteredResidentsForModal[0]);
+                                }
+                              }
+                            }}
+                            placeholder="Search resident by name, Student ID, IC, or room (e.g. 5A-2-17)..."
+                            aria-label="Search resident by name, Student ID, IC, or room"
+                            aria-expanded={residentDropdownOpen}
+                            autoComplete="off"
+                            className="w-full pl-9 pr-9 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-blue-900 focus:ring-2 focus:ring-blue-900/10"
+                          />
+                          {residentSearchQuery && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setResidentSearchQuery('');
+                                setResidentDropdownOpen(true);
+                                residentSearchInputRef.current?.focus();
+                              }}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 text-slate-400 hover:text-slate-700 cursor-pointer"
+                              aria-label="Clear resident search"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+
+                        {residentDropdownOpen && (
+                          <div className="absolute left-0 right-0 top-full mt-1 z-50 max-h-96 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl divide-y divide-slate-100">
+                            {filteredResidentsForModal.length === 0 ? (
+                              <div className="px-4 py-5 text-center text-xs text-slate-500">
+                                No matching residents found for &ldquo;{residentSearchQuery}&rdquo;.
+                              </div>
+                            ) : (
+                              filteredResidentsForModal.map((s) => {
+                                const b =
+                                  studentBillingMap.get(s.studentId) ||
+                                  calculateResidentBilling(s, payments);
+                                const depOS = Math.max(
+                                  0,
+                                  Math.round((b.expectedDeposit - b.depositPaid) * 100) /
+                                    100
+                                );
+                                const regOS = Math.max(
+                                  0,
+                                  Math.round(
+                                    (b.expectedRegistrationFee - b.registrationFeePaid) *
+                                      100
+                                  ) / 100
+                                );
+
+                                return (
+                                  <button
+                                    key={s.studentId}
+                                    type="button"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => handleSelectResident(s)}
+                                    className="w-full text-left px-3.5 py-2.5 hover:bg-blue-50/70 transition-colors flex items-center justify-between gap-3 cursor-pointer"
+                                  >
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <span className="text-sm font-semibold text-slate-900 truncate">
+                                          {s.fullName}
+                                        </span>
+                                        <span className="text-xs font-mono text-slate-500">
+                                          {s.studentId}
+                                        </span>
+                                        {s.icNumber && (
+                                          <span className="text-[11px] font-mono text-slate-400">
+                                            · {s.icNumber}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                        <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded bg-slate-100 text-slate-700 border border-slate-200">
+                                          {s.assignedRoomId || 'Unassigned'}
+                                        </span>
+                                        <span
+                                          className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-semibold rounded border ${
+                                            s.status === 'Active'
+                                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                              : s.status === 'Checked-Out'
+                                                ? 'bg-slate-100 text-slate-600 border-slate-200'
+                                                : 'bg-red-50 text-red-700 border-red-200'
+                                          }`}
+                                        >
+                                          {s.status}
+                                        </span>
+                                      </div>
+                                    </div>
+
+                                    <div className="text-right shrink-0 font-mono text-[11px] tabular-nums space-y-0.5">
+                                      <div
+                                        className={
+                                          b.outstandingBalance > 0.009
+                                            ? 'font-semibold text-red-700'
+                                            : 'text-slate-500'
+                                        }
+                                      >
+                                        Rent O/S: {formatRM(b.outstandingBalance)}
+                                      </div>
+                                      <div className="text-[10px] flex items-center justify-end gap-2">
+                                        <span
+                                          className={
+                                            depOS > 0.009
+                                              ? 'font-semibold text-amber-800'
+                                              : 'text-slate-400'
+                                          }
+                                        >
+                                          Dep. O/S: {formatRM(depOS)}
+                                        </span>
+                                        <span
+                                          className={
+                                            regOS > 0.009
+                                              ? 'font-semibold text-amber-800'
+                                              : 'text-slate-400'
+                                          }
+                                        >
+                                          Reg. O/S: {formatRM(regOS)}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

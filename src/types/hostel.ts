@@ -189,6 +189,7 @@ export interface StayHistorySegment {
 export interface Student {
   studentId: string;
   fullName: string;
+  icNumber?: string;
   residentType?: ResidentType;
   occupantType?: OccupantType;
   occupancyMode?: ResidentOccupancyMode;

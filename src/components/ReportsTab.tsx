@@ -941,10 +941,18 @@ export function ReportsTab({
 
     const cleanRegFeePaid = roundMoney(totalRegFeePaid);
     const cleanDepositForfeited = roundMoney(totalDepositForfeited);
+    const forfeitedDepositRows = filteredRows.filter(
+      (r) => r.depositDisposition === 'Forfeited' && r.depositPaid > 0.009
+    );
+    const refundedDepositRows = filteredRows.filter(
+      (r) => r.depositDisposition === 'Refunded' && r.depositPaid > 0.009
+    );
 
     return {
       allPendingCount,
       rows: filteredRows,
+      forfeitedDepositRows,
+      refundedDepositRows,
       totals: {
         residentCount: filteredRows.length,
         pendingResidentsCount,
@@ -1277,6 +1285,75 @@ export function ReportsTab({
     XLSX.utils.book_append_sheet(wb, ws, 'Deposit & Reg Fee Details');
 
     const t = upfrontFeeReport.totals;
+
+    // Sheet 2: Forfeited Deposits (Usable by GIS)
+    const forfeitedAoa: Array<Array<string | number>> = [
+      [
+        'Student Name & ID',
+        'Last Unit / Room',
+        'Deposit Amount Forfeited (RM)',
+        'Forfeiture Date',
+        'Forfeiture Reason / Notes',
+      ],
+      ...upfrontFeeReport.forfeitedDepositRows.map((r) => [
+        `${r.student.fullName} (${r.student.studentId})`,
+        `${r.unitCode} · ${r.hostelLocation}`,
+        r.depositPaid,
+        r.depositDispositionDate || '-',
+        r.depositDispositionNotes || '-',
+      ]),
+      [
+        `TOTAL DEPOSITS FORFEITED — USABLE BY GIS (${upfrontFeeReport.forfeitedDepositRows.length} resident${upfrontFeeReport.forfeitedDepositRows.length === 1 ? '' : 's'})`,
+        '',
+        t.totalDepositForfeited,
+        '',
+        '',
+      ],
+    ];
+    const forfeitedWs = XLSX.utils.aoa_to_sheet(forfeitedAoa);
+    forfeitedWs['!cols'] = [
+      { wch: 34 },
+      { wch: 30 },
+      { wch: 28 },
+      { wch: 16 },
+      { wch: 40 },
+    ];
+    XLSX.utils.book_append_sheet(wb, forfeitedWs, 'Forfeited Deposits');
+
+    // Sheet 3: Refunded Deposits (Returned to Students)
+    const refundedAoa: Array<Array<string | number>> = [
+      [
+        'Student Name & ID',
+        'Last Unit / Room',
+        'Deposit Amount Refunded (RM)',
+        'Refund Date',
+        'Refund Notes / Voucher Reference',
+      ],
+      ...upfrontFeeReport.refundedDepositRows.map((r) => [
+        `${r.student.fullName} (${r.student.studentId})`,
+        `${r.unitCode} · ${r.hostelLocation}`,
+        r.depositPaid,
+        r.depositDispositionDate || '-',
+        r.depositDispositionNotes || '-',
+      ]),
+      [
+        `TOTAL DEPOSITS REFUNDED (${upfrontFeeReport.refundedDepositRows.length} resident${upfrontFeeReport.refundedDepositRows.length === 1 ? '' : 's'})`,
+        '',
+        t.totalDepositRefunded,
+        '',
+        '',
+      ],
+    ];
+    const refundedWs = XLSX.utils.aoa_to_sheet(refundedAoa);
+    refundedWs['!cols'] = [
+      { wch: 34 },
+      { wch: 30 },
+      { wch: 28 },
+      { wch: 16 },
+      { wch: 40 },
+    ];
+    XLSX.utils.book_append_sheet(wb, refundedWs, 'Refunded Deposits');
+
     const summaryWs = XLSX.utils.json_to_sheet([
       { Metric: 'Generated Date', Value: todayISO },
       { Metric: 'Location Filter', Value: upfrontLocation },
@@ -2471,8 +2548,33 @@ export function ReportsTab({
             </div>
           </section>
 
-          {/* Upfront Fees Table */}
+          {/* Table A: Resident Deposit & Registration Fee Schedule */}
           <section className="bg-white border border-slate-200 rounded-xl overflow-hidden print:border-slate-400 print:rounded-none print:overflow-visible">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between gap-4 flex-wrap print:px-2 print:py-1.5 print:bg-slate-100">
+              <div>
+                <h3 className="font-display text-sm font-bold text-slate-900 tracking-wide uppercase print:text-xs">
+                  Table A — Resident Deposit &amp; Registration Fee Schedule
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5 print:text-[10px]">
+                  {upfrontFeeReport.totals.residentCount} resident(s) ·{' '}
+                  {upfrontFeeReport.totals.pendingResidentsCount} with pending upfront fees
+                </p>
+              </div>
+              <div className="flex items-center gap-4 text-xs font-mono tabular-nums print:text-[10px]">
+                <span className="text-slate-600">
+                  Pending:{' '}
+                  <strong className="text-red-700">
+                    {formatRM(upfrontFeeReport.totals.totalCombinedPending)}
+                  </strong>
+                </span>
+                <span className="text-slate-600">
+                  GIS Usable:{' '}
+                  <strong className="text-emerald-700">
+                    {formatRM(upfrontFeeReport.totals.totalNonRefundableGisFunds)}
+                  </strong>
+                </span>
+              </div>
+            </div>
             {upfrontFeeReport.rows.length === 0 ? (
               <div className="p-10 text-center space-y-2">
                 <Wallet className="w-7 h-7 text-slate-400 mx-auto" />
@@ -2708,6 +2810,202 @@ export function ReportsTab({
                           </span>
                         </div>
                       </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* Table B: Forfeited Deposits (Usable by GIS) */}
+          <section className="bg-white border border-amber-200 rounded-xl overflow-hidden print:border-slate-400 print:rounded-none print:overflow-visible">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-amber-200 bg-amber-50/60 flex items-center justify-between gap-4 flex-wrap print:px-2 print:py-1.5 print:bg-slate-100 print:border-slate-300">
+              <div>
+                <h3 className="font-display text-sm font-bold text-amber-950 tracking-wide uppercase print:text-xs print:text-slate-900">
+                  Table B — Forfeited Deposits (Usable by GIS)
+                </h3>
+                <p className="text-xs text-amber-900/80 mt-0.5 print:text-[10px] print:text-slate-600">
+                  Rejected security deposit refunds retained as non-refundable GIS funds ·{' '}
+                  {upfrontFeeReport.forfeitedDepositRows.length} resident(s)
+                </p>
+              </div>
+              <span className="text-xs font-mono font-bold tabular-nums text-amber-900 print:text-[10px] print:text-slate-900">
+                Total: {formatRM(upfrontFeeReport.totals.totalDepositForfeited)}
+              </span>
+            </div>
+
+            {upfrontFeeReport.forfeitedDepositRows.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-500 print:p-3">
+                No forfeited deposits match the current filters.
+              </div>
+            ) : (
+              <div className="overflow-x-auto print:overflow-visible">
+                <table className="w-full text-left border-collapse text-xs print:text-[9px]">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase print:bg-slate-100">
+                      <th className="px-3 py-2.5 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
+                        Student Name &amp; ID
+                      </th>
+                      <th className="px-3 py-2.5 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
+                        Last Unit / Room
+                      </th>
+                      <th className="px-3 py-2.5 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1">
+                        Deposit Amount Forfeited (RM)
+                      </th>
+                      <th className="px-3 py-2.5 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
+                        Forfeiture Date
+                      </th>
+                      <th className="px-3 py-2.5 font-semibold min-w-[220px] print:px-1.5 print:py-1">
+                        Forfeiture Reason / Notes
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {upfrontFeeReport.forfeitedDepositRows.map((row) => (
+                      <tr
+                        key={row.student.studentId}
+                        className="hover:bg-amber-50/30 transition-colors"
+                      >
+                        <td className="px-3 py-2.5 print:px-1.5 print:py-1">
+                          <div className="font-semibold text-slate-900">
+                            {row.student.fullName}
+                          </div>
+                          <div className="font-mono text-[11px] text-slate-500 print:text-[8px]">
+                            {row.student.studentId} · {row.student.status}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap print:px-1.5 print:py-1">
+                          <div className="font-mono font-medium text-slate-900">
+                            {row.unitCode}
+                          </div>
+                          <div className="text-[11px] text-slate-500 print:text-[8px]">
+                            {row.hostelLocation === 'Nilai Square'
+                              ? 'Nilai Square (NSQ)'
+                              : row.hostelLocation}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono font-semibold tabular-nums text-amber-900 whitespace-nowrap print:px-1.5 print:py-1">
+                          {formatRM(row.depositPaid)}
+                        </td>
+                        <td className="px-3 py-2.5 font-mono tabular-nums text-slate-700 whitespace-nowrap print:px-1.5 print:py-1">
+                          {row.depositDispositionDate || '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-700 print:px-1.5 print:py-1">
+                          {row.depositDispositionNotes || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-amber-50/70 border-t-2 border-amber-300 font-bold text-amber-950 print:bg-slate-100 print:border-slate-400 print:text-slate-900">
+                      <td
+                        colSpan={2}
+                        className="px-3 py-2.5 text-right uppercase text-xs print:px-1.5 print:py-1.5 print:text-[9px]"
+                      >
+                        Total Deposits Forfeited — Usable by GIS (RM)
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums whitespace-nowrap print:px-1.5 print:py-1.5">
+                        {formatRM(upfrontFeeReport.totals.totalDepositForfeited)}
+                      </td>
+                      <td colSpan={2} className="px-3 py-2.5 print:px-1.5 print:py-1.5" />
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </section>
+
+          {/* Table C: Refunded Deposits (Returned to Students) */}
+          <section className="bg-white border border-slate-200 rounded-xl overflow-hidden print:border-slate-400 print:rounded-none print:overflow-visible">
+            <div className="px-4 sm:px-5 py-3.5 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between gap-4 flex-wrap print:px-2 print:py-1.5 print:bg-slate-100">
+              <div>
+                <h3 className="font-display text-sm font-bold text-slate-900 tracking-wide uppercase print:text-xs">
+                  Table C — Refunded Deposits (Returned to Students)
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5 print:text-[10px]">
+                  Itemized schedule of security deposits returned to checked-out or departing residents ·{' '}
+                  {upfrontFeeReport.refundedDepositRows.length} resident(s)
+                </p>
+              </div>
+              <span className="text-xs font-mono font-bold tabular-nums text-slate-800 print:text-[10px]">
+                Total: {formatRM(upfrontFeeReport.totals.totalDepositRefunded)}
+              </span>
+            </div>
+
+            {upfrontFeeReport.refundedDepositRows.length === 0 ? (
+              <div className="p-6 text-center text-xs text-slate-500 print:p-3">
+                No refunded deposits match the current filters.
+              </div>
+            ) : (
+              <div className="overflow-x-auto print:overflow-visible">
+                <table className="w-full text-left border-collapse text-xs print:text-[9px]">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase print:bg-slate-100">
+                      <th className="px-3 py-2.5 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
+                        Student Name &amp; ID
+                      </th>
+                      <th className="px-3 py-2.5 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
+                        Last Unit / Room
+                      </th>
+                      <th className="px-3 py-2.5 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1">
+                        Deposit Amount Refunded (RM)
+                      </th>
+                      <th className="px-3 py-2.5 font-semibold whitespace-nowrap print:px-1.5 print:py-1">
+                        Refund Date
+                      </th>
+                      <th className="px-3 py-2.5 font-semibold min-w-[220px] print:px-1.5 print:py-1">
+                        Refund Notes / Voucher Reference
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {upfrontFeeReport.refundedDepositRows.map((row) => (
+                      <tr
+                        key={row.student.studentId}
+                        className="hover:bg-slate-50/80 transition-colors"
+                      >
+                        <td className="px-3 py-2.5 print:px-1.5 print:py-1">
+                          <div className="font-semibold text-slate-900">
+                            {row.student.fullName}
+                          </div>
+                          <div className="font-mono text-[11px] text-slate-500 print:text-[8px]">
+                            {row.student.studentId} · {row.student.status}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 whitespace-nowrap print:px-1.5 print:py-1">
+                          <div className="font-mono font-medium text-slate-900">
+                            {row.unitCode}
+                          </div>
+                          <div className="text-[11px] text-slate-500 print:text-[8px]">
+                            {row.hostelLocation === 'Nilai Square'
+                              ? 'Nilai Square (NSQ)'
+                              : row.hostelLocation}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2.5 text-right font-mono font-semibold tabular-nums text-slate-900 whitespace-nowrap print:px-1.5 print:py-1">
+                          {formatRM(row.depositPaid)}
+                        </td>
+                        <td className="px-3 py-2.5 font-mono tabular-nums text-slate-700 whitespace-nowrap print:px-1.5 print:py-1">
+                          {row.depositDispositionDate || '—'}
+                        </td>
+                        <td className="px-3 py-2.5 text-slate-700 print:px-1.5 print:py-1">
+                          {row.depositDispositionNotes || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-slate-100 border-t-2 border-slate-300 font-bold text-slate-900 print:bg-slate-100 print:border-slate-400">
+                      <td
+                        colSpan={2}
+                        className="px-3 py-2.5 text-right uppercase text-xs print:px-1.5 print:py-1.5 print:text-[9px]"
+                      >
+                        Total Deposits Refunded (RM)
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-mono tabular-nums whitespace-nowrap print:px-1.5 print:py-1.5">
+                        {formatRM(upfrontFeeReport.totals.totalDepositRefunded)}
+                      </td>
+                      <td colSpan={2} className="px-3 py-2.5 print:px-1.5 print:py-1.5" />
                     </tr>
                   </tfoot>
                 </table>

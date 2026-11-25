@@ -194,6 +194,7 @@ export function StudentsTab({
     useState<DepositDisposition>('Held');
   const [stmtDepositDispositionDate, setStmtDepositDispositionDate] = useState('');
   const [stmtDepositDispositionNotes, setStmtDepositDispositionNotes] = useState('');
+  const [stmtLedgerTypeFilter, setStmtLedgerTypeFilter] = useState<'All' | PaymentType>('All');
 
   // Direct Assign Room modal state (for unassigned students)
   const [assigningStudent, setAssigningStudent] = useState<Student | null>(null);
@@ -367,6 +368,13 @@ export function StudentsTab({
         return (b.updatedAt?.toMillis?.() ?? 0) - (a.updatedAt?.toMillis?.() ?? 0);
       });
   }, [liveStatementStudent, payments]);
+
+  const filteredStatementPayments = useMemo(() => {
+    if (stmtLedgerTypeFilter === 'All') return statementPayments;
+    return statementPayments.filter(
+      (p) => p.paymentType === stmtLedgerTypeFilter
+    );
+  }, [statementPayments, stmtLedgerTypeFilter]);
 
   const transferVacantChoices = useMemo(() => {
     if (!transferStudent) return vacantRooms;
@@ -1419,7 +1427,8 @@ export function StudentsTab({
     const defaultMonth =
       presetType === 'Deposit' || presetType === 'Registration Fee'
         ? (liveStatementStudent.checkInDate || getTodayISO()).slice(0, 7)
-        : presetType === 'Rent Refund' && liveStatementStudent.checkOutDate
+        : (presetType === 'Rent Refund' || presetType === 'Deposit Refund') &&
+            liveStatementStudent.checkOutDate
           ? liveStatementStudent.checkOutDate.slice(0, 7)
           : getCurrentMonthISO();
     setStmtBillingMonth(defaultMonth);
@@ -1439,6 +1448,13 @@ export function StudentsTab({
           : statementBilling.expectedRegistrationFee;
       setStmtAmount(amt.toFixed(2));
       setStmtNotes('Hostel registration fee payment');
+    } else if (presetType === 'Deposit Refund') {
+      const amt =
+        statementBilling.depositPaid > 0
+          ? statementBilling.depositPaid
+          : statementBilling.expectedDeposit;
+      setStmtAmount(amt.toFixed(2));
+      setStmtNotes('Security deposit refund to resident');
     } else if (presetType === 'Rent Refund') {
       const paidForDefaultMonth = payments
         .filter(
@@ -1485,6 +1501,21 @@ export function StudentsTab({
     setStmtUpfrontNotes(statementBilling.upfrontFeeNotes);
     setStmtDepositDisposition(statementBilling.depositDisposition);
     setStmtDepositDispositionDate(statementBilling.depositDispositionDate);
+    setStmtDepositDispositionNotes(statementBilling.depositDispositionNotes);
+    setEditingStmtUpfront(true);
+  };
+
+  const openStmtQuickDepositRefund = () => {
+    if (!liveStatementStudent || !statementBilling) return;
+    setStmtExpectedDeposit(String(statementBilling.expectedDeposit));
+    setStmtExpectedRegFee(String(statementBilling.expectedRegistrationFee));
+    setStmtUpfrontNotes(statementBilling.upfrontFeeNotes);
+    setStmtDepositDisposition('Refunded');
+    setStmtDepositDispositionDate(
+      statementBilling.depositDispositionDate ||
+        liveStatementStudent.checkOutDate ||
+        getTodayISO()
+    );
     setStmtDepositDispositionNotes(statementBilling.depositDispositionNotes);
     setEditingStmtUpfront(true);
   };
@@ -2318,6 +2349,7 @@ export function StudentsTab({
                               type="button"
                               onClick={() => {
                                 setEditingStmtUpfront(false);
+                                setStmtLedgerTypeFilter('All');
                                 setStatementStudent(st);
                               }}
                               className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-md cursor-pointer"
@@ -3467,6 +3499,11 @@ export function StudentsTab({
                               Usable by GIS (Non-Refundable)
                             </span>
                           )}
+                          {editDepositDisposition === 'Refunded' && (
+                            <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-slate-100 text-slate-800 border border-slate-300">
+                              Returned to Student
+                            </span>
+                          )}
                         </div>
                         <select
                           value={editDepositDisposition}
@@ -3492,7 +3529,9 @@ export function StudentsTab({
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                             <div>
                               <label className="block text-xs font-medium text-slate-700 mb-1">
-                                Disposition Date
+                                {editDepositDisposition === 'Refunded'
+                                  ? 'Refund Date'
+                                  : 'Forfeiture Date'}
                               </label>
                               <input
                                 type="date"
@@ -3507,7 +3546,7 @@ export function StudentsTab({
                               <label className="block text-xs font-medium text-slate-700 mb-1">
                                 {editDepositDisposition === 'Forfeited'
                                   ? 'Forfeiture Reason / Notes'
-                                  : 'Refund Reference / Notes'}
+                                  : 'Voucher / Bank Transfer Reference Note'}
                               </label>
                               <input
                                 type="text"
@@ -3519,7 +3558,7 @@ export function StudentsTab({
                                 placeholder={
                                   editDepositDisposition === 'Forfeited'
                                     ? 'e.g. Unreturned key, room damage, or early termination clause'
-                                    : 'e.g. Refunded via online transfer ref'
+                                    : 'e.g. PV-DEP-202611 / Maybank transfer ref'
                                 }
                                 className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                               />
@@ -4621,6 +4660,19 @@ export function StudentsTab({
                           <span>Edit Upfront Fees / Notes</span>
                         </button>
                       )}
+                      {!editingStmtUpfront &&
+                        statementBilling.depositPaid > 0.009 &&
+                        statementBilling.depositDisposition === 'Held' && (
+                          <button
+                            type="button"
+                            onClick={openStmtQuickDepositRefund}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-teal-900 bg-teal-50 border border-teal-200 hover:bg-teal-100 rounded-lg cursor-pointer whitespace-nowrap"
+                            title="Mark collected security deposit as Refunded to Student with refund date and voucher/bank transfer reference"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Refund Deposit</span>
+                          </button>
+                        )}
                       <button
                         type="button"
                         onClick={() =>
@@ -4845,7 +4897,9 @@ export function StudentsTab({
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                               <div>
                                 <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                                  Disposition Date
+                                  {stmtDepositDisposition === 'Refunded'
+                                    ? 'Refund Date'
+                                    : 'Forfeiture Date'}
                                 </label>
                                 <input
                                   type="date"
@@ -4858,7 +4912,9 @@ export function StudentsTab({
                               </div>
                               <div className="sm:col-span-2">
                                 <label className="block text-[11px] font-medium text-slate-600 mb-1">
-                                  Reason / Notes
+                                  {stmtDepositDisposition === 'Forfeited'
+                                    ? 'Forfeiture Reason / Notes'
+                                    : 'Voucher / Bank Transfer Reference Note'}
                                 </label>
                                 <input
                                   type="text"
@@ -4870,7 +4926,7 @@ export function StudentsTab({
                                   placeholder={
                                     stmtDepositDisposition === 'Forfeited'
                                       ? 'Reason deposit refund was rejected / forfeited'
-                                      : 'Refund reference or remarks'
+                                      : 'e.g. PV-DEP-202611 / Maybank transfer ref'
                                   }
                                   className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                                 />
@@ -5058,64 +5114,88 @@ export function StudentsTab({
                       Payment &amp; Fee Waiver Ledger
                     </h3>
                     <p className="text-xs text-slate-500 tabular-nums">
-                      {statementPayments.length}{' '}
-                      {statementPayments.length === 1 ? 'entry' : 'entries'} recorded
+                      {stmtLedgerTypeFilter === 'All'
+                        ? `${statementPayments.length} ${statementPayments.length === 1 ? 'entry' : 'entries'} recorded`
+                        : `${filteredStatementPayments.length} of ${statementPayments.length} ${statementPayments.length === 1 ? 'entry' : 'entries'} (${stmtLedgerTypeFilter})`}
                     </p>
                   </div>
-                  {!isViewer && (
-                    <div className="flex flex-wrap items-center gap-2 print:hidden">
-                      {isMasterAdmin &&
-                        liveStatementStudent.status === 'Checked-Out' &&
-                        statementBilling.outstandingBalance > 0.009 && (
+                  <div className="flex flex-wrap items-center gap-2 print:hidden">
+                    <select
+                      value={stmtLedgerTypeFilter}
+                      onChange={(e) =>
+                        setStmtLedgerTypeFilter(
+                          e.target.value as 'All' | PaymentType
+                        )
+                      }
+                      aria-label="Filter statement ledger by payment type"
+                      className="px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                    >
+                      <option value="All">All Entry Types</option>
+                      {PAYMENT_TYPES.map((t) => (
+                        <option key={t} value={t}>
+                          {t === 'Registration/Deposit'
+                            ? 'Registration/Deposit (Legacy)'
+                            : t}
+                        </option>
+                      ))}
+                    </select>
+                    {!isViewer && (
+                      <>
+                        {isMasterAdmin &&
+                          liveStatementStudent.status === 'Checked-Out' &&
+                          statementBilling.outstandingBalance > 0.009 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormError(null);
+                                setSettleBalanceConfirmOpen(true);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-lg cursor-pointer whitespace-nowrap"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Settle Full Historical Balance</span>
+                            </button>
+                          )}
+                        {isMasterAdmin && (
                           <button
                             type="button"
-                            onClick={() => {
-                              setFormError(null);
-                              setSettleBalanceConfirmOpen(true);
-                            }}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-emerald-900 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 rounded-lg cursor-pointer whitespace-nowrap"
+                            onClick={openBatchPastPaymentsModal}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
                           >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Settle Full Historical Balance</span>
+                            <CalendarCheck2 className="w-3.5 h-3.5" />
+                            <span>Batch Add Past Payments</span>
                           </button>
                         )}
-                      {isMasterAdmin && (
+                        {(liveStatementStudent.status === 'Checked-Out' ||
+                          statementBilling.totalRentPaid > 0.009) && (
+                          <button
+                            type="button"
+                            onClick={() => openStmtRecordPaymentModal('Rent Refund')}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-900 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg cursor-pointer whitespace-nowrap"
+                            title="Record a management-approved monthly rent refund with optional leniency waiver"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Issue Rent Refund</span>
+                          </button>
+                        )}
                         <button
                           type="button"
-                          onClick={openBatchPastPaymentsModal}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-900 bg-blue-50 border border-blue-200 hover:bg-blue-100 rounded-lg cursor-pointer whitespace-nowrap"
+                          onClick={() => openStmtRecordPaymentModal('Monthly Rent')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
                         >
-                          <CalendarCheck2 className="w-3.5 h-3.5" />
-                          <span>Batch Add Past Payments</span>
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Record / Backdate Payment</span>
                         </button>
-                      )}
-                      {(liveStatementStudent.status === 'Checked-Out' ||
-                        statementBilling.totalRentPaid > 0.009) && (
-                        <button
-                          type="button"
-                          onClick={() => openStmtRecordPaymentModal('Rent Refund')}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-900 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg cursor-pointer whitespace-nowrap"
-                          title="Record a management-approved monthly rent refund with optional leniency waiver"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Issue Rent Refund</span>
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => openStmtRecordPaymentModal('Monthly Rent')}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 rounded-lg cursor-pointer whitespace-nowrap"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                        <span>Record / Backdate Payment</span>
-                      </button>
-                    </div>
-                  )}
+                      </>
+                    )}
+                  </div>
                 </div>
 
-                {statementPayments.length === 0 ? (
+                {filteredStatementPayments.length === 0 ? (
                   <div className="p-6 text-center bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-500">
-                    No payment or fee waiver entries recorded for this resident yet.
+                    {statementPayments.length === 0
+                      ? 'No payment or fee waiver entries recorded for this resident yet.'
+                      : `No "${stmtLedgerTypeFilter}" entries recorded for this resident.`}
                   </div>
                 ) : (
                   <div className="border border-slate-200 rounded-lg overflow-x-auto">
@@ -5135,9 +5215,10 @@ export function StudentsTab({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {statementPayments.map((p) => {
+                        {filteredStatementPayments.map((p) => {
                           const physStatus = getPhysicalReceiptStatus(p);
                           const isRentRefund = p.paymentType === 'Rent Refund';
+                          const isDepositRefund = p.paymentType === 'Deposit Refund';
                           const waivedAmt = isRentRefund
                             ? getRentRefundWaivedAmount(p)
                             : 0;
@@ -5154,7 +5235,9 @@ export function StudentsTab({
                                   className={
                                     isRentRefund
                                       ? 'text-rose-700 font-medium'
-                                      : 'text-slate-500'
+                                      : isDepositRefund
+                                        ? 'text-teal-800 font-medium'
+                                        : 'text-slate-500'
                                   }
                                 >
                                   {p.paymentType}
@@ -5162,6 +5245,11 @@ export function StudentsTab({
                                 {isRentRefund && waivedAmt > 0.009 && (
                                   <span className="inline-block mt-0.5 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-50 text-amber-800 border border-amber-200">
                                     Leniency Waiver: {formatRM(waivedAmt)}
+                                  </span>
+                                )}
+                                {isDepositRefund && (
+                                  <span className="inline-block mt-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded bg-teal-50 text-teal-800 border border-teal-200">
+                                    Non-Rent Deposit Return
                                   </span>
                                 )}
                               </td>
@@ -5178,10 +5266,16 @@ export function StudentsTab({
                               </td>
                               <td
                                 className={`py-2.5 px-3 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${
-                                  isRentRefund ? 'text-rose-700' : 'text-slate-900'
+                                  isRentRefund
+                                    ? 'text-rose-700'
+                                    : isDepositRefund
+                                      ? 'text-teal-800'
+                                      : 'text-slate-900'
                                 }`}
                               >
-                                {isRentRefund ? `-${formatRM(p.amount)}` : formatRM(p.amount)}
+                                {isRentRefund || isDepositRefund
+                                  ? `-${formatRM(p.amount)}`
+                                  : formatRM(p.amount)}
                               </td>
                               <td className="py-2.5 px-3 whitespace-nowrap">
                                 <StatusBadge status={physStatus} />
@@ -5724,7 +5818,8 @@ export function StudentsTab({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      {stmtPaymentType === 'Rent Refund'
+                      {stmtPaymentType === 'Rent Refund' ||
+                      stmtPaymentType === 'Deposit Refund'
                         ? 'Refunded Month (YYYY-MM)'
                         : 'Billing Month'}
                     </label>
@@ -5784,6 +5879,15 @@ export function StudentsTab({
                                 ? statementBilling.registrationFeePending
                                 : statementBilling.expectedRegistrationFee;
                             setStmtAmount(amt.toFixed(2));
+                          } else if (next === 'Deposit Refund') {
+                            const amt =
+                              statementBilling.depositPaid > 0
+                                ? statementBilling.depositPaid
+                                : statementBilling.expectedDeposit;
+                            setStmtAmount(amt.toFixed(2));
+                            if (!stmtNotes.trim()) {
+                              setStmtNotes('Security deposit refund to resident');
+                            }
                           } else if (next === 'Rent Refund') {
                             const paidForMonth = payments
                               .filter(
@@ -5853,10 +5957,22 @@ export function StudentsTab({
                   </div>
                 )}
 
+                {stmtPaymentType === 'Deposit Refund' && (
+                  <div className="p-3 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-950">
+                    <p className="font-semibold">
+                      Security Deposit Refund (Non-Rent Outflow)
+                    </p>
+                    <p className="text-teal-900 mt-0.5">
+                      Deposit Refund records the return of security deposit and does not alter Monthly Rent Paid or Rent Outstanding Balance.
+                    </p>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      {stmtPaymentType === 'Rent Refund'
+                      {stmtPaymentType === 'Rent Refund' ||
+                      stmtPaymentType === 'Deposit Refund'
                         ? 'Refund Amount (RM)'
                         : 'Amount (RM)'}
                     </label>
@@ -5915,7 +6031,8 @@ export function StudentsTab({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      {stmtPaymentType === 'Rent Refund'
+                      {stmtPaymentType === 'Rent Refund' ||
+                      stmtPaymentType === 'Deposit Refund'
                         ? 'Refund Method'
                         : 'Payment Method'}
                     </label>
@@ -5933,7 +6050,8 @@ export function StudentsTab({
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      {stmtPaymentType === 'Rent Refund'
+                      {stmtPaymentType === 'Rent Refund' ||
+                      stmtPaymentType === 'Deposit Refund'
                         ? 'Refund Date'
                         : 'Transaction Date'}
                     </label>
@@ -5949,7 +6067,8 @@ export function StudentsTab({
 
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    {stmtPaymentType === 'Rent Refund'
+                    {stmtPaymentType === 'Rent Refund' ||
+                    stmtPaymentType === 'Deposit Refund'
                       ? 'Voucher / Reference No.'
                       : 'Bank Reference No.'}
                   </label>
@@ -5961,7 +6080,9 @@ export function StudentsTab({
                     placeholder={
                       stmtPaymentType === 'Rent Refund'
                         ? 'e.g. PV-REFUND-2026-01'
-                        : 'e.g. DUITNOW-20260915-01'
+                        : stmtPaymentType === 'Deposit Refund'
+                          ? 'e.g. PV-DEP-2026-01'
+                          : 'e.g. DUITNOW-20260915-01'
                     }
                     className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />
@@ -6002,7 +6123,9 @@ export function StudentsTab({
                   <label className="block text-xs font-medium text-slate-700 mb-1">
                     {stmtPaymentType === 'Rent Refund'
                       ? 'Management Approval Notes'
-                      : 'Remarks / Notes'}
+                      : stmtPaymentType === 'Deposit Refund'
+                        ? 'Refund / Voucher Notes'
+                        : 'Remarks / Notes'}
                   </label>
                   <input
                     type="text"
@@ -6012,7 +6135,9 @@ export function StudentsTab({
                     placeholder={
                       stmtPaymentType === 'Rent Refund'
                         ? 'e.g. Approved by Campus Director — early checkout mid-month refund'
-                        : 'Optional backdated payment note'
+                        : stmtPaymentType === 'Deposit Refund'
+                          ? 'e.g. Security deposit refunded via bank transfer upon check-out'
+                          : 'Optional backdated payment note'
                     }
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />

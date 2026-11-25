@@ -533,6 +533,9 @@ export function PaymentsTab({
       );
       return String(remaining);
     }
+    if (targetType === 'Deposit Refund') {
+      return billing.depositPaid > 0 ? String(billing.depositPaid) : '';
+    }
     return null;
   };
 
@@ -1066,6 +1069,7 @@ export function PaymentsTab({
                   const recordedBy = getPaymentRecordedBy(p);
                   const isWaiver = p.paymentType === 'Rebate / Fee Waiver';
                   const isRentRefund = p.paymentType === 'Rent Refund';
+                  const isDepositRefund = p.paymentType === 'Deposit Refund';
                   const rentRefundWaived = isRentRefund
                     ? getRentRefundWaivedAmount(p)
                     : 0;
@@ -1099,13 +1103,15 @@ export function PaymentsTab({
                           className={`text-xs whitespace-nowrap ${
                             isRentRefund
                               ? 'text-rose-700 font-semibold'
-                              : isWaiver
-                                ? 'text-indigo-800 font-medium'
-                                : p.paymentType === 'Deposit'
-                                  ? 'text-blue-800 font-medium'
-                                  : p.paymentType === 'Registration Fee'
-                                    ? 'text-teal-800 font-medium'
-                                    : 'text-slate-500'
+                              : isDepositRefund
+                                ? 'text-teal-800 font-semibold'
+                                : isWaiver
+                                  ? 'text-indigo-800 font-medium'
+                                  : p.paymentType === 'Deposit'
+                                    ? 'text-blue-800 font-medium'
+                                    : p.paymentType === 'Registration Fee'
+                                      ? 'text-teal-800 font-medium'
+                                      : 'text-slate-500'
                           }`}
                         >
                           {p.paymentType}
@@ -1113,6 +1119,11 @@ export function PaymentsTab({
                         {isRentRefund && rentRefundWaived > 0 && (
                           <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-[10px] font-medium text-rose-800 whitespace-nowrap">
                             Leniency Waiver: {formatRM(rentRefundWaived)}
+                          </span>
+                        )}
+                        {isDepositRefund && (
+                          <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-teal-50 border border-teal-200 text-[10px] font-medium text-teal-800 whitespace-nowrap">
+                            Non-Rent
                           </span>
                         )}
                       </td>
@@ -1126,10 +1137,16 @@ export function PaymentsTab({
                       </td>
                       <td
                         className={`py-3 px-4 text-right font-mono text-xs font-semibold tabular-nums whitespace-nowrap ${
-                          isRentRefund ? 'text-rose-700' : 'text-slate-900'
+                          isRentRefund
+                            ? 'text-rose-700'
+                            : isDepositRefund
+                              ? 'text-teal-800'
+                              : 'text-slate-900'
                         }`}
                       >
-                        {isRentRefund ? `-${formatRM(p.amount)}` : formatRM(p.amount)}
+                        {isRentRefund || isDepositRefund
+                          ? `-${formatRM(p.amount)}`
+                          : formatRM(p.amount)}
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex flex-col items-start gap-1">
@@ -1638,7 +1655,8 @@ export function PaymentsTab({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        {paymentType === 'Rent Refund'
+                        {paymentType === 'Rent Refund' ||
+                        paymentType === 'Deposit Refund'
                           ? 'Refunded Month (YYYY-MM)'
                           : 'Billing Month'}
                       </label>
@@ -1704,10 +1722,17 @@ export function PaymentsTab({
                     </div>
                   )}
 
+                  {paymentType === 'Deposit Refund' && (
+                    <div className="p-2.5 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-900">
+                      Deposit Refund records the return of security deposit and does not alter Monthly Rent Paid or Rent Outstanding Balance.
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        {paymentType === 'Rent Refund'
+                        {paymentType === 'Rent Refund' ||
+                        paymentType === 'Deposit Refund'
                           ? 'Refund Amount (RM)'
                           : 'Amount (RM)'}
                       </label>
@@ -1793,7 +1818,8 @@ export function PaymentsTab({
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        {paymentType === 'Rent Refund'
+                        {paymentType === 'Rent Refund' ||
+                        paymentType === 'Deposit Refund'
                           ? 'Refund Date'
                           : 'Transaction Date'}
                       </label>
@@ -1809,7 +1835,8 @@ export function PaymentsTab({
 
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      {paymentType === 'Rent Refund'
+                      {paymentType === 'Rent Refund' ||
+                      paymentType === 'Deposit Refund'
                         ? 'Voucher / Reference No.'
                         : 'Bank Reference No.'}
                     </label>
@@ -1821,7 +1848,9 @@ export function PaymentsTab({
                       placeholder={
                         paymentType === 'Rent Refund'
                           ? 'e.g. PV-REFUND-202611'
-                          : 'e.g. DUITNOW-20261118-01'
+                          : paymentType === 'Deposit Refund'
+                            ? 'e.g. PV-DEP-202611'
+                            : 'e.g. DUITNOW-20261118-01'
                       }
                       className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     />
@@ -1831,7 +1860,9 @@ export function PaymentsTab({
                     <label className="block text-xs font-medium text-slate-700 mb-1">
                       {paymentType === 'Rent Refund'
                         ? 'Management Approval Notes'
-                        : 'Remarks / Notes'}
+                        : paymentType === 'Deposit Refund'
+                          ? 'Refund / Voucher Notes'
+                          : 'Remarks / Notes'}
                     </label>
                     <input
                       type="text"
@@ -1841,7 +1872,9 @@ export function PaymentsTab({
                       placeholder={
                         paymentType === 'Rent Refund'
                           ? 'e.g. Early checkout pro-rata refund approved by Management'
-                          : 'Optional receipt notes or waiver justification'
+                          : paymentType === 'Deposit Refund'
+                            ? 'e.g. Security deposit refunded via bank transfer upon check-out'
+                            : 'Optional receipt notes or waiver justification'
                       }
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     />
@@ -1866,7 +1899,9 @@ export function PaymentsTab({
                       ? 'Recording...'
                       : paymentType === 'Rent Refund'
                         ? 'Record Rent Refund'
-                        : 'Issue Receipt & Save'}
+                        : paymentType === 'Deposit Refund'
+                          ? 'Record Deposit Refund'
+                          : 'Issue Receipt & Save'}
                   </button>
                 </div>
               </form>
@@ -1914,7 +1949,8 @@ export function PaymentsTab({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      {paymentType === 'Rent Refund'
+                      {paymentType === 'Rent Refund' ||
+                      paymentType === 'Deposit Refund'
                         ? 'Refunded Month (YYYY-MM)'
                         : 'Billing Month'}
                     </label>
@@ -1971,10 +2007,17 @@ export function PaymentsTab({
                   </div>
                 )}
 
+                {paymentType === 'Deposit Refund' && (
+                  <div className="p-2.5 rounded-lg bg-teal-50 border border-teal-200 text-xs text-teal-900">
+                    Deposit Refund records the return of security deposit and does not alter Monthly Rent Paid or Rent Outstanding Balance.
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      {paymentType === 'Rent Refund'
+                      {paymentType === 'Rent Refund' ||
+                      paymentType === 'Deposit Refund'
                         ? 'Refund Amount (RM)'
                         : 'Amount (RM)'}
                     </label>
@@ -2026,7 +2069,8 @@ export function PaymentsTab({
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      {paymentType === 'Rent Refund'
+                      {paymentType === 'Rent Refund' ||
+                      paymentType === 'Deposit Refund'
                         ? 'Refund Date'
                         : 'Transaction Date'}
                     </label>
@@ -2042,7 +2086,8 @@ export function PaymentsTab({
 
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    {paymentType === 'Rent Refund'
+                    {paymentType === 'Rent Refund' ||
+                    paymentType === 'Deposit Refund'
                       ? 'Voucher / Reference No.'
                       : 'Bank Reference No.'}
                   </label>
@@ -2059,7 +2104,9 @@ export function PaymentsTab({
                   <label className="block text-xs font-medium text-slate-700 mb-1">
                     {paymentType === 'Rent Refund'
                       ? 'Management Approval Notes'
-                      : 'Notes'}
+                      : paymentType === 'Deposit Refund'
+                        ? 'Refund / Voucher Notes'
+                        : 'Notes'}
                   </label>
                   <input
                     type="text"
@@ -2383,7 +2430,9 @@ export function PaymentsTab({
                         ? 'Official Waiver Credit Note'
                         : printingPayment.paymentType === 'Rent Refund'
                           ? 'Official Rent Refund Voucher'
-                          : 'Official Payment Receipt'}
+                          : printingPayment.paymentType === 'Deposit Refund'
+                            ? 'Official Deposit Refund Voucher'
+                            : 'Official Payment Receipt'}
                     </p>
                     <p className="font-mono text-sm font-bold text-slate-900 mt-1">
                       {getPaymentReceiptNo(printingPayment)}
@@ -2491,6 +2540,10 @@ export function PaymentsTab({
                           ? ` · Leniency Waiver of ${formatRM(getRentRefundWaivedAmount(printingPayment))} applied`
                           : ''}
                       </span>
+                    ) : printingPayment.paymentType === 'Deposit Refund' ? (
+                      <span>
+                        Security deposit refund disbursed ({printingPayment.paymentMethod}) · Non-rent deposit return
+                      </span>
                     ) : isCashPaymentType(printingPayment.paymentType) ? (
                       <span>
                         Cash / Bank Settlement Amount ({printingPayment.paymentMethod})
@@ -2505,16 +2558,21 @@ export function PaymentsTab({
                     <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">
                       {printingPayment.paymentType === 'Rent Refund'
                         ? 'Total Cash Refunded'
-                        : 'Total Cash Received'}
+                        : printingPayment.paymentType === 'Deposit Refund'
+                          ? 'Total Deposit Refunded'
+                          : 'Total Cash Received'}
                     </p>
                     <p
                       className={`font-mono text-xl font-bold tabular-nums ${
                         printingPayment.paymentType === 'Rent Refund'
                           ? 'text-rose-700'
-                          : 'text-slate-900'
+                          : printingPayment.paymentType === 'Deposit Refund'
+                            ? 'text-teal-800'
+                            : 'text-slate-900'
                       }`}
                     >
-                      {printingPayment.paymentType === 'Rent Refund'
+                      {printingPayment.paymentType === 'Rent Refund' ||
+                      printingPayment.paymentType === 'Deposit Refund'
                         ? printingPayment.status === 'Paid'
                           ? `-${formatRM(printingPayment.amount)}`
                           : formatRM(0)

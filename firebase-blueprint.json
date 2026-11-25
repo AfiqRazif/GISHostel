@@ -181,6 +181,22 @@
           "type": "number",
           "description": "Hostel security deposit paid in RM"
         },
+        "depositDisposition": {
+          "type": "string",
+          "enum": ["Held", "Refunded", "Forfeited"],
+          "maxLength": 24,
+          "description": "Disposition status of collected deposit (Held refundable liability, Refunded to student, or Forfeited usable by GIS)"
+        },
+        "depositDispositionDate": {
+          "type": "string",
+          "maxLength": 10,
+          "description": "Optional YYYY-MM-DD date when deposit was forfeited or refunded"
+        },
+        "depositDispositionNotes": {
+          "type": "string",
+          "maxLength": 240,
+          "description": "Optional reason or remarks for deposit forfeiture or refund"
+        },
         "expectedRegistrationFee": {
           "type": "number",
           "description": "Expected hostel registration fee in RM (defaults to 50 for Students, 0 for Staff/Event Guests)"
@@ -193,6 +209,10 @@
           "type": "string",
           "maxLength": 240,
           "description": "Optional notes for deposit/registration fee waivers, installments, or remarks"
+        },
+        "rentRefundWaiver": {
+          "type": "number",
+          "description": "Total management-approved leniency waiver in RM linked to Rent Refunds"
         },
         "standardRoomRate": {
           "type": "number",
@@ -323,6 +343,7 @@
             "Registration Fee",
             "Utility/Penalty",
             "Rebate / Fee Waiver",
+            "Rent Refund",
             "Deposit Refund",
             "Registration/Deposit"
           ],
@@ -332,6 +353,14 @@
         "amount": {
           "type": "number",
           "description": "Amount in RM"
+        },
+        "waivedAmount": {
+          "type": "number",
+          "description": "Expected rent waived under management leniency for Rent Refund transactions in RM"
+        },
+        "applyLeniencyWaiver": {
+          "type": "boolean",
+          "description": "Whether a Rent Refund reduces the student's expected rent so they are not flagged as overdue"
         },
         "paymentMethod": {
           "type": "string",

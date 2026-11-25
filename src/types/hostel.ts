@@ -23,12 +23,14 @@ export type RebateReason =
   | 'Other';
 export type ProgramType = 'Diploma' | 'SKM' | 'DiFFER' | 'Other';
 export type StudentStatus = 'Active' | 'Checked-Out' | 'Suspended';
+export type DepositDisposition = 'Held' | 'Refunded' | 'Forfeited';
 export type PaymentType =
   | 'Monthly Rent'
   | 'Deposit'
   | 'Registration Fee'
   | 'Utility/Penalty'
   | 'Rebate / Fee Waiver'
+  | 'Rent Refund'
   | 'Deposit Refund'
   | 'Registration/Deposit';
 export type PaymentMethod =
@@ -94,12 +96,18 @@ export const STUDENT_STATUSES: StudentStatus[] = [
   'Checked-Out',
   'Suspended',
 ];
+export const DEPOSIT_DISPOSITIONS: DepositDisposition[] = [
+  'Held',
+  'Forfeited',
+  'Refunded',
+];
 export const PAYMENT_TYPES: PaymentType[] = [
   'Monthly Rent',
   'Deposit',
   'Registration Fee',
   'Utility/Penalty',
   'Rebate / Fee Waiver',
+  'Rent Refund',
   'Deposit Refund',
   'Registration/Deposit',
 ];
@@ -203,9 +211,13 @@ export interface Student {
   checkOutDate: string | null;
   expectedDeposit?: number;
   depositPaid: number;
+  depositDisposition?: DepositDisposition;
+  depositDispositionDate?: string;
+  depositDispositionNotes?: string;
   expectedRegistrationFee?: number;
   registrationFeePaid?: number;
   upfrontFeeNotes?: string;
+  rentRefundWaiver?: number;
   standardRoomRate?: number;
   monthlyRebate?: number;
   rebateReason?: string;
@@ -229,6 +241,8 @@ export interface Payment {
   billingMonth: string;
   paymentType: PaymentType | string;
   amount: number;
+  waivedAmount?: number;
+  applyLeniencyWaiver?: boolean;
   paymentMethod: PaymentMethod | string;
   bankRefNo?: string;
   referenceNo?: string;
@@ -282,12 +296,17 @@ export interface ResidentBillingSummary {
   monthsBilled: number;
   totalExpectedRent: number;
   totalRentPaid: number;
+  totalRentRefunded: number;
+  totalRentRefundWaived: number;
   totalRentCredited: number;
   outstandingBalance: number;
   expectedDeposit: number;
   depositPaid: number;
   depositPending: number;
   depositStatus: UpfrontFeeStatus;
+  depositDisposition: DepositDisposition;
+  depositDispositionDate: string;
+  depositDispositionNotes: string;
   expectedRegistrationFee: number;
   registrationFeePaid: number;
   registrationFeePending: number;
@@ -295,6 +314,25 @@ export interface ResidentBillingSummary {
   upfrontFeeNotes: string;
   hasPendingUpfrontFee: boolean;
   segments: SegmentBillingBreakdown[];
+}
+
+export function resolveDepositDisposition(
+  disposition: string | null | undefined
+): DepositDisposition {
+  if (disposition === 'Forfeited' || disposition === 'Refunded') {
+    return disposition;
+  }
+  return 'Held';
+}
+
+export function getRentRefundWaivedAmount(p: Pick<Payment, 'amount' | 'waivedAmount' | 'applyLeniencyWaiver'>): number {
+  if (typeof p.waivedAmount === 'number' && !Number.isNaN(p.waivedAmount)) {
+    return Math.max(0, Math.round(p.waivedAmount * 100) / 100);
+  }
+  if (p.applyLeniencyWaiver) {
+    return Math.max(0, Math.round((Number(p.amount) || 0) * 100) / 100);
+  }
+  return 0;
 }
 
 export function getDefaultUpfrontFees(occupantType: OccupantType): {
@@ -823,7 +861,33 @@ export function calculateResidentBilling(
     }
   }
 
-  const totalRentPaid =
+  const rentRefundPayments = payments.filter(
+    (p) =>
+      p.studentId === student.studentId &&
+      p.paymentType === 'Rent Refund' &&
+      isSettledPaymentStatus(p.status)
+  );
+  const totalRentRefunded =
+    Math.round(
+      rentRefundPayments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) *
+        100
+    ) / 100;
+  const totalRentRefundWaived =
+    rentRefundPayments.length > 0
+      ? Math.round(
+          rentRefundPayments.reduce(
+            (sum, p) => sum + getRentRefundWaivedAmount(p),
+            0
+          ) * 100
+        ) / 100
+      : Math.max(0, Math.round((student.rentRefundWaiver || 0) * 100) / 100);
+
+  const adjustedExpectedRent = Math.max(
+    0,
+    Math.round((totalExpectedRent - totalRentRefundWaived) * 100) / 100
+  );
+
+  const grossRentPaid =
     Math.round(
       payments
         .filter(
@@ -835,21 +899,31 @@ export function calculateResidentBilling(
         .reduce((sum, p) => sum + p.amount, 0) * 100
     ) / 100;
 
-  const totalRentCredited =
+  const totalRentPaid = Math.max(
+    0,
+    Math.round((grossRentPaid - totalRentRefunded) * 100) / 100
+  );
+
+  const rebateWaiversTotal =
     Math.round(
       payments
         .filter(
           (p) =>
             p.studentId === student.studentId &&
-            isRentCreditType(p.paymentType) &&
+            p.paymentType === 'Rebate / Fee Waiver' &&
             isSettledPaymentStatus(p.status)
         )
         .reduce((sum, p) => sum + p.amount, 0) * 100
     ) / 100;
 
+  const totalRentCredited = Math.max(
+    0,
+    Math.round((totalRentPaid + rebateWaiversTotal) * 100) / 100
+  );
+
   const outstandingBalance = Math.max(
     0,
-    Math.round((totalExpectedRent - totalRentCredited) * 100) / 100
+    Math.round((adjustedExpectedRent - totalRentCredited) * 100) / 100
   );
 
   // Separate Deposit & Hostel Registration Fee tracking (strictly isolated from Monthly Rent)
@@ -886,6 +960,9 @@ export function calculateResidentBilling(
     depositPaid,
     depositWaivedAmount
   );
+  const depositDisposition = resolveDepositDisposition(student.depositDisposition);
+  const depositDispositionDate = (student.depositDispositionDate || '').trim();
+  const depositDispositionNotes = (student.depositDispositionNotes || '').trim();
 
   const studentRegFeePayments = payments.filter(
     (p) => p.studentId === student.studentId && p.paymentType === 'Registration Fee'
@@ -925,14 +1002,19 @@ export function calculateResidentBilling(
     firstMonthCharge,
     firstMonthNote,
     monthsBilled,
-    totalExpectedRent,
+    totalExpectedRent: adjustedExpectedRent,
     totalRentPaid,
+    totalRentRefunded,
+    totalRentRefundWaived,
     totalRentCredited,
     outstandingBalance,
     expectedDeposit,
     depositPaid,
     depositPending: depositResolved.pending,
     depositStatus: depositResolved.status,
+    depositDisposition,
+    depositDispositionDate,
+    depositDispositionNotes,
     expectedRegistrationFee,
     registrationFeePaid,
     registrationFeePending: regFeeResolved.pending,
@@ -994,6 +1076,31 @@ export function calculateMonthInstallmentStatus(
     monthTargetCharge = summary.firstMonthCharge;
   }
 
+  const monthRentRefunds = payments.filter(
+    (p) =>
+      p.paymentId !== excludePaymentId &&
+      p.studentId === student.studentId &&
+      p.billingMonth === billingMonth &&
+      p.paymentType === 'Rent Refund' &&
+      isSettledPaymentStatus(p.status)
+  );
+  const monthRefunded =
+    Math.round(
+      monthRentRefunds.reduce((sum, p) => sum + (Number(p.amount) || 0), 0) *
+        100
+    ) / 100;
+  const monthWaived =
+    Math.round(
+      monthRentRefunds.reduce(
+        (sum, p) => sum + getRentRefundWaivedAmount(p),
+        0
+      ) * 100
+    ) / 100;
+  const adjustedMonthTargetCharge = Math.max(
+    0,
+    Math.round((monthTargetCharge - monthWaived) * 100) / 100
+  );
+
   const settledForMonth = payments.filter(
     (p) =>
       p.paymentId !== excludePaymentId &&
@@ -1003,13 +1110,17 @@ export function calculateMonthInstallmentStatus(
       isSettledPaymentStatus(p.status)
   );
 
-  const alreadyCreditedForMonth =
+  const grossCreditedForMonth =
     Math.round(settledForMonth.reduce((sum, p) => sum + p.amount, 0) * 100) /
     100;
+  const alreadyCreditedForMonth = Math.max(
+    0,
+    Math.round((grossCreditedForMonth - monthRefunded) * 100) / 100
+  );
 
   const remainingBeforeEntry = Math.max(
     0,
-    Math.round((monthTargetCharge - alreadyCreditedForMonth) * 100) / 100
+    Math.round((adjustedMonthTargetCharge - alreadyCreditedForMonth) * 100) / 100
   );
   const cleanAmount = Math.max(0, Number(currentEntryAmount) || 0);
   const remainingAfterEntry = Math.max(
@@ -1018,7 +1129,7 @@ export function calculateMonthInstallmentStatus(
   );
 
   return {
-    monthTargetCharge,
+    monthTargetCharge: adjustedMonthTargetCharge,
     alreadyCreditedForMonth,
     remainingBeforeEntry,
     remainingAfterEntry,

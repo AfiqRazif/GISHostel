@@ -26,6 +26,7 @@ import {
   getPaymentReceiptNo,
   getPaymentRecordedBy,
   getPhysicalReceiptStatus,
+  getRentRefundWaivedAmount,
   getTodayISO,
   HOSTEL_LOCATIONS,
   HostelLocation,
@@ -137,6 +138,7 @@ export function PaymentsTab({
   const [paymentDate, setPaymentDate] = useState(getTodayISO());
   const [status, setStatus] = useState<PaymentStatus>('Paid');
   const [notes, setNotes] = useState('');
+  const [applyLeniencyWaiver, setApplyLeniencyWaiver] = useState(true);
   const [proofImageData, setProofImageData] = useState<string | null>(null);
   const [scanningProof, setScanningProof] = useState(false);
   const [aiScanInfo, setAiScanInfo] = useState<{
@@ -246,6 +248,7 @@ export function PaymentsTab({
     setPaymentDate(getTodayISO());
     setStatus('Paid');
     setNotes('Arrears settlement');
+    setApplyLeniencyWaiver(true);
     setProofImageData(null);
     setAiScanInfo(null);
     setShowAddModal(true);
@@ -316,43 +319,100 @@ export function PaymentsTab({
   }, [activeModalStudent, paymentType, payments, billingMonth, amount, editingPayment]);
 
   const totals = useMemo(() => {
-    const monthlyRentCollected = filteredPayments
-      .filter((p) => p.status === 'Paid' && p.paymentType === 'Monthly Rent')
-      .reduce((sum, p) => sum + p.amount, 0);
-    const depositsCollected = filteredPayments
-      .filter(
-        (p) =>
-          p.status === 'Paid' &&
-          (p.paymentType === 'Deposit' ||
-            p.paymentType === 'Registration/Deposit')
+    const round2 = (n: number) => Math.round((n || 0) * 100) / 100;
+    const grossRentCollected = round2(
+      filteredPayments
+        .filter((p) => p.status === 'Paid' && p.paymentType === 'Monthly Rent')
+        .reduce((sum, p) => sum + p.amount, 0)
+    );
+    const rentRefundsTotal = round2(
+      filteredPayments
+        .filter((p) => p.status === 'Paid' && p.paymentType === 'Rent Refund')
+        .reduce((sum, p) => sum + p.amount, 0)
+    );
+    const monthlyRentCollected = Math.max(
+      0,
+      round2(grossRentCollected - rentRefundsTotal)
+    );
+
+    const q = searchQuery.trim().toLowerCase();
+    const scopedStudents = students
+      .filter((s) =>
+        locationFilter === 'All' ? true : s.hostelLocation === locationFilter
       )
-      .reduce((sum, p) => sum + p.amount, 0);
-    const depositRefunds = filteredPayments
-      .filter((p) => p.status === 'Paid' && p.paymentType === 'Deposit Refund')
-      .reduce((sum, p) => sum + p.amount, 0);
-    const depositsHeld = Math.max(0, depositsCollected - depositRefunds);
-    const registrationFeesCollected = filteredPayments
-      .filter((p) => p.status === 'Paid' && p.paymentType === 'Registration Fee')
-      .reduce((sum, p) => sum + p.amount, 0);
-    const waiversGranted = filteredPayments
-      .filter(
-        (p) =>
-          p.paymentType === 'Rebate / Fee Waiver' &&
-          (p.status === 'Paid' || p.status === 'Waived')
-      )
-      .reduce((sum, p) => sum + p.amount, 0);
-    const pendingOrOverdue = filteredPayments
-      .filter((p) => p.status === 'Pending' || p.status === 'Overdue')
-      .reduce((sum, p) => sum + p.amount, 0);
+      .filter((s) => {
+        if (!q) return true;
+        return (
+          s.fullName.toLowerCase().includes(q) ||
+          s.studentId.toLowerCase().includes(q) ||
+          (s.assignedRoomId || '').toLowerCase().includes(q)
+        );
+      });
+
+    let refundableDepositsHeld = 0;
+    let forfeitedDeposits = 0;
+    let refundedDeposits = 0;
+
+    for (const s of scopedStudents) {
+      const billing =
+        studentBillingMap.get(s.studentId) ||
+        calculateResidentBilling(s, payments);
+      if (billing.depositDisposition === 'Forfeited') {
+        forfeitedDeposits += billing.depositPaid;
+      } else if (billing.depositDisposition === 'Refunded') {
+        refundedDeposits += billing.depositPaid;
+      } else {
+        refundableDepositsHeld += billing.depositPaid;
+      }
+    }
+
+    refundableDepositsHeld = round2(refundableDepositsHeld);
+    forfeitedDeposits = round2(forfeitedDeposits);
+    refundedDeposits = round2(refundedDeposits);
+
+    const registrationFeesCollected = round2(
+      filteredPayments
+        .filter((p) => p.status === 'Paid' && p.paymentType === 'Registration Fee')
+        .reduce((sum, p) => sum + p.amount, 0)
+    );
+    const waiversGranted = round2(
+      filteredPayments
+        .filter(
+          (p) =>
+            p.paymentType === 'Rebate / Fee Waiver' &&
+            (p.status === 'Paid' || p.status === 'Waived')
+        )
+        .reduce((sum, p) => sum + p.amount, 0)
+    );
+    const pendingOrOverdue = round2(
+      filteredPayments
+        .filter((p) => p.status === 'Pending' || p.status === 'Overdue')
+        .reduce((sum, p) => sum + p.amount, 0)
+    );
+    const nonRefundableGisFunds = round2(
+      registrationFeesCollected + forfeitedDeposits
+    );
+
     return {
+      grossRentCollected,
+      rentRefundsTotal,
       monthlyRentCollected,
-      depositsHeld,
-      depositRefunds,
+      refundableDepositsHeld,
+      forfeitedDeposits,
+      refundedDeposits,
       registrationFeesCollected,
+      nonRefundableGisFunds,
       waiversGranted,
       pendingOrOverdue,
     };
-  }, [filteredPayments]);
+  }, [
+    filteredPayments,
+    students,
+    studentBillingMap,
+    payments,
+    locationFilter,
+    searchQuery,
+  ]);
 
   const handleOpenAddModal = () => {
     setFormError(null);
@@ -367,6 +427,7 @@ export function PaymentsTab({
     setPaymentDate(getTodayISO());
     setStatus('Paid');
     setNotes('');
+    setApplyLeniencyWaiver(true);
     setProofImageData(null);
     setAiScanInfo(null);
     setShowAddModal(true);
@@ -451,7 +512,7 @@ export function PaymentsTab({
   ): string | null => {
     const billing =
       studentBillingMap.get(st.studentId) || calculateResidentBilling(st, payments);
-    if (targetType === 'Monthly Rent') {
+    if (targetType === 'Monthly Rent' || targetType === 'Rent Refund') {
       return billing.effectiveMonthlyFee > 0
         ? String(billing.effectiveMonthlyFee)
         : '';
@@ -497,6 +558,9 @@ export function PaymentsTab({
 
   const handlePaymentTypeChange = (nextType: PaymentType) => {
     setPaymentType(nextType);
+    if (nextType === 'Rent Refund') {
+      setApplyLeniencyWaiver(true);
+    }
     const st = students.find((s) => s.studentId === selectedStudentId);
     if (nextType === 'Rebate / Fee Waiver') {
       setPaymentMethod('Internal Adjustment');
@@ -530,12 +594,17 @@ export function PaymentsTab({
     setSubmitting(true);
     setFormError(null);
     try {
+      const parsedAmount = Number(amount);
       const result = await createPayment(
         {
           student: st,
           billingMonth,
           paymentType,
-          amount: Number(amount),
+          amount: parsedAmount,
+          waivedAmount:
+            paymentType === 'Rent Refund' && applyLeniencyWaiver ? parsedAmount : 0,
+          applyLeniencyWaiver:
+            paymentType === 'Rent Refund' ? applyLeniencyWaiver : false,
           paymentMethod,
           bankRefNo,
           paymentDate,
@@ -548,7 +617,7 @@ export function PaymentsTab({
       );
       setShowAddModal(false);
       setFeedbackBanner(
-        `Recorded ${result.receiptNo} · ${formatRM(Number(amount))} (${paymentType}) for ${st.fullName}.`
+        `Recorded ${result.receiptNo} · ${formatRM(parsedAmount)} (${paymentType}) for ${st.fullName}.`
       );
     } catch (err) {
       setFormError(
@@ -579,6 +648,11 @@ export function PaymentsTab({
     setPaymentDate(p.paymentDate);
     setStatus(p.status);
     setNotes(p.notes);
+    setApplyLeniencyWaiver(
+      typeof p.applyLeniencyWaiver === 'boolean'
+        ? p.applyLeniencyWaiver
+        : getRentRefundWaivedAmount(p) > 0
+    );
     setProofImageData(p.proofImageData ?? null);
     setEditPhysStatus(getPhysicalReceiptStatus(p));
     setEditPhysNo(p.physicalReceiptNo || '');
@@ -590,12 +664,17 @@ export function PaymentsTab({
     setSubmitting(true);
     setFormError(null);
     try {
+      const parsedAmount = Number(amount);
       await updatePayment(
         editingPayment.paymentId,
         {
           billingMonth,
           paymentType,
-          amount: Number(amount),
+          amount: parsedAmount,
+          waivedAmount:
+            paymentType === 'Rent Refund' && applyLeniencyWaiver ? parsedAmount : 0,
+          applyLeniencyWaiver:
+            paymentType === 'Rent Refund' ? applyLeniencyWaiver : false,
           paymentMethod,
           bankRefNo,
           paymentDate,
@@ -676,6 +755,14 @@ export function PaymentsTab({
             ? p.paymentType
             : 'Monthly Rent') as PaymentType,
           amount: p.amount,
+          waivedAmount:
+            p.paymentType === 'Rent Refund' ? getRentRefundWaivedAmount(p) : 0,
+          applyLeniencyWaiver:
+            p.paymentType === 'Rent Refund'
+              ? typeof p.applyLeniencyWaiver === 'boolean'
+                ? p.applyLeniencyWaiver
+                : getRentRefundWaivedAmount(p) > 0
+              : false,
           paymentMethod: (PAYMENT_METHODS.includes(p.paymentMethod as PaymentMethod)
             ? p.paymentMethod
             : 'Online Transfer') as PaymentMethod,
@@ -714,29 +801,18 @@ export function PaymentsTab({
         )}
 
         {/* Summary KPI Strip */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
           <div className="bg-white border border-slate-200 rounded-xl p-4">
             <p className="text-xs font-medium text-slate-500">
-              Monthly Rent Collected
+              Monthly Rent Collected (Net)
             </p>
             <p className="font-display text-xl font-bold text-emerald-700 mt-1 font-mono tabular-nums">
               {formatRM(totals.monthlyRentCollected)}
             </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Settled rent receipts
-            </p>
-          </div>
-          <div className="bg-white border border-slate-200 rounded-xl p-4">
-            <p className="text-xs font-medium text-slate-500">
-              Deposits Held
-            </p>
-            <p className="font-display text-xl font-bold text-blue-900 mt-1 font-mono tabular-nums">
-              {formatRM(totals.depositsHeld)}
-            </p>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              {totals.depositRefunds > 0
-                ? `Net of ${formatRM(totals.depositRefunds)} refunded`
-                : 'Security deposits collected'}
+            <p className="text-[11px] text-slate-500 mt-0.5 tabular-nums">
+              {totals.rentRefundsTotal > 0
+                ? `Gross ${formatRM(totals.grossRentCollected)} − ${formatRM(totals.rentRefundsTotal)} refunded`
+                : 'Settled rent receipts'}
             </p>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-4">
@@ -747,7 +823,7 @@ export function PaymentsTab({
               {formatRM(totals.registrationFeesCollected)}
             </p>
             <p className="text-[11px] text-slate-400 mt-0.5">
-              Hostel registration receipts
+              Non-refundable reg. receipts
             </p>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-4">
@@ -770,6 +846,51 @@ export function PaymentsTab({
             </p>
             <p className="text-[11px] text-slate-400 mt-0.5">
               Awaiting settlement
+            </p>
+          </div>
+
+          <div className="bg-white border border-blue-200 rounded-xl p-4">
+            <p className="text-xs font-medium text-blue-900">
+              Refundable Deposits Held (Liability)
+            </p>
+            <p className="font-display text-xl font-bold text-blue-900 mt-1 font-mono tabular-nums">
+              {formatRM(totals.refundableDepositsHeld)}
+            </p>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Refundable upon resident checkout
+            </p>
+          </div>
+          <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-4">
+            <p className="text-xs font-medium text-amber-900">
+              Forfeited Deposits (Usable by GIS)
+            </p>
+            <p className="font-display text-xl font-bold text-amber-800 mt-1 font-mono tabular-nums">
+              {formatRM(totals.forfeitedDeposits)}
+            </p>
+            <p className="text-[11px] text-amber-800/80 mt-0.5">
+              Rejected refunds retained as GIS fund
+            </p>
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <p className="text-xs font-medium text-slate-500">
+              Refunded Deposits (Returned)
+            </p>
+            <p className="font-display text-xl font-bold text-slate-700 mt-1 font-mono tabular-nums">
+              {formatRM(totals.refundedDeposits)}
+            </p>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              Returned to checked-out residents
+            </p>
+          </div>
+          <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4">
+            <p className="text-xs font-semibold text-emerald-900">
+              Total Non-Refundable Funds (GIS Usable)
+            </p>
+            <p className="font-display text-xl font-bold text-emerald-800 mt-1 font-mono tabular-nums">
+              {formatRM(totals.nonRefundableGisFunds)}
+            </p>
+            <p className="text-[11px] text-emerald-800/80 mt-0.5">
+              Reg. Fees + Forfeited Deposits
             </p>
           </div>
         </div>
@@ -944,6 +1065,10 @@ export function PaymentsTab({
                   const bankRef = getPaymentBankRef(p);
                   const recordedBy = getPaymentRecordedBy(p);
                   const isWaiver = p.paymentType === 'Rebate / Fee Waiver';
+                  const isRentRefund = p.paymentType === 'Rent Refund';
+                  const rentRefundWaived = isRentRefund
+                    ? getRentRefundWaivedAmount(p)
+                    : 0;
                   const physStatus = getPhysicalReceiptStatus(p);
                   return (
                     <tr key={p.paymentId} className="group hover:bg-slate-50">
@@ -972,17 +1097,24 @@ export function PaymentsTab({
                         </p>
                         <p
                           className={`text-xs whitespace-nowrap ${
-                            isWaiver
-                              ? 'text-indigo-800 font-medium'
-                              : p.paymentType === 'Deposit'
-                                ? 'text-blue-800 font-medium'
-                                : p.paymentType === 'Registration Fee'
-                                  ? 'text-teal-800 font-medium'
-                                  : 'text-slate-500'
+                            isRentRefund
+                              ? 'text-rose-700 font-semibold'
+                              : isWaiver
+                                ? 'text-indigo-800 font-medium'
+                                : p.paymentType === 'Deposit'
+                                  ? 'text-blue-800 font-medium'
+                                  : p.paymentType === 'Registration Fee'
+                                    ? 'text-teal-800 font-medium'
+                                    : 'text-slate-500'
                           }`}
                         >
                           {p.paymentType}
                         </p>
+                        {isRentRefund && rentRefundWaived > 0 && (
+                          <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded bg-rose-50 border border-rose-200 text-[10px] font-medium text-rose-800 whitespace-nowrap">
+                            Leniency Waiver: {formatRM(rentRefundWaived)}
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4">
                         <p className="text-xs text-slate-800 whitespace-nowrap">
@@ -992,8 +1124,12 @@ export function PaymentsTab({
                           {bankRef || 'No bank ref'} · {p.paymentDate}
                         </p>
                       </td>
-                      <td className="py-3 px-4 text-right font-mono text-xs font-semibold text-slate-900 tabular-nums whitespace-nowrap">
-                        {formatRM(p.amount)}
+                      <td
+                        className={`py-3 px-4 text-right font-mono text-xs font-semibold tabular-nums whitespace-nowrap ${
+                          isRentRefund ? 'text-rose-700' : 'text-slate-900'
+                        }`}
+                      >
+                        {isRentRefund ? `-${formatRM(p.amount)}` : formatRM(p.amount)}
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex flex-col items-start gap-1">
@@ -1502,7 +1638,9 @@ export function PaymentsTab({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Billing Month
+                        {paymentType === 'Rent Refund'
+                          ? 'Refunded Month (YYYY-MM)'
+                          : 'Billing Month'}
                       </label>
                       <input
                         type="month"
@@ -1540,6 +1678,25 @@ export function PaymentsTab({
                     </div>
                   )}
 
+                  {paymentType === 'Rent Refund' && (
+                    <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 space-y-2 text-xs text-rose-900">
+                      <p className="font-medium">
+                        Management-approved Monthly Rent Refund deducts the refunded amount from collected rent totals and monthly reports.
+                      </p>
+                      <label className="flex items-start gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={applyLeniencyWaiver}
+                          onChange={(e) => setApplyLeniencyWaiver(e.target.checked)}
+                          className="mt-0.5 rounded border-rose-300 text-blue-900 focus:ring-blue-900"
+                        />
+                        <span>
+                          <strong>Apply Leniency Waiver</strong> (Reduce student&apos;s expected rent by refunded amount so they are not flagged as overdue)
+                        </span>
+                      </label>
+                    </div>
+                  )}
+
                   {(paymentType === 'Deposit' ||
                     paymentType === 'Registration Fee') && (
                     <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900">
@@ -1550,7 +1707,9 @@ export function PaymentsTab({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Amount (RM)
+                        {paymentType === 'Rent Refund'
+                          ? 'Refund Amount (RM)'
+                          : 'Amount (RM)'}
                       </label>
                       <input
                         type="number"
@@ -1634,7 +1793,9 @@ export function PaymentsTab({
                     </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">
-                        Transaction Date
+                        {paymentType === 'Rent Refund'
+                          ? 'Refund Date'
+                          : 'Transaction Date'}
                       </label>
                       <input
                         type="date"
@@ -1648,28 +1809,40 @@ export function PaymentsTab({
 
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Bank Reference No.
+                      {paymentType === 'Rent Refund'
+                        ? 'Voucher / Reference No.'
+                        : 'Bank Reference No.'}
                     </label>
                     <input
                       type="text"
                       maxLength={64}
                       value={bankRefNo}
                       onChange={(e) => setBankRefNo(e.target.value)}
-                      placeholder="e.g. DUITNOW-20261118-01"
+                      placeholder={
+                        paymentType === 'Rent Refund'
+                          ? 'e.g. PV-REFUND-202611'
+                          : 'e.g. DUITNOW-20261118-01'
+                      }
                       className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     />
                   </div>
 
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Remarks / Notes
+                      {paymentType === 'Rent Refund'
+                        ? 'Management Approval Notes'
+                        : 'Remarks / Notes'}
                     </label>
                     <input
                       type="text"
                       maxLength={240}
                       value={notes}
                       onChange={(e) => setNotes(e.target.value)}
-                      placeholder="Optional receipt notes or waiver justification"
+                      placeholder={
+                        paymentType === 'Rent Refund'
+                          ? 'e.g. Early checkout pro-rata refund approved by Management'
+                          : 'Optional receipt notes or waiver justification'
+                      }
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     />
                   </div>
@@ -1689,7 +1862,11 @@ export function PaymentsTab({
                     disabled={submitting}
                     className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer"
                   >
-                    {submitting ? 'Recording...' : 'Issue Receipt & Save'}
+                    {submitting
+                      ? 'Recording...'
+                      : paymentType === 'Rent Refund'
+                        ? 'Record Rent Refund'
+                        : 'Issue Receipt & Save'}
                   </button>
                 </div>
               </form>
@@ -1737,7 +1914,9 @@ export function PaymentsTab({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Billing Month
+                      {paymentType === 'Rent Refund'
+                        ? 'Refunded Month (YYYY-MM)'
+                        : 'Billing Month'}
                     </label>
                     <input
                       type="month"
@@ -1753,7 +1932,13 @@ export function PaymentsTab({
                     </label>
                     <select
                       value={paymentType}
-                      onChange={(e) => setPaymentType(e.target.value as PaymentType)}
+                      onChange={(e) => {
+                        const next = e.target.value as PaymentType;
+                        setPaymentType(next);
+                        if (next === 'Rent Refund') {
+                          setApplyLeniencyWaiver(true);
+                        }
+                      }}
                       className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                     >
                       {PAYMENT_TYPES.map((t) => (
@@ -1767,10 +1952,31 @@ export function PaymentsTab({
                   </div>
                 </div>
 
+                {paymentType === 'Rent Refund' && (
+                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 space-y-2 text-xs text-rose-900">
+                    <p className="font-medium">
+                      Management-approved Monthly Rent Refund deducts the refunded amount from collected rent totals and monthly reports.
+                    </p>
+                    <label className="flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={applyLeniencyWaiver}
+                        onChange={(e) => setApplyLeniencyWaiver(e.target.checked)}
+                        className="mt-0.5 rounded border-rose-300 text-blue-900 focus:ring-blue-900"
+                      />
+                      <span>
+                        <strong>Apply Leniency Waiver</strong> (Reduce student&apos;s expected rent by refunded amount so they are not flagged as overdue)
+                      </span>
+                    </label>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Amount (RM)
+                      {paymentType === 'Rent Refund'
+                        ? 'Refund Amount (RM)'
+                        : 'Amount (RM)'}
                     </label>
                     <input
                       type="number"
@@ -1820,7 +2026,9 @@ export function PaymentsTab({
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Transaction Date
+                      {paymentType === 'Rent Refund'
+                        ? 'Refund Date'
+                        : 'Transaction Date'}
                     </label>
                     <input
                       type="date"
@@ -1834,7 +2042,9 @@ export function PaymentsTab({
 
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Bank Reference No.
+                    {paymentType === 'Rent Refund'
+                      ? 'Voucher / Reference No.'
+                      : 'Bank Reference No.'}
                   </label>
                   <input
                     type="text"
@@ -1847,7 +2057,9 @@ export function PaymentsTab({
 
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Notes
+                    {paymentType === 'Rent Refund'
+                      ? 'Management Approval Notes'
+                      : 'Notes'}
                   </label>
                   <input
                     type="text"
@@ -2169,7 +2381,9 @@ export function PaymentsTab({
                     <p className="text-xs font-bold uppercase tracking-wider text-blue-900">
                       {printingPayment.paymentType === 'Rebate / Fee Waiver'
                         ? 'Official Waiver Credit Note'
-                        : 'Official Payment Receipt'}
+                        : printingPayment.paymentType === 'Rent Refund'
+                          ? 'Official Rent Refund Voucher'
+                          : 'Official Payment Receipt'}
                     </p>
                     <p className="font-mono text-sm font-bold text-slate-900 mt-1">
                       {getPaymentReceiptNo(printingPayment)}
@@ -2270,7 +2484,14 @@ export function PaymentsTab({
 
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50 border border-slate-200 rounded-lg p-4">
                   <div className="text-xs text-slate-600">
-                    {isCashPaymentType(printingPayment.paymentType) ? (
+                    {printingPayment.paymentType === 'Rent Refund' ? (
+                      <span>
+                        Management-approved rent refund disbursed ({printingPayment.paymentMethod})
+                        {getRentRefundWaivedAmount(printingPayment) > 0
+                          ? ` · Leniency Waiver of ${formatRM(getRentRefundWaivedAmount(printingPayment))} applied`
+                          : ''}
+                      </span>
+                    ) : isCashPaymentType(printingPayment.paymentType) ? (
                       <span>
                         Cash / Bank Settlement Amount ({printingPayment.paymentMethod})
                       </span>
@@ -2282,13 +2503,25 @@ export function PaymentsTab({
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-xs uppercase tracking-wider text-slate-500 font-semibold">
-                      Total Cash Received
+                      {printingPayment.paymentType === 'Rent Refund'
+                        ? 'Total Cash Refunded'
+                        : 'Total Cash Received'}
                     </p>
-                    <p className="font-mono text-xl font-bold text-slate-900 tabular-nums">
-                      {isCashPaymentType(printingPayment.paymentType) &&
-                      printingPayment.status === 'Paid'
-                        ? formatRM(printingPayment.amount)
-                        : formatRM(0)}
+                    <p
+                      className={`font-mono text-xl font-bold tabular-nums ${
+                        printingPayment.paymentType === 'Rent Refund'
+                          ? 'text-rose-700'
+                          : 'text-slate-900'
+                      }`}
+                    >
+                      {printingPayment.paymentType === 'Rent Refund'
+                        ? printingPayment.status === 'Paid'
+                          ? `-${formatRM(printingPayment.amount)}`
+                          : formatRM(0)
+                        : isCashPaymentType(printingPayment.paymentType) &&
+                            printingPayment.status === 'Paid'
+                          ? formatRM(printingPayment.amount)
+                          : formatRM(0)}
                     </p>
                   </div>
                 </div>

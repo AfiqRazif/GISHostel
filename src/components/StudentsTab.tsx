@@ -22,6 +22,7 @@ import {
   calculateFirstMonthDefaults,
   calculateMonthInstallmentStatus,
   calculateStudentBilling,
+  DepositDisposition,
   enumerateMonthsISO,
   formatRM,
   formatTimestamp,
@@ -31,6 +32,7 @@ import {
   getPaymentBankRef,
   getPaymentReceiptNo,
   getPhysicalReceiptStatus,
+  getRentRefundWaivedAmount,
   getTodayISO,
   HOSTEL_LOCATIONS,
   isRentCreditType,
@@ -154,6 +156,10 @@ export function StudentsTab({
   const [editCheckOutDate, setEditCheckOutDate] = useState('');
   const [editExpectedDeposit, setEditExpectedDeposit] = useState('300');
   const [editDepositPaid, setEditDepositPaid] = useState('0');
+  const [editDepositDisposition, setEditDepositDisposition] =
+    useState<DepositDisposition>('Held');
+  const [editDepositDispositionDate, setEditDepositDispositionDate] = useState('');
+  const [editDepositDispositionNotes, setEditDepositDispositionNotes] = useState('');
   const [editExpectedRegFee, setEditExpectedRegFee] = useState('50');
   const [editUpfrontFeeNotes, setEditUpfrontFeeNotes] = useState('');
   const [editStandardRate, setEditStandardRate] = useState('250');
@@ -184,6 +190,10 @@ export function StudentsTab({
   const [stmtExpectedDeposit, setStmtExpectedDeposit] = useState('300');
   const [stmtExpectedRegFee, setStmtExpectedRegFee] = useState('50');
   const [stmtUpfrontNotes, setStmtUpfrontNotes] = useState('');
+  const [stmtDepositDisposition, setStmtDepositDisposition] =
+    useState<DepositDisposition>('Held');
+  const [stmtDepositDispositionDate, setStmtDepositDispositionDate] = useState('');
+  const [stmtDepositDispositionNotes, setStmtDepositDispositionNotes] = useState('');
 
   // Direct Assign Room modal state (for unassigned students)
   const [assigningStudent, setAssigningStudent] = useState<Student | null>(null);
@@ -240,6 +250,7 @@ export function StudentsTab({
     useState<PhysicalReceiptStatus>('Issued');
   const [stmtPhysNo, setStmtPhysNo] = useState('');
   const [stmtNotes, setStmtNotes] = useState('');
+  const [stmtApplyLeniencyWaiver, setStmtApplyLeniencyWaiver] = useState(true);
 
   // Statement: Master-Admin Batch Add Past Payments & Settle Balance state
   const [batchModalOpen, setBatchModalOpen] = useState(false);
@@ -824,6 +835,9 @@ export function StudentsTab({
     );
     setEditExpectedDeposit(String(billing.expectedDeposit));
     setEditDepositPaid(String(billing.depositPaid));
+    setEditDepositDisposition(billing.depositDisposition);
+    setEditDepositDispositionDate(billing.depositDispositionDate);
+    setEditDepositDispositionNotes(billing.depositDispositionNotes);
     setEditExpectedRegFee(String(billing.expectedRegistrationFee));
     setEditUpfrontFeeNotes(billing.upfrontFeeNotes);
     setEditStandardRate(String(billing.standardRoomRate));
@@ -938,6 +952,9 @@ export function StudentsTab({
           checkOutDate: editStatus === 'Checked-Out' ? editCheckOutDate : null,
           expectedDeposit: Number(editExpectedDeposit) || 0,
           depositPaid: Number(editDepositPaid) || 0,
+          depositDisposition: editDepositDisposition,
+          depositDispositionDate: editDepositDispositionDate,
+          depositDispositionNotes: editDepositDispositionNotes,
           expectedRegistrationFee: Number(editExpectedRegFee) || 0,
           upfrontFeeNotes: editUpfrontFeeNotes,
           standardRoomRate: Number(editStandardRate),
@@ -1402,9 +1419,12 @@ export function StudentsTab({
     const defaultMonth =
       presetType === 'Deposit' || presetType === 'Registration Fee'
         ? (liveStatementStudent.checkInDate || getTodayISO()).slice(0, 7)
-        : getCurrentMonthISO();
+        : presetType === 'Rent Refund' && liveStatementStudent.checkOutDate
+          ? liveStatementStudent.checkOutDate.slice(0, 7)
+          : getCurrentMonthISO();
     setStmtBillingMonth(defaultMonth);
     setStmtPaymentType(presetType);
+    setStmtApplyLeniencyWaiver(true);
     if (presetType === 'Deposit') {
       const amt =
         statementBilling.depositPending > 0
@@ -1419,6 +1439,22 @@ export function StudentsTab({
           : statementBilling.expectedRegistrationFee;
       setStmtAmount(amt.toFixed(2));
       setStmtNotes('Hostel registration fee payment');
+    } else if (presetType === 'Rent Refund') {
+      const paidForDefaultMonth = payments
+        .filter(
+          (p) =>
+            p.studentId === liveStatementStudent.studentId &&
+            p.billingMonth === defaultMonth &&
+            p.paymentType === 'Monthly Rent' &&
+            p.status === 'Paid'
+        )
+        .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+      const suggestedRefund =
+        paidForDefaultMonth > 0
+          ? paidForDefaultMonth
+          : statementBilling.effectiveMonthlyFee;
+      setStmtAmount(suggestedRefund.toFixed(2));
+      setStmtNotes('Management-approved monthly rent refund (early check-out / leniency)');
     } else {
       const monthStatus = calculateMonthInstallmentStatus(
         liveStatementStudent,
@@ -1447,6 +1483,9 @@ export function StudentsTab({
     setStmtExpectedDeposit(String(statementBilling.expectedDeposit));
     setStmtExpectedRegFee(String(statementBilling.expectedRegistrationFee));
     setStmtUpfrontNotes(statementBilling.upfrontFeeNotes);
+    setStmtDepositDisposition(statementBilling.depositDisposition);
+    setStmtDepositDispositionDate(statementBilling.depositDispositionDate);
+    setStmtDepositDispositionNotes(statementBilling.depositDispositionNotes);
     setEditingStmtUpfront(true);
   };
 
@@ -1462,12 +1501,15 @@ export function StudentsTab({
           expectedDeposit: Number(stmtExpectedDeposit) || 0,
           expectedRegistrationFee: Number(stmtExpectedRegFee) || 0,
           upfrontFeeNotes: stmtUpfrontNotes,
+          depositDisposition: stmtDepositDisposition,
+          depositDispositionDate: stmtDepositDispositionDate,
+          depositDispositionNotes: stmtDepositDispositionNotes,
         },
         staffEmail
       );
       setEditingStmtUpfront(false);
       setFeedbackBanner(
-        `Updated Deposit / Registration Fee expectations & notes for ${liveStatementStudent.fullName}.`
+        `Updated Deposit / Registration Fee settings for ${liveStatementStudent.fullName}.`
       );
     } catch (err) {
       setFormError(
@@ -1488,6 +1530,13 @@ export function StudentsTab({
         : 'Monthly Rent') as PaymentType
     );
     setStmtAmount(String(p.amount));
+    setStmtApplyLeniencyWaiver(
+      p.paymentType === 'Rent Refund'
+        ? typeof p.applyLeniencyWaiver === 'boolean'
+          ? p.applyLeniencyWaiver
+          : getRentRefundWaivedAmount(p) > 0
+        : true
+    );
     setStmtMethod(
       (PAYMENT_METHODS.includes(p.paymentMethod as PaymentMethod)
         ? p.paymentMethod
@@ -1507,6 +1556,8 @@ export function StudentsTab({
     if (!liveStatementStudent) return;
     setSubmitting(true);
     setFormError(null);
+    const numericAmt = Number(stmtAmount);
+    const isRentRefund = stmtPaymentType === 'Rent Refund';
     try {
       if (stmtEditingPayment) {
         await updatePayment(
@@ -1514,7 +1565,10 @@ export function StudentsTab({
           {
             billingMonth: stmtBillingMonth,
             paymentType: stmtPaymentType,
-            amount: Number(stmtAmount),
+            amount: numericAmt,
+            applyLeniencyWaiver: isRentRefund ? stmtApplyLeniencyWaiver : false,
+            waivedAmount:
+              isRentRefund && stmtApplyLeniencyWaiver ? numericAmt : 0,
             paymentMethod: stmtMethod,
             bankRefNo: stmtBankRefNo,
             paymentDate: stmtPaymentDate,
@@ -1526,7 +1580,7 @@ export function StudentsTab({
           staffEmail
         );
         setFeedbackBanner(
-          `Updated payment ${getPaymentReceiptNo(stmtEditingPayment)} for ${liveStatementStudent.fullName}.`
+          `Updated ${isRentRefund ? 'rent refund' : 'payment'} ${getPaymentReceiptNo(stmtEditingPayment)} for ${liveStatementStudent.fullName}.`
         );
       } else {
         const res = await createPayment(
@@ -1534,7 +1588,10 @@ export function StudentsTab({
             student: liveStatementStudent,
             billingMonth: stmtBillingMonth,
             paymentType: stmtPaymentType,
-            amount: Number(stmtAmount),
+            amount: numericAmt,
+            applyLeniencyWaiver: isRentRefund ? stmtApplyLeniencyWaiver : false,
+            waivedAmount:
+              isRentRefund && stmtApplyLeniencyWaiver ? numericAmt : 0,
             paymentMethod: stmtMethod,
             bankRefNo: stmtBankRefNo,
             paymentDate: stmtPaymentDate,
@@ -1547,7 +1604,7 @@ export function StudentsTab({
           staffEmail
         );
         setFeedbackBanner(
-          `Recorded ${res.receiptNo} (${formatRM(Number(stmtAmount))} for ${stmtBillingMonth}) on ${liveStatementStudent.fullName}'s ledger.`
+          `Recorded ${res.receiptNo} (${isRentRefund ? 'Rent Refund ' : ''}${formatRM(numericAmt)} for ${stmtBillingMonth}) on ${liveStatementStudent.fullName}'s ledger.`
         );
       }
       setStmtPaymentModalOpen(false);
@@ -2169,6 +2226,32 @@ export function StudentsTab({
                                   >
                                     Deposit: {depLabel}
                                   </span>
+                                  {billing.depositPaid > 0.009 &&
+                                    billing.depositDisposition === 'Forfeited' && (
+                                      <span
+                                        className="inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-semibold bg-purple-50 text-purple-900 border-purple-200"
+                                        title={
+                                          billing.depositDispositionNotes ||
+                                          'Deposit forfeited (usable by GIS)'
+                                        }
+                                      >
+                                        Deposit Forfeited: RM{' '}
+                                        {billing.depositPaid.toFixed(0)} (GIS Fund)
+                                      </span>
+                                    )}
+                                  {billing.depositPaid > 0.009 &&
+                                    billing.depositDisposition === 'Refunded' && (
+                                      <span
+                                        className="inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-semibold bg-slate-100 text-slate-700 border-slate-300"
+                                        title={
+                                          billing.depositDispositionNotes ||
+                                          'Deposit refunded to student'
+                                        }
+                                      >
+                                        Deposit Refunded: RM{' '}
+                                        {billing.depositPaid.toFixed(0)}
+                                      </span>
+                                    )}
                                   <span
                                     className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-semibold ${pillColor(
                                       billing.registrationFeeStatus
@@ -3372,6 +3455,79 @@ export function StudentsTab({
                         className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                       />
                     </div>
+
+                    {(Number(editDepositPaid) > 0 || editingStudent.depositPaid > 0) && (
+                      <div className="sm:col-span-2 pt-3 border-t border-slate-200 space-y-2.5">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <label className="text-xs font-semibold text-slate-800">
+                            Security Deposit Disposition ({formatRM(Number(editDepositPaid) || editingStudent.depositPaid)} Paid)
+                          </label>
+                          {editDepositDisposition === 'Forfeited' && (
+                            <span className="px-2 py-0.5 text-[10px] font-semibold rounded bg-purple-100 text-purple-900 border border-purple-200">
+                              Usable by GIS (Non-Refundable)
+                            </span>
+                          )}
+                        </div>
+                        <select
+                          value={editDepositDisposition}
+                          onChange={(e) => {
+                            const next = e.target.value as DepositDisposition;
+                            setEditDepositDisposition(next);
+                            if (next !== 'Held' && !editDepositDispositionDate) {
+                              setEditDepositDispositionDate(
+                                editCheckOutDate || getTodayISO()
+                              );
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                        >
+                          <option value="Held">Held (Refundable Liability)</option>
+                          <option value="Forfeited">
+                            Forfeited (Rejected Refund — Usable by GIS)
+                          </option>
+                          <option value="Refunded">Refunded to Student</option>
+                        </select>
+
+                        {editDepositDisposition !== 'Held' && (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div>
+                              <label className="block text-xs font-medium text-slate-700 mb-1">
+                                Disposition Date
+                              </label>
+                              <input
+                                type="date"
+                                value={editDepositDispositionDate}
+                                onChange={(e) =>
+                                  setEditDepositDispositionDate(e.target.value)
+                                }
+                                className="w-full px-3 py-2 text-sm font-mono bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                              />
+                            </div>
+                            <div className="sm:col-span-2">
+                              <label className="block text-xs font-medium text-slate-700 mb-1">
+                                {editDepositDisposition === 'Forfeited'
+                                  ? 'Forfeiture Reason / Notes'
+                                  : 'Refund Reference / Notes'}
+                              </label>
+                              <input
+                                type="text"
+                                maxLength={240}
+                                value={editDepositDispositionNotes}
+                                onChange={(e) =>
+                                  setEditDepositDispositionNotes(e.target.value)
+                                }
+                                placeholder={
+                                  editDepositDisposition === 'Forfeited'
+                                    ? 'e.g. Unreturned key, room damage, or early termination clause'
+                                    : 'e.g. Refunded via online transfer ref'
+                                }
+                                className="w-full px-3 py-2 text-sm bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -4409,8 +4565,9 @@ export function StudentsTab({
                     {formatRM(statementBilling.totalExpectedRent)}
                   </p>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Across {statementBilling.segments.length}{' '}
-                    {statementBilling.segments.length === 1 ? 'stay segment' : 'stay segments'}
+                    {statementBilling.totalRentRefundWaived > 0.009
+                      ? `After ${formatRM(statementBilling.totalRentRefundWaived)} leniency waiver`
+                      : `Across ${statementBilling.segments.length} ${statementBilling.segments.length === 1 ? 'stay segment' : 'stay segments'}`}
                   </p>
                 </div>
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
@@ -4418,7 +4575,11 @@ export function StudentsTab({
                   <p className="font-mono text-base font-bold text-emerald-700 tabular-nums mt-0.5">
                     {formatRM(statementBilling.totalRentCredited)}
                   </p>
-                  <p className="text-xs text-slate-500 mt-0.5">Rent &amp; waivers only</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {statementBilling.totalRentRefunded > 0.009
+                      ? `Net of ${formatRM(statementBilling.totalRentRefunded)} refunded`
+                      : 'Rent & waivers only'}
+                  </p>
                 </div>
                 <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
                   <p className="text-xs text-slate-500">Monthly Rent Balance</p>
@@ -4494,6 +4655,38 @@ export function StudentsTab({
                         <p className="text-xs font-mono text-red-700 mt-0.5">
                           Pending: {formatRM(statementBilling.depositPending)}
                         </p>
+                      )}
+                      {statementBilling.depositPaid > 0.009 && (
+                        <div className="mt-1.5 space-y-0.5">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded border text-[11px] font-semibold ${
+                              statementBilling.depositDisposition === 'Forfeited'
+                                ? 'bg-purple-50 text-purple-900 border-purple-200'
+                                : statementBilling.depositDisposition === 'Refunded'
+                                  ? 'bg-slate-100 text-slate-700 border-slate-300'
+                                  : 'bg-blue-50 text-blue-900 border-blue-200'
+                            }`}
+                          >
+                            {statementBilling.depositDisposition === 'Forfeited'
+                              ? `Deposit Forfeited: ${formatRM(statementBilling.depositPaid)} (GIS Fund)`
+                              : statementBilling.depositDisposition === 'Refunded'
+                                ? `Deposit Refunded: ${formatRM(statementBilling.depositPaid)}`
+                                : 'Held (Refundable Liability)'}
+                          </span>
+                          {(statementBilling.depositDispositionDate ||
+                            statementBilling.depositDispositionNotes) && (
+                            <p className="text-[11px] text-slate-500">
+                              {statementBilling.depositDispositionDate
+                                ? `${statementBilling.depositDispositionDate}`
+                                : ''}
+                              {statementBilling.depositDispositionDate &&
+                              statementBilling.depositDispositionNotes
+                                ? ' · '
+                                : ''}
+                              {statementBilling.depositDispositionNotes}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </div>
                     <div className="flex flex-col items-end gap-1.5 shrink-0">
@@ -4623,6 +4816,69 @@ export function StudentsTab({
                           className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                         />
                       </div>
+
+                      {statementBilling.depositPaid > 0.009 && (
+                        <div className="sm:col-span-2 pt-2.5 border-t border-slate-200 space-y-2">
+                          <label className="block text-xs font-semibold text-slate-800">
+                            Deposit Disposition ({formatRM(statementBilling.depositPaid)} Collected)
+                          </label>
+                          <select
+                            value={stmtDepositDisposition}
+                            onChange={(e) => {
+                              const next = e.target.value as DepositDisposition;
+                              setStmtDepositDisposition(next);
+                              if (next !== 'Held' && !stmtDepositDispositionDate) {
+                                setStmtDepositDispositionDate(
+                                  liveStatementStudent.checkOutDate || getTodayISO()
+                                );
+                              }
+                            }}
+                            className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                          >
+                            <option value="Held">Held (Refundable Liability)</option>
+                            <option value="Forfeited">
+                              Forfeited (Rejected Refund — Usable by GIS)
+                            </option>
+                            <option value="Refunded">Refunded to Student</option>
+                          </select>
+                          {stmtDepositDisposition !== 'Held' && (
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                              <div>
+                                <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                                  Disposition Date
+                                </label>
+                                <input
+                                  type="date"
+                                  value={stmtDepositDispositionDate}
+                                  onChange={(e) =>
+                                    setStmtDepositDispositionDate(e.target.value)
+                                  }
+                                  className="w-full px-2.5 py-1.5 text-xs font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                                />
+                              </div>
+                              <div className="sm:col-span-2">
+                                <label className="block text-[11px] font-medium text-slate-600 mb-1">
+                                  Reason / Notes
+                                </label>
+                                <input
+                                  type="text"
+                                  maxLength={240}
+                                  value={stmtDepositDispositionNotes}
+                                  onChange={(e) =>
+                                    setStmtDepositDispositionNotes(e.target.value)
+                                  }
+                                  placeholder={
+                                    stmtDepositDisposition === 'Forfeited'
+                                      ? 'Reason deposit refund was rejected / forfeited'
+                                      : 'Refund reference or remarks'
+                                  }
+                                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                     <div className="flex items-center justify-end gap-2">
                       <button
@@ -4833,6 +5089,18 @@ export function StudentsTab({
                           <span>Batch Add Past Payments</span>
                         </button>
                       )}
+                      {(liveStatementStudent.status === 'Checked-Out' ||
+                        statementBilling.totalRentPaid > 0.009) && (
+                        <button
+                          type="button"
+                          onClick={() => openStmtRecordPaymentModal('Rent Refund')}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-rose-900 bg-rose-50 border border-rose-200 hover:bg-rose-100 rounded-lg cursor-pointer whitespace-nowrap"
+                          title="Record a management-approved monthly rent refund with optional leniency waiver"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Issue Rent Refund</span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         onClick={() => openStmtRecordPaymentModal('Monthly Rent')}
@@ -4869,6 +5137,10 @@ export function StudentsTab({
                       <tbody className="divide-y divide-slate-100">
                         {statementPayments.map((p) => {
                           const physStatus = getPhysicalReceiptStatus(p);
+                          const isRentRefund = p.paymentType === 'Rent Refund';
+                          const waivedAmt = isRentRefund
+                            ? getRentRefundWaivedAmount(p)
+                            : 0;
                           return (
                             <tr key={p.paymentId}>
                               <td className="py-2.5 px-3 font-mono font-semibold text-blue-900 whitespace-nowrap">
@@ -4878,7 +5150,20 @@ export function StudentsTab({
                                 <p className="font-mono font-semibold text-slate-900">
                                   {p.billingMonth}
                                 </p>
-                                <p className="text-slate-500">{p.paymentType}</p>
+                                <p
+                                  className={
+                                    isRentRefund
+                                      ? 'text-rose-700 font-medium'
+                                      : 'text-slate-500'
+                                  }
+                                >
+                                  {p.paymentType}
+                                </p>
+                                {isRentRefund && waivedAmt > 0.009 && (
+                                  <span className="inline-block mt-0.5 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-amber-50 text-amber-800 border border-amber-200">
+                                    Leniency Waiver: {formatRM(waivedAmt)}
+                                  </span>
+                                )}
                               </td>
                               <td className="py-2.5 px-3">
                                 <p className="text-slate-800">{p.paymentMethod}</p>
@@ -4891,8 +5176,12 @@ export function StudentsTab({
                               <td className="py-2.5 px-3 font-mono tabular-nums whitespace-nowrap text-slate-700">
                                 {p.paymentDate}
                               </td>
-                              <td className="py-2.5 px-3 text-right font-mono font-semibold tabular-nums whitespace-nowrap text-slate-900">
-                                {formatRM(p.amount)}
+                              <td
+                                className={`py-2.5 px-3 text-right font-mono font-semibold tabular-nums whitespace-nowrap ${
+                                  isRentRefund ? 'text-rose-700' : 'text-slate-900'
+                                }`}
+                              >
+                                {isRentRefund ? `-${formatRM(p.amount)}` : formatRM(p.amount)}
                               </td>
                               <td className="py-2.5 px-3 whitespace-nowrap">
                                 <StatusBadge status={physStatus} />
@@ -5397,8 +5686,10 @@ export function StudentsTab({
               <div>
                 <h2 className="font-display text-lg font-semibold text-slate-900">
                   {stmtEditingPayment
-                    ? `Edit Payment · ${getPaymentReceiptNo(stmtEditingPayment)}`
-                    : 'Record / Backdate Payment'}
+                    ? `Edit ${stmtPaymentType === 'Rent Refund' ? 'Rent Refund' : 'Payment'} · ${getPaymentReceiptNo(stmtEditingPayment)}`
+                    : stmtPaymentType === 'Rent Refund'
+                      ? 'Issue Management-Approved Rent Refund'
+                      : 'Record / Backdate Payment'}
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {liveStatementStudent.fullName} (
@@ -5433,7 +5724,9 @@ export function StudentsTab({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Billing Month
+                      {stmtPaymentType === 'Rent Refund'
+                        ? 'Refunded Month (YYYY-MM)'
+                        : 'Billing Month'}
                     </label>
                     <input
                       type="month"
@@ -5469,6 +5762,9 @@ export function StudentsTab({
                       onChange={(e) => {
                         const next = e.target.value as PaymentType;
                         setStmtPaymentType(next);
+                        if (next === 'Rent Refund') {
+                          setStmtApplyLeniencyWaiver(true);
+                        }
                         if (next === 'Rebate / Fee Waiver') {
                           setStmtMethod('Internal Adjustment');
                           setStmtStatus('Waived');
@@ -5488,6 +5784,22 @@ export function StudentsTab({
                                 ? statementBilling.registrationFeePending
                                 : statementBilling.expectedRegistrationFee;
                             setStmtAmount(amt.toFixed(2));
+                          } else if (next === 'Rent Refund') {
+                            const paidForMonth = payments
+                              .filter(
+                                (p) =>
+                                  p.studentId === liveStatementStudent.studentId &&
+                                  p.billingMonth === stmtBillingMonth &&
+                                  p.paymentType === 'Monthly Rent' &&
+                                  p.status === 'Paid'
+                              )
+                              .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+                            setStmtAmount(
+                              (paidForMonth > 0
+                                ? paidForMonth
+                                : statementBilling.effectiveMonthlyFee
+                              ).toFixed(2)
+                            );
                           } else if (next === 'Monthly Rent') {
                             const info = calculateMonthInstallmentStatus(
                               liveStatementStudent,
@@ -5517,10 +5829,36 @@ export function StudentsTab({
                   </div>
                 </div>
 
+                {stmtPaymentType === 'Rent Refund' && (
+                  <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 space-y-2 text-xs text-rose-950">
+                    <p className="font-semibold">
+                      Management-Approved Rent Refund (Cash Outflow)
+                    </p>
+                    <p className="text-rose-900">
+                      Deducts {formatRM(Number(stmtAmount) || 0)} from {stmtBillingMonth} actual rent collection and resident net paid total.
+                    </p>
+                    <label className="flex items-start gap-2 pt-1 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={stmtApplyLeniencyWaiver}
+                        onChange={(e) =>
+                          setStmtApplyLeniencyWaiver(e.target.checked)
+                        }
+                        className="mt-0.5 rounded border-rose-300 text-blue-900 focus:ring-blue-900"
+                      />
+                      <span className="font-medium text-slate-900">
+                        Apply Leniency Waiver (Reduce student&apos;s expected rent by refunded amount so they are not flagged as overdue)
+                      </span>
+                    </label>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Amount (RM)
+                      {stmtPaymentType === 'Rent Refund'
+                        ? 'Refund Amount (RM)'
+                        : 'Amount (RM)'}
                     </label>
                     <input
                       type="number"
@@ -5577,7 +5915,9 @@ export function StudentsTab({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Payment Method
+                      {stmtPaymentType === 'Rent Refund'
+                        ? 'Refund Method'
+                        : 'Payment Method'}
                     </label>
                     <select
                       value={stmtMethod}
@@ -5593,7 +5933,9 @@ export function StudentsTab({
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Transaction Date
+                      {stmtPaymentType === 'Rent Refund'
+                        ? 'Refund Date'
+                        : 'Transaction Date'}
                     </label>
                     <input
                       type="date"
@@ -5607,14 +5949,20 @@ export function StudentsTab({
 
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Bank Reference No.
+                    {stmtPaymentType === 'Rent Refund'
+                      ? 'Voucher / Reference No.'
+                      : 'Bank Reference No.'}
                   </label>
                   <input
                     type="text"
                     maxLength={64}
                     value={stmtBankRefNo}
                     onChange={(e) => setStmtBankRefNo(e.target.value)}
-                    placeholder="e.g. DUITNOW-20260915-01"
+                    placeholder={
+                      stmtPaymentType === 'Rent Refund'
+                        ? 'e.g. PV-REFUND-2026-01'
+                        : 'e.g. DUITNOW-20260915-01'
+                    }
                     className="w-full px-3 py-2 text-sm font-mono border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
@@ -5652,14 +6000,20 @@ export function StudentsTab({
 
                 <div>
                   <label className="block text-xs font-medium text-slate-700 mb-1">
-                    Remarks / Notes
+                    {stmtPaymentType === 'Rent Refund'
+                      ? 'Management Approval Notes'
+                      : 'Remarks / Notes'}
                   </label>
                   <input
                     type="text"
                     maxLength={240}
                     value={stmtNotes}
                     onChange={(e) => setStmtNotes(e.target.value)}
-                    placeholder="Optional backdated payment note"
+                    placeholder={
+                      stmtPaymentType === 'Rent Refund'
+                        ? 'e.g. Approved by Campus Director — early checkout mid-month refund'
+                        : 'Optional backdated payment note'
+                    }
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-900"
                   />
                 </div>
@@ -5680,13 +6034,19 @@ export function StudentsTab({
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-4 py-2 text-xs font-semibold text-white bg-blue-900 hover:bg-blue-800 disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap"
+                  className={`px-4 py-2 text-xs font-semibold text-white disabled:opacity-60 rounded-lg cursor-pointer whitespace-nowrap ${
+                    stmtPaymentType === 'Rent Refund'
+                      ? 'bg-rose-700 hover:bg-rose-800'
+                      : 'bg-blue-900 hover:bg-blue-800'
+                  }`}
                 >
                   {submitting
                     ? 'Saving...'
                     : stmtEditingPayment
-                      ? 'Update Payment'
-                      : 'Save Payment Entry'}
+                      ? 'Update Entry'
+                      : stmtPaymentType === 'Rent Refund'
+                        ? 'Confirm & Issue Rent Refund'
+                        : 'Save Payment Entry'}
                 </button>
               </div>
             </form>

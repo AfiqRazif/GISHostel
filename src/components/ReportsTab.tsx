@@ -14,8 +14,10 @@ import {
   calculateFirstMonthDefaults,
   calculateResidentBilling,
   DATE_REGEX,
+  DepositDisposition,
   formatRM,
   getLocationPrefix,
+  getRentRefundWaivedAmount,
   resolveOccupantType,
   getTodayISO,
   HOSTEL_LOCATIONS,
@@ -45,7 +47,12 @@ interface ReportsTabProps {
 type ReportSubView = 'collection' | 'defaulters' | 'upfrontFees';
 type MonthRangeKey = 'FULL' | 'H1' | 'H2';
 type DefaulterStatusFilter = 'All' | 'Active' | 'Checked-Out';
-type UpfrontFeeFilterMode = 'all' | 'pending' | 'settled';
+type UpfrontFeeFilterMode =
+  | 'all'
+  | 'pending'
+  | 'settled'
+  | 'forfeited'
+  | 'refunded';
 type SeverityTier = 'Critical' | 'High' | 'Moderate';
 
 const MONTH_LABELS = [
@@ -576,14 +583,15 @@ export function ReportsTab({
       }
     }
 
-    // 2. Allocate actual Monthly Rent payments collected in selectedYear
+    // 2. Allocate actual Monthly Rent payments and Rent Refunds (+ Leniency Waivers) in selectedYear
     let unallocatedActualTotal = 0;
     for (const p of payments) {
-      if (
-        p.status !== 'Paid' ||
-        p.paymentType !== 'Monthly Rent' ||
-        !p.billingMonth?.startsWith(yearPrefix)
-      ) {
+      const isRentPayment =
+        p.status === 'Paid' && p.paymentType === 'Monthly Rent';
+      const isRentRefund =
+        isSettledPaymentStatus(p.status) && p.paymentType === 'Rent Refund';
+
+      if ((!isRentPayment && !isRentRefund) || !p.billingMonth?.startsWith(yearPrefix)) {
         continue;
       }
       const mIdx = Number.parseInt(p.billingMonth.slice(5, 7), 10) - 1;
@@ -602,10 +610,24 @@ export function ReportsTab({
         );
       }
 
-      if (unitKey && unitsByKey.has(unitKey)) {
-        unitsByKey.get(unitKey)!.actualByMonth[mIdx] += p.amount || 0;
-      } else {
-        unallocatedActualTotal += p.amount || 0;
+      if (isRentPayment) {
+        if (unitKey && unitsByKey.has(unitKey)) {
+          unitsByKey.get(unitKey)!.actualByMonth[mIdx] += p.amount || 0;
+        } else {
+          unallocatedActualTotal += p.amount || 0;
+        }
+      } else if (isRentRefund) {
+        const refundAmt = p.amount || 0;
+        const waivedAmt = getRentRefundWaivedAmount(p);
+        if (unitKey && unitsByKey.has(unitKey)) {
+          const targetUnit = unitsByKey.get(unitKey)!;
+          targetUnit.actualByMonth[mIdx] -= refundAmt;
+          if (waivedAmt > 0) {
+            targetUnit.expectedByMonth[mIdx] -= waivedAmt;
+          }
+        } else {
+          unallocatedActualTotal -= refundAmt;
+        }
       }
     }
 
@@ -617,8 +639,8 @@ export function ReportsTab({
             (sum, beds) => sum + beds,
             0
           ),
-          expected: roundMoney(acc.expectedByMonth[idx]),
-          actual: roundMoney(acc.actualByMonth[idx]),
+          expected: Math.max(0, roundMoney(acc.expectedByMonth[idx])),
+          actual: Math.max(0, roundMoney(acc.actualByMonth[idx])),
         }));
         const periodExpected = roundMoney(
           visibleMonthIndices.reduce((sum, idx) => sum + months[idx].expected, 0)
@@ -850,6 +872,9 @@ export function ReportsTab({
         depositPaid: billing.depositPaid,
         depositPending: billing.depositPending,
         depositStatus: billing.depositStatus,
+        depositDisposition: billing.depositDisposition as DepositDisposition,
+        depositDispositionDate: billing.depositDispositionDate,
+        depositDispositionNotes: billing.depositDispositionNotes,
         expectedRegFee: billing.expectedRegistrationFee,
         regFeePaid: billing.registrationFeePaid,
         regFeePending: billing.registrationFeePending,
@@ -872,6 +897,12 @@ export function ReportsTab({
       .filter((r) => {
         if (upfrontFeeFilter === 'pending') return r.hasPending;
         if (upfrontFeeFilter === 'settled') return !r.hasPending;
+        if (upfrontFeeFilter === 'forfeited') {
+          return r.depositDisposition === 'Forfeited';
+        }
+        if (upfrontFeeFilter === 'refunded') {
+          return r.depositDisposition === 'Refunded';
+        }
         return true;
       })
       .sort((a, b) => {
@@ -883,6 +914,9 @@ export function ReportsTab({
     let totalExpectedDeposit = 0;
     let totalDepositPaid = 0;
     let totalDepositPending = 0;
+    let totalDepositHeld = 0;
+    let totalDepositForfeited = 0;
+    let totalDepositRefunded = 0;
     let totalExpectedRegFee = 0;
     let totalRegFeePaid = 0;
     let totalRegFeePending = 0;
@@ -892,11 +926,21 @@ export function ReportsTab({
       totalExpectedDeposit += r.expectedDeposit;
       totalDepositPaid += r.depositPaid;
       totalDepositPending += r.depositPending;
+      if (r.depositDisposition === 'Forfeited') {
+        totalDepositForfeited += r.depositPaid;
+      } else if (r.depositDisposition === 'Refunded') {
+        totalDepositRefunded += r.depositPaid;
+      } else {
+        totalDepositHeld += r.depositPaid;
+      }
       totalExpectedRegFee += r.expectedRegFee;
       totalRegFeePaid += r.regFeePaid;
       totalRegFeePending += r.regFeePending;
       if (r.hasPending) pendingResidentsCount += 1;
     }
+
+    const cleanRegFeePaid = roundMoney(totalRegFeePaid);
+    const cleanDepositForfeited = roundMoney(totalDepositForfeited);
 
     return {
       allPendingCount,
@@ -907,11 +951,17 @@ export function ReportsTab({
         totalExpectedDeposit: roundMoney(totalExpectedDeposit),
         totalDepositPaid: roundMoney(totalDepositPaid),
         totalDepositPending: roundMoney(totalDepositPending),
+        totalDepositHeld: roundMoney(totalDepositHeld),
+        totalDepositForfeited: cleanDepositForfeited,
+        totalDepositRefunded: roundMoney(totalDepositRefunded),
         totalExpectedRegFee: roundMoney(totalExpectedRegFee),
-        totalRegFeePaid: roundMoney(totalRegFeePaid),
+        totalRegFeePaid: cleanRegFeePaid,
         totalRegFeePending: roundMoney(totalRegFeePending),
         totalCombinedPending: roundMoney(
           totalDepositPending + totalRegFeePending
+        ),
+        totalNonRefundableGisFunds: roundMoney(
+          cleanRegFeePaid + cleanDepositForfeited
         ),
       },
     };
@@ -1186,12 +1236,20 @@ export function ReportsTab({
       'Deposit Paid (RM)': r.depositPaid,
       'Deposit Pending (RM)': r.depositPending,
       'Deposit Status': r.depositStatus,
+      'Deposit Disposition':
+        r.depositDisposition === 'Forfeited'
+          ? 'Forfeited (Usable by GIS)'
+          : r.depositDisposition === 'Refunded'
+            ? 'Refunded to Student'
+            : 'Held (Refundable Liability)',
+      'Disposition Date': r.depositDispositionDate || '-',
+      'Disposition Notes': r.depositDispositionNotes || '-',
       'Expected Reg. Fee (RM)': r.expectedRegFee,
       'Reg. Fee Paid (RM)': r.regFeePaid,
       'Reg. Fee Pending (RM)': r.regFeePending,
       'Reg. Fee Status': r.regFeeStatus,
       'Total Upfront Pending (RM)': r.totalUpfrontPending,
-      'Notes / Remarks': r.upfrontFeeNotes || '-',
+      'Upfront Fee Notes': r.upfrontFeeNotes || '-',
     }));
 
     const ws = XLSX.utils.json_to_sheet(detailRows);
@@ -1206,6 +1264,9 @@ export function ReportsTab({
       { wch: 16 },
       { wch: 18 },
       { wch: 14 },
+      { wch: 26 },
+      { wch: 16 },
+      { wch: 30 },
       { wch: 18 },
       { wch: 16 },
       { wch: 18 },
@@ -1226,12 +1287,28 @@ export function ReportsTab({
       { Metric: 'Total Expected Deposits (RM)', Value: t.totalExpectedDeposit },
       { Metric: 'Total Deposits Paid (RM)', Value: t.totalDepositPaid },
       { Metric: 'Total Deposits Pending (RM)', Value: t.totalDepositPending },
+      {
+        Metric: 'Refundable Deposits Held — Liability (RM)',
+        Value: t.totalDepositHeld,
+      },
+      {
+        Metric: 'Forfeited Deposits — Usable by GIS (RM)',
+        Value: t.totalDepositForfeited,
+      },
+      {
+        Metric: 'Refunded Deposits — Returned (RM)',
+        Value: t.totalDepositRefunded,
+      },
       { Metric: 'Total Expected Reg. Fees (RM)', Value: t.totalExpectedRegFee },
       { Metric: 'Total Reg. Fees Paid (RM)', Value: t.totalRegFeePaid },
       { Metric: 'Total Reg. Fees Pending (RM)', Value: t.totalRegFeePending },
       { Metric: 'Combined Upfront Pending (RM)', Value: t.totalCombinedPending },
+      {
+        Metric: 'Total Non-Refundable Funds Usable by GIS (RM)',
+        Value: t.totalNonRefundableGisFunds,
+      },
     ]);
-    summaryWs['!cols'] = [{ wch: 34 }, { wch: 24 }];
+    summaryWs['!cols'] = [{ wch: 42 }, { wch: 24 }];
     XLSX.utils.book_append_sheet(wb, summaryWs, 'Upfront Fee Summary');
 
     XLSX.writeFile(wb, `gis-deposit-regfee-summary-${todayISO}.xlsx`);
@@ -1867,6 +1944,8 @@ export function ReportsTab({
                   <option value="all">All Residents</option>
                   <option value="pending">Pending Deposit / Reg. Fee Only</option>
                   <option value="settled">Settled / Waived Only</option>
+                  <option value="forfeited">Forfeited Deposits Only (GIS Fund)</option>
+                  <option value="refunded">Refunded Deposits Only</option>
                 </select>
               </div>
             </div>
@@ -1983,7 +2062,7 @@ export function ReportsTab({
                   {formatRM(collectionReport.grandTotals.totalActual)}
                 </p>
                 <p className="text-[11px] text-emerald-700/80 mt-0.5 print:text-[9px]">
-                  Settled Monthly Rent
+                  Settled Monthly Rent (net of refunds)
                 </p>
               </div>
 
@@ -2341,11 +2420,59 @@ export function ReportsTab({
                   Deposit + Registration Fee balance
                 </p>
               </div>
+
+              <div className="border border-blue-200 rounded-lg p-3.5 bg-white print:p-2">
+                <p className="text-xs font-medium text-blue-900">
+                  Refundable Deposits Held (Liability)
+                </p>
+                <p className="text-xl font-bold font-mono tabular-nums text-blue-900 mt-1 print:text-sm">
+                  {formatRM(upfrontFeeReport.totals.totalDepositHeld)}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5 print:text-[9px]">
+                  Refundable upon resident checkout
+                </p>
+              </div>
+
+              <div className="border border-amber-200 rounded-lg p-3.5 bg-amber-50/50 print:p-2">
+                <p className="text-xs font-medium text-amber-900">
+                  Forfeited Deposits (Usable by GIS)
+                </p>
+                <p className="text-xl font-bold font-mono tabular-nums text-amber-800 mt-1 print:text-sm">
+                  {formatRM(upfrontFeeReport.totals.totalDepositForfeited)}
+                </p>
+                <p className="text-[11px] text-amber-800/80 mt-0.5 print:text-[9px]">
+                  Rejected refunds retained as GIS fund
+                </p>
+              </div>
+
+              <div className="border border-slate-200 rounded-lg p-3.5 bg-slate-50/50 print:p-2">
+                <p className="text-xs font-medium text-slate-600">
+                  Refunded Deposits (Returned)
+                </p>
+                <p className="text-xl font-bold font-mono tabular-nums text-slate-700 mt-1 print:text-sm">
+                  {formatRM(upfrontFeeReport.totals.totalDepositRefunded)}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5 print:text-[9px]">
+                  Returned to checked-out residents
+                </p>
+              </div>
+
+              <div className="border border-emerald-300 rounded-lg p-3.5 bg-emerald-50/70 print:p-2">
+                <p className="text-xs font-semibold text-emerald-900">
+                  Total Non-Refundable Funds Usable by GIS
+                </p>
+                <p className="text-xl font-bold font-mono tabular-nums text-emerald-800 mt-1 print:text-sm">
+                  {formatRM(upfrontFeeReport.totals.totalNonRefundableGisFunds)}
+                </p>
+                <p className="text-[11px] text-emerald-800/80 mt-0.5 print:text-[9px]">
+                  Reg. Fees Collected + Forfeited Deposits
+                </p>
+              </div>
             </div>
           </section>
 
           {/* Upfront Fees Table */}
-          <section className="bg-white border border-slate-200 rounded-xl overflow-hidden print:border-slate-400 print:rounded-none">
+          <section className="bg-white border border-slate-200 rounded-xl overflow-hidden print:border-slate-400 print:rounded-none print:overflow-visible">
             {upfrontFeeReport.rows.length === 0 ? (
               <div className="p-10 text-center space-y-2">
                 <Wallet className="w-7 h-7 text-slate-400 mx-auto" />
@@ -2374,7 +2501,7 @@ export function ReportsTab({
                         Exp. Deposit
                       </th>
                       <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
-                        Deposit Paid
+                        Deposit Paid / Disp.
                       </th>
                       <th className="px-3 py-3 font-semibold text-right whitespace-nowrap print:px-1.5 print:py-1.5">
                         Deposit Bal / Status
@@ -2389,7 +2516,7 @@ export function ReportsTab({
                         Reg. Bal / Status
                       </th>
                       <th className="px-3 py-3 font-semibold min-w-[180px] print:px-1.5 print:py-1.5">
-                        Upfront Fee Notes
+                        Notes &amp; Disposition Remarks
                       </th>
                     </tr>
                   </thead>
@@ -2422,6 +2549,19 @@ export function ReportsTab({
                           </div>
                         );
                       };
+
+                      const dispositionBadgeClass =
+                        row.depositDisposition === 'Forfeited'
+                          ? 'bg-amber-50 text-amber-900 border-amber-200'
+                          : row.depositDisposition === 'Refunded'
+                            ? 'bg-slate-100 text-slate-700 border-slate-200'
+                            : 'bg-blue-50 text-blue-800 border-blue-200';
+                      const dispositionLabel =
+                        row.depositDisposition === 'Forfeited'
+                          ? 'Forfeited (GIS Fund)'
+                          : row.depositDisposition === 'Refunded'
+                            ? 'Refunded'
+                            : 'Held';
 
                       return (
                         <tr
@@ -2462,8 +2602,18 @@ export function ReportsTab({
                           <td className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-700 whitespace-nowrap print:px-1.5 print:py-1.5">
                             {formatRM(row.expectedDeposit)}
                           </td>
-                          <td className="px-3 py-2.5 text-right font-mono tabular-nums text-blue-900 font-medium whitespace-nowrap print:px-1.5 print:py-1.5">
-                            {formatRM(row.depositPaid)}
+                          <td className="px-3 py-2.5 text-right whitespace-nowrap print:px-1.5 print:py-1.5">
+                            <div className="font-mono tabular-nums text-blue-900 font-medium">
+                              {formatRM(row.depositPaid)}
+                            </div>
+                            {(row.depositPaid > 0 ||
+                              row.depositDisposition !== 'Held') && (
+                              <span
+                                className={`inline-block mt-0.5 px-1.5 py-0.5 text-[10px] font-semibold rounded border print:text-[7.5px] print:px-1 ${dispositionBadgeClass}`}
+                              >
+                                {dispositionLabel}
+                              </span>
+                            )}
                           </td>
                           <td className="px-3 py-2.5 text-right whitespace-nowrap print:px-1.5 print:py-1.5">
                             {renderStatusBadge(
@@ -2484,13 +2634,32 @@ export function ReportsTab({
                             )}
                           </td>
                           <td className="px-3 py-2.5 text-slate-600 print:px-1.5 print:py-1.5">
-                            {row.upfrontFeeNotes ? (
-                              <span className="text-xs text-slate-700 print:text-[8px]">
-                                {row.upfrontFeeNotes}
-                              </span>
-                            ) : (
-                              <span className="text-slate-400">—</span>
-                            )}
+                            <div className="space-y-0.5">
+                              {row.upfrontFeeNotes && (
+                                <p className="text-xs text-slate-700 print:text-[8px]">
+                                  {row.upfrontFeeNotes}
+                                </p>
+                              )}
+                              {(row.depositDisposition !== 'Held' ||
+                                row.depositDispositionDate ||
+                                row.depositDispositionNotes) && (
+                                <p className="text-[11px] text-amber-900 print:text-[7.5px]">
+                                  {row.depositDisposition}
+                                  {row.depositDispositionDate
+                                    ? ` (${row.depositDispositionDate})`
+                                    : ''}
+                                  {row.depositDispositionNotes
+                                    ? `: ${row.depositDispositionNotes}`
+                                    : ''}
+                                </p>
+                              )}
+                              {!row.upfrontFeeNotes &&
+                                row.depositDisposition === 'Held' &&
+                                !row.depositDispositionDate &&
+                                !row.depositDispositionNotes && (
+                                  <span className="text-slate-400">—</span>
+                                )}
+                            </div>
                           </td>
                         </tr>
                       );
@@ -2524,10 +2693,20 @@ export function ReportsTab({
                         {formatRM(upfrontFeeReport.totals.totalRegFeePending)}
                       </td>
                       <td className="px-3 py-2.5 text-xs font-mono text-slate-600 print:px-1.5 print:py-1.5">
-                        Pending Total:{' '}
-                        <span className="font-bold text-red-700">
-                          {formatRM(upfrontFeeReport.totals.totalCombinedPending)}
-                        </span>
+                        <div>
+                          Pending:{' '}
+                          <span className="font-bold text-red-700">
+                            {formatRM(upfrontFeeReport.totals.totalCombinedPending)}
+                          </span>
+                        </div>
+                        <div>
+                          GIS Usable:{' '}
+                          <span className="font-bold text-emerald-700">
+                            {formatRM(
+                              upfrontFeeReport.totals.totalNonRefundableGisFunds
+                            )}
+                          </span>
+                        </div>
                       </td>
                     </tr>
                   </tfoot>
@@ -2539,35 +2718,15 @@ export function ReportsTab({
       )}
 
       {/* Official Print Signature Footer (shown only on print) */}
-      <div className="hidden print:grid grid-cols-3 gap-6 pt-6 mt-5 border-t border-slate-300 break-inside-avoid">
-        <div>
+      <div className="hidden print:flex justify-start pt-6 mt-5 border-t border-slate-300 break-inside-avoid">
+        <div className="w-72">
           <p className="text-[10px] font-semibold uppercase text-slate-600 mb-8">
             Prepared By:
           </p>
           <div className="border-t border-slate-700 pt-1 text-[10px] text-slate-800">
             <p className="font-semibold">{staffName || staffEmail}</p>
-            <p className="text-slate-600">Hostel Administration · GIS Nilai</p>
+            <p className="text-slate-600">{staffRole}</p>
             <p className="text-slate-500 mt-0.5">Date: {todayISO}</p>
-          </div>
-        </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase text-slate-600 mb-8">
-            Reviewed By:
-          </p>
-          <div className="border-t border-slate-700 pt-1 text-[10px] text-slate-800">
-            <p className="font-semibold">Head of Student Affairs / Finance</p>
-            <p className="text-slate-600">Global Institute of Studies (GIS) Nilai</p>
-            <p className="text-slate-500 mt-0.5">Date: ______________________</p>
-          </div>
-        </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase text-slate-600 mb-8">
-            Approved By:
-          </p>
-          <div className="border-t border-slate-700 pt-1 text-[10px] text-slate-800">
-            <p className="font-semibold">Chief Executive / Campus Director</p>
-            <p className="text-slate-600">Global Institute of Studies (GIS) Nilai</p>
-            <p className="text-slate-500 mt-0.5">Date: ______________________</p>
           </div>
         </div>
       </div>
